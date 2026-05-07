@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - "master"
+      - "bermont"
     tags:
       - "v*"
 
@@ -39,6 +40,7 @@ jobs:
           images: ghcr.io/${{ github.repository }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=bermont,enable=${{ github.ref == 'refs/heads/bermont' }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha
