@@ -47,6 +47,7 @@ RUN pnpm --filter @paperclipai/ui build
 RUN pnpm --filter @paperclipai/plugin-sdk build
 RUN pnpm --filter @paperclipai/server build
 RUN test -f server/dist/index.js || (echo "ERROR: server build output missing" && exit 1)
+RUN test -f cli/src/index.ts || (echo "ERROR: cli source missing" && exit 1)
 
 FROM base AS production
 ARG USER_UID=1000
@@ -61,7 +62,9 @@ RUN npm install --global --omit=dev @anthropic-ai/claude-code@latest @openai/cod
   && chown node:node /paperclip
 
 COPY scripts/docker-entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
+  && printf '#!/bin/sh\nexec node --import /app/server/node_modules/tsx/dist/loader.mjs /app/cli/src/index.ts "$@"\n' > /usr/local/bin/paperclipai \
+  && chmod +x /usr/local/bin/paperclipai
 
 ENV NODE_ENV=production \
   HOME=/paperclip \
