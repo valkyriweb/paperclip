@@ -14,7 +14,10 @@ permissions:
 
 jobs:
   build-and-push:
-    runs-on: ubuntu-latest
+    # Bermont fork: build on self-hosted Mac mini (M1) for paperclip-specific
+    # workflows. amd64-only — the lue-kube cluster runs amd64 and arm64
+    # emulation on M1 (or on hosted runners) doubles build time for no gain.
+    runs-on: ${{ github.ref == 'refs/heads/bermont' && fromJSON('["self-hosted", "macOS", "ARM64", "mac-mini", "paperclip"]') || 'ubuntu-latest' }}
     timeout-minutes: 60
     concurrency:
       group: docker-${{ github.ref }}
@@ -49,7 +52,8 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          # bermont branch deploys to lue-kube (amd64 only). master keeps multi-arch.
+          platforms: ${{ github.ref == 'refs/heads/bermont' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
           push: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
