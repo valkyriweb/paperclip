@@ -543,7 +543,7 @@ describeEmbeddedPostgres("applyPendingMigrations", () => {
   );
 
   it(
-    "migrations 0084 + 0085 add pricing infra and a partial unique index on (company_id, idempotency_key)",
+    "migrations 0084 + 0087 add pricing infra and a partial unique index on (company_id, idempotency_key)",
     async () => {
       const connectionString = await createTempDatabase();
       await applyPendingMigrations(connectionString);
@@ -597,7 +597,7 @@ describeEmbeddedPostgres("applyPendingMigrations", () => {
         expect(cacheWriteCol[0].data_type).toBe("integer");
         expect(cacheWriteCol[0].column_default).toBe("0");
 
-        // 3. idempotency_key column exists on cost_events (added by 0085)
+        // 3. idempotency_key column exists on cost_events (added by 0087)
         const idemCol = await sql.unsafe<{ column_name: string; data_type: string; is_nullable: string }[]>(
           `
             SELECT column_name, data_type, is_nullable
@@ -612,7 +612,7 @@ describeEmbeddedPostgres("applyPendingMigrations", () => {
         expect(idemCol[0].is_nullable).toBe("YES");
 
         // 4. partial unique index on (company_id, idempotency_key) WHERE idempotency_key IS NOT NULL
-        //    (created by 0085). billing_code is now a free-text grouping label with no unique index.
+        //    (created by 0087). billing_code is now a free-text grouping label with no unique index.
         const indexes = await sql.unsafe<{ indexname: string; indexdef: string }[]>(
           `
             SELECT indexname, indexdef
