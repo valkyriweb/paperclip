@@ -44,7 +44,21 @@
 import { sql, createDb } from "../packages/db/src/index.js";
 import { loadConfig } from "../server/src/config.js";
 
-interface Args {
+/**
+ * Helper: build a parameterised `IN (...)` clause from a list of UUIDs.
+ * Postgres-js doesn't auto-cast a JS array into a Postgres array literal
+ * when you write `ANY($1::uuid[])` — it tries to send the array as a single
+ * string and the server rejects it with 22P02 'malformed array literal'.
+ * Binding each UUID as its own parameter via sql.join sidesteps the issue.
+ */
+function uuidIn(companyIds: string[]) {
+  return sql.join(
+    companyIds.map((id) => sql`${id}::uuid`),
+    sql`, `,
+  );
+}
+
+export interface Args {
   companyId: string | null;
   all: boolean;
   windowHours: number;
@@ -87,7 +101,7 @@ function parseArgs(): Args {
   };
 }
 
-interface GateResult {
+export interface GateResult {
   id: string;
   name: string;
   passed: boolean;
@@ -102,7 +116,7 @@ function fail(id: string, name: string, detail: string): GateResult {
   return { id, name, passed: false, detail };
 }
 
-async function gateG1(
+export async function gateG1(
   db: ReturnType<typeof createDb>,
   args: Args,
   companyIds: string[],
@@ -115,7 +129,7 @@ async function gateG1(
   }>(sql`
     SELECT biller, company_id, COUNT(*)::text AS n, MAX(occurred_at)::text AS last_seen
     FROM cost_events
-    WHERE company_id = ANY(${companyIds}::uuid[])
+    WHERE company_id IN (${uuidIn(companyIds)})
       AND occurred_at >= now() - (${args.windowHours}::int || ' hours')::interval
     GROUP BY biller, company_id
     ORDER BY biller, company_id
@@ -147,7 +161,7 @@ async function gateG1(
     : fail("G1", "every named source emitted cost events", detail);
 }
 
-async function gateG2(
+export async function gateG2(
   db: ReturnType<typeof createDb>,
   args: Args,
   companyIds: string[],
@@ -155,7 +169,7 @@ async function gateG2(
   const rows = await db.execute<{ biller: string; n: string }>(sql`
     SELECT biller, COUNT(*)::text AS n
     FROM cost_events
-    WHERE company_id = ANY(${companyIds}::uuid[])
+    WHERE company_id IN (${uuidIn(companyIds)})
       AND occurred_at >= now() - (${args.windowHours}::int || ' hours')::interval
       AND billing_type = 'unknown'
       AND biller NOT IN ('claude-bridge', 'openai-codex')  -- hybrids legitimately unknown w/o env signal
@@ -186,7 +200,7 @@ async function gateG2(
   );
 }
 
-async function gateG2b(
+export async function gateG2b(
   db: ReturnType<typeof createDb>,
   args: Args,
   companyIds: string[],
@@ -197,7 +211,7 @@ async function gateG2b(
   const rows = await db.execute<{ biller: string; billing_type: string; n: string }>(sql`
     SELECT biller, billing_type, COUNT(*)::text AS n
     FROM cost_events
-    WHERE company_id = ANY(${companyIds}::uuid[])
+    WHERE company_id IN (${uuidIn(companyIds)})
       AND occurred_at >= now() - (${args.windowHours}::int || ' hours')::interval
       AND (
         (biller IN ('openai','anthropic','google','google-vertex','amazon-bedrock','deepseek','groq','xai','openrouter','mistral','cohere','perplexity')
@@ -227,7 +241,7 @@ async function gateG2b(
   );
 }
 
-async function gateG6(
+export async function gateG6(
   db: ReturnType<typeof createDb>,
   args: Args,
   companyIds: string[],
@@ -237,7 +251,7 @@ async function gateG6(
   const rows = await db.execute<{ company_id: string; billing_code: string; n: string }>(sql`
     SELECT company_id, billing_code, COUNT(*)::text AS n
     FROM cost_events
-    WHERE company_id = ANY(${companyIds}::uuid[])
+    WHERE company_id IN (${uuidIn(companyIds)})
       AND billing_code IS NOT NULL
     GROUP BY company_id, billing_code
     HAVING COUNT(*) > 1
@@ -264,7 +278,7 @@ async function gateG6(
   );
 }
 
-async function gateG3(
+export async function gateG3(
   db: ReturnType<typeof createDb>,
   _args: Args,
   companyIds: string[],
@@ -272,7 +286,7 @@ async function gateG3(
   const rows = await db.execute<{ scope_type: string; n: string }>(sql`
     SELECT scope_type, COUNT(*)::text AS n
     FROM budget_policies
-    WHERE company_id = ANY(${companyIds}::uuid[])
+    WHERE company_id IN (${uuidIn(companyIds)})
       AND is_active = true
       AND amount > 0
     GROUP BY scope_type
@@ -306,50 +320,80 @@ async function gateG3(
   );
 }
 
-async function gateG4(
+export async function gateG4(
   db: ReturnType<typeof createDb>,
   _args: Args,
   companyIds: string[],
 ): Promise<GateResult> {
   // Find scopes paused for budget reason, then check if any heartbeat_runs
   // started after the pause. If so, the budget control plane leaked.
+  //
+  // Uses agents.paused_at / projects.paused_at — dedicated columns set by
+  // services/budgets.ts:pauseAndCancelScopeForBudget when a hard threshold is
+  // crossed. NOT updated_at, which advances on any agent edit (rename, icon
+  // change) and would give false negatives.
   const leakedAgents = await db.execute<{
-    agent_id: string;
+    scope: string;
+    scope_id: string;
     paused_at: string;
     run_id: string;
     run_started: string;
   }>(sql`
-    SELECT a.id AS agent_id, a.updated_at::text AS paused_at,
+    SELECT 'agent' AS scope, a.id AS scope_id, a.paused_at::text AS paused_at,
            hr.id AS run_id, hr.started_at::text AS run_started
     FROM agents a
     JOIN heartbeat_runs hr ON hr.agent_id = a.id
-    WHERE a.company_id = ANY(${companyIds}::uuid[])
+    WHERE a.company_id IN (${uuidIn(companyIds)})
       AND a.status = 'paused'
       AND a.pause_reason = 'budget'
-      AND hr.started_at > a.updated_at
+      AND a.paused_at IS NOT NULL
+      AND hr.started_at > a.paused_at
     LIMIT 20
   `);
 
-  const leaks = leakedAgents as unknown as Array<{
-    agent_id: string;
+  // Projects pause cancels in-flight work too. heartbeat_runs has no direct
+  // project_id column — the link is via context_snapshot.projectId, falling
+  // back to the issue's project_id (matches services/heartbeat.ts:9245-9268
+  // listProjectScopedRunIds). A run started after a paused project's
+  // paused_at, resolving to that project via either path, is a leak.
+  const leakedProjects = await db.execute<{
+    scope: string;
+    scope_id: string;
     paused_at: string;
     run_id: string;
     run_started: string;
-  }>;
+  }>(sql`
+    SELECT 'project' AS scope, p.id AS scope_id, p.paused_at::text AS paused_at,
+           hr.id AS run_id, hr.started_at::text AS run_started
+    FROM projects p
+    JOIN heartbeat_runs hr ON hr.company_id = p.company_id
+    LEFT JOIN issues i ON i.id::text = hr.context_snapshot ->> 'issueId'
+    WHERE p.company_id IN (${uuidIn(companyIds)})
+      AND p.paused_at IS NOT NULL
+      AND p.pause_reason = 'budget'
+      AND hr.started_at > p.paused_at
+      AND coalesce(hr.context_snapshot ->> 'projectId', i.project_id::text) = p.id::text
+    LIMIT 20
+  `);
+
+  const leaks = [
+    ...(leakedAgents as unknown as Array<{ scope: string; scope_id: string; paused_at: string; run_id: string; run_started: string }>),
+    ...(leakedProjects as unknown as Array<{ scope: string; scope_id: string; paused_at: string; run_id: string; run_started: string }>),
+  ];
 
   if (leaks.length === 0) {
     return ok(
       "G4",
       "paused-by-budget scopes have not started new runs",
-      `    ✓ budget control plane is blocking paused scopes`,
+      `    ✓ budget control plane is blocking paused agents AND projects`,
     );
   }
   return fail(
     "G4",
     "paused-by-budget scopes have not started new runs",
     [
-      `    Found ${leaks.length} heartbeat run(s) that started AFTER agent pause:`,
-      ...leaks.map((r) => `    agent=${r.agent_id} paused=${r.paused_at} run=${r.run_id} started=${r.run_started}`),
+      `    Found ${leaks.length} heartbeat run(s) that started AFTER scope pause:`,
+      ...leaks.map((r) => `    ${r.scope.padEnd(7)} ${r.scope_id} paused=${r.paused_at} run=${r.run_id} started=${r.run_started}`),
     ].join("\n"),
   );
 }
@@ -409,7 +453,10 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error("verifier crashed:", err);
-  process.exit(2);
-});
+// Only auto-run when invoked as a script, not when imported by tests.
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((err) => {
+    console.error("verifier crashed:", err);
+    process.exit(2);
+  });
+}
