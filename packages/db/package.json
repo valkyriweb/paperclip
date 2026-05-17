@@ -42,7 +42,8 @@
     "generate": "pnpm run check:migrations && tsc -p tsconfig.json && drizzle-kit generate",
     "migrate": "pnpm run check:migrations && tsx src/migrate.ts",
     "seed": "tsx src/seed.ts",
-    "seed:pricing": "tsx src/seed-model-pricing.ts"
+    "seed:pricing": "tsx src/seed-model-pricing.ts",
+    "backfill:cost-cents": "tsx src/backfill-cost-cents.ts"
   },
   "dependencies": {
     "@paperclipai/shared": "workspace:*",
