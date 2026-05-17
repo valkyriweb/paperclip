@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
-import { createCostEventSchema } from "./cost";
+import { createCostEventSchema } from "./cost.js";
 
 function valid() {
   return {

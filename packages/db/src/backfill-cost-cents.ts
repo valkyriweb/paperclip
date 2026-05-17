@@ -1,6 +1,7 @@
 import postgres from "postgres";
 import { and, eq, gt, lte, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
+import { computeCostCents } from "@paperclipai/shared";
 
 import { costEvents } from "./schema/cost_events.js";
 import { modelPricing } from "./schema/model_pricing.js";
@@ -125,15 +126,17 @@ export async function backfillCostCents(
           continue;
         }
 
-        // Same math as server/src/services/costs.ts computeCostCents.
-        // Divisor 1e12: 1e6 to collapse per-million-tokens, 1e6 to convert
-        // micro-cents -> cents.
-        const microCentTokenProduct =
-          row.inputTokens * pricing.inputCpmMicros +
-          row.cachedInputTokens * pricing.cachedInputCpmMicros +
-          row.cacheCreationInputTokens * pricing.cacheWriteCpmMicros +
-          row.outputTokens * pricing.outputCpmMicros;
-        const cents = Math.max(0, Math.round(microCentTokenProduct / 1e12));
+        // Shared with server/src/services/costs.ts to avoid silent drift.
+        // Both call sites must produce the same cents for the same row.
+        const cents = computeCostCents(
+          {
+            inputTokens: row.inputTokens,
+            cachedInputTokens: row.cachedInputTokens,
+            cacheCreationInputTokens: row.cacheCreationInputTokens,
+            outputTokens: row.outputTokens,
+          },
+          pricing,
+        );
         if (cents === 0) {
           // Token rates were 0 for this model — counts as priced (the answer is
           // legitimately zero), don't keep retrying it on the next run.
