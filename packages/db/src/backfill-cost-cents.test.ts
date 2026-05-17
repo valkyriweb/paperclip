@@ -339,4 +339,97 @@ describeEmbeddedPostgres("backfillCostCents", () => {
     },
     20_000,
   );
+
+  it(
+    "prices cache_read + cache_write tokens with the right per-Mtok rates",
+    async () => {
+      // Every other test in this file leaves cachedInputTokens and
+      // cacheCreationInputTokens at 0 — the cache branches in the math are
+      // untested. Anthropic prompt-caching workloads are typically 30-50%
+      // cache reads + writes by token count, so a future refactor that
+      // dropped or swapped those multiplications would silently underprice
+      // every cached workload. This test locks the 4-term sum.
+      //
+      // Substream: agent-system/PAPERCLIP-BUDGET-INTEGRATION.md G5 follow-up.
+      const db = createDb(connectionString);
+      const id = randomUUID();
+      await db.insert(costEvents).values({
+        id,
+        companyId,
+        agentId,
+        provider: "anthropic",
+        biller: "anthropic",
+        billingType: "metered_api",
+        model: "claude-sonnet-4-6",
+        // Pricing rates from beforeEach:
+        //   input $3/Mtok, cached $0.30/Mtok, cacheWrite $3.75/Mtok, output $15/Mtok.
+        // 1M of each → 300 + 30 + 375 + 1500 = 2205 cents.
+        inputTokens: 1_000_000,
+        cachedInputTokens: 1_000_000,
+        cacheCreationInputTokens: 1_000_000,
+        outputTokens: 1_000_000,
+        costCents: 0,
+        occurredAt: new Date("2026-05-15T00:00:00.000Z"),
+      });
+
+      const summary = await backfillCostCents({ connectionString });
+      expect(summary.priced).toBe(1);
+      expect(summary.totalCentsApplied).toBe(2205);
+
+      const sql = postgres(connectionString, { max: 1, onnotice: () => {} });
+      try {
+        const [row] = await sql.unsafe<{ cost_cents: number }[]>(
+          `SELECT cost_cents FROM cost_events WHERE id = $1`,
+          [id],
+        );
+        expect(row.cost_cents).toBe(2205);
+      } finally {
+        await sql.end();
+      }
+    },
+    20_000,
+  );
+
+  it(
+    "prices a cache-heavy workload where reads dominate (typical Anthropic shape)",
+    async () => {
+      // Realistic shape: a long-running session sends ~10x more cache reads
+      // than fresh input. If the multiplier for cachedInputTokens were
+      // swapped with inputTokens', total would be wildly off; locked here.
+      const db = createDb(connectionString);
+      const id = randomUUID();
+      await db.insert(costEvents).values({
+        id,
+        companyId,
+        agentId,
+        provider: "anthropic",
+        biller: "anthropic",
+        billingType: "metered_api",
+        model: "claude-sonnet-4-6",
+        // 100k fresh input @ $3/Mtok               = 30 cents (rounded from 30.0)
+        // 1M cached @ $0.30/Mtok                   = 30 cents
+        // 50k cache write @ $3.75/Mtok             = 18.75 → 19 cents
+        // 20k output @ $15/Mtok                    = 30 cents
+        // = 109 cents (Math.round of 109.187... → microcent-precision yields 109)
+        inputTokens: 100_000,
+        cachedInputTokens: 1_000_000,
+        cacheCreationInputTokens: 50_000,
+        outputTokens: 20_000,
+        costCents: 0,
+        occurredAt: new Date("2026-05-15T00:00:00.000Z"),
+      });
+
+      const summary = await backfillCostCents({ connectionString });
+      expect(summary.priced).toBe(1);
+      // Exact computation:
+      //   100_000 * 300_000_000     = 30_000_000_000_000
+      //   1_000_000 * 30_000_000    = 30_000_000_000_000
+      //   50_000 * 375_000_000      = 18_750_000_000_000
+      //   20_000 * 1_500_000_000    = 30_000_000_000_000
+      //   sum                       = 108_750_000_000_000
+      //   sum / 1e12                = 108.75 → Math.round → 109
+      expect(summary.totalCentsApplied).toBe(109);
+    },
+    20_000,
+  );
 });
