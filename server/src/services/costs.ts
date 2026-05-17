@@ -2,6 +2,7 @@ import { and, desc, eq, getTableColumns, gte, isNotNull, isNull, lt, lte, sql } 
 import { alias } from "drizzle-orm/pg-core";
 import type { Db } from "@paperclipai/db";
 import { activityLog, agents, companies, costEvents, heartbeatRuns, issues, modelPricing, projects } from "@paperclipai/db";
+import { computeCostCents as sharedComputeCostCents } from "@paperclipai/shared";
 import { notFound, unprocessable } from "../errors.js";
 import { budgetService, type BudgetServiceHooks } from "./budgets.js";
 
@@ -122,17 +123,13 @@ async function lookupPricing(
  * Math.round before truncation so small charges (sub-cent) round to nearest
  * cent rather than getting clobbered to 0.
  */
-export function computeCostCents(
-  tokens: { inputTokens: number; cachedInputTokens: number; cacheCreationInputTokens: number; outputTokens: number },
-  pricing: { inputCpmMicros: number; cachedInputCpmMicros: number; cacheWriteCpmMicros: number; outputCpmMicros: number },
-): number {
-  const microCentTokenProduct =
-    tokens.inputTokens * pricing.inputCpmMicros +
-    tokens.cachedInputTokens * pricing.cachedInputCpmMicros +
-    tokens.cacheCreationInputTokens * pricing.cacheWriteCpmMicros +
-    tokens.outputTokens * pricing.outputCpmMicros;
-  return Math.max(0, Math.round(microCentTokenProduct / 1e12));
-}
+/**
+ * Re-export from @paperclipai/shared so existing call sites that import
+ * `computeCostCents` from this module keep working. The implementation lives
+ * in shared so the backfill script (packages/db, which can't depend on
+ * server) gets the same math.
+ */
+export const computeCostCents = sharedComputeCostCents;
 
 export interface CostDateRange {
   from?: Date;
