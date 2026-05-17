@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { inferOpenAiCompatibleBiller, type AdapterExecutionContext, type AdapterExecutionResult } from "@paperclipai/adapter-utils";
+import { classifyBillingType, inferOpenAiCompatibleBiller, type AdapterExecutionContext, type AdapterExecutionResult } from "@paperclipai/adapter-utils";
 import {
   adapterExecutionTargetIsRemote,
   adapterExecutionTargetRemoteCwd,
@@ -651,7 +651,9 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         provider: parseModelProvider(modelId),
         biller: resolveOpenCodeBiller(runtimeEnv, parseModelProvider(modelId)),
         model: modelId,
-        billingType: "unknown",
+        // Classification follows the resolved provider + runtime env. See
+        // classifyBillingType in @paperclipai/adapter-utils for the rules.
+        billingType: classifyBillingType(parseModelProvider(modelId), runtimeEnv),
         costUsd: attempt.parsed.costUsd,
         resultJson: {
           stdout: attempt.proc.stdout,
