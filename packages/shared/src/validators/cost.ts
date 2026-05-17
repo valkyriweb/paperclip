@@ -14,8 +14,15 @@ export const createCostEventSchema = z.object({
   model: z.string().min(1),
   inputTokens: z.number().int().nonnegative().optional().default(0),
   cachedInputTokens: z.number().int().nonnegative().optional().default(0),
+  // Anthropic cache *write* tokens (distinct from cache reads in
+  // cachedInputTokens). Optional for backward-compat with callers built
+  // against the pre-0084 schema.
+  cacheCreationInputTokens: z.number().int().nonnegative().optional().default(0),
   outputTokens: z.number().int().nonnegative().optional().default(0),
-  costCents: z.number().int().nonnegative(),
+  // costCents is now optional: when omitted (or 0) the server computes
+  // from model_pricing. Callers that already know the cost (e.g. heartbeat
+  // forwarding Anthropic's response total) keep passing it explicitly.
+  costCents: z.number().int().nonnegative().optional(),
   occurredAt: z.string().datetime(),
 }).transform((value) => ({
   ...value,
