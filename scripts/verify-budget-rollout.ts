@@ -286,6 +286,64 @@ export async function gateG6(
   );
 }
 
+export async function gateG5(
+  db: ReturnType<typeof createDb>,
+  args: Args,
+  companyIds: string[],
+): Promise<GateResult> {
+  // Metered rows that landed with cost_cents = 0 despite having token usage.
+  // services/costs.ts:createEvent falls back to costCents=0 when the
+  // model_pricing lookup for (aliasedProvider, model, occurredAt) returns
+  // nothing — the goal calls this 'no gaps', so any zero-cost metered row
+  // with non-zero token spend is a pricing-table gap that needs filling.
+  //
+  // Excluded from the gate:
+  //   - billing_type = subscription_included (legitimately zero by definition)
+  //   - billing_type = unknown (G2 owns that bucket)
+  //   - input + cached + output = 0 (handshake / heartbeat-shaped rows where
+  //     zero cost is correct, e.g. metadata-only events)
+  //
+  // Returns top 20 offending (biller, model) pairs ordered by row count so the
+  // operator can prioritize seeding the missing pricing entries.
+  const rows = await db.execute<{ biller: string; model: string; n: string; total_tokens: string }>(sql`
+    SELECT biller,
+           model,
+           COUNT(*)::text AS n,
+           SUM(input_tokens + cached_input_tokens + cache_creation_input_tokens + output_tokens)::text AS total_tokens
+    FROM cost_events
+    WHERE company_id IN (${uuidIn(companyIds)})
+      AND occurred_at >= now() - (${args.windowHours}::int || ' hours')::interval
+      AND cost_cents = 0
+      AND billing_type IN ('metered_api', 'subscription_overage', 'credits', 'fixed')
+      AND (input_tokens + cached_input_tokens + cache_creation_input_tokens + output_tokens) > 0
+    GROUP BY biller, model
+    ORDER BY n DESC
+    LIMIT 20
+  `);
+
+  const list = rows as unknown as Array<{ biller: string; model: string; n: string; total_tokens: string }>;
+
+  if (list.length === 0) {
+    return ok(
+      "G5",
+      "no metered rows with cost=0 and tokens>0 (no pricing gaps)",
+      `    ✓ every metered emission with tokens resolved a price—`,
+    );
+  }
+  return fail(
+    "G5",
+    "no metered rows with cost=0 and tokens>0 (no pricing gaps)",
+    [
+      `    Found metered rows with no resolved price (top 20):`,
+      `    Fix: add a model_pricing row for each (biller, model) pair below,`,
+      `    then re-run \`pnpm db:backfill-cost-cents\` to repair existing rows.`,
+      ...list.map((r) =>
+        `    ${r.biller.padEnd(18)} ${r.model.padEnd(40)} ${r.n.padStart(6)} rows  ${r.total_tokens.padStart(10)} tokens`,
+      ),
+    ].join("\n"),
+  );
+}
+
 export async function gateG3(
   db: ReturnType<typeof createDb>,
   _args: Args,
@@ -439,6 +497,7 @@ async function main() {
     await gateG1(db, args, companyIds),
     await gateG2(db, args, companyIds),
     await gateG2b(db, args, companyIds),
+    await gateG5(db, args, companyIds),
     await gateG6(db, args, companyIds),
     await gateG3(db, args, companyIds),
     await gateG4(db, args, companyIds),
