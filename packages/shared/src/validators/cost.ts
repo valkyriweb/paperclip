@@ -1,6 +1,22 @@
 import { z } from "zod";
 import { BILLING_TYPES } from "../constants.js";
 
+/**
+ * Upper bound for `occurredAt`: 1 hour in the future. Tolerates routine
+ * clock skew between Paperclip and remote emitters (laptop sleep, sidecar
+ * NTP drift, response-header timestamps from upstream providers) while
+ * rejecting obvious bugs:
+ *
+ *   - emitter passing UNIX seconds to `new Date(...)` (off by 1000x → year 7000+)
+ *   - emitter using PST clock then converting to UTC wrong (off by 8h)
+ *   - replay tool reusing a staged event with its original future timestamp
+ *
+ * Future-dated cost events poison every dashboard window that filters by
+ * occurredAt and can never be aged out by retention; the bound is a one-line
+ * guardrail. Substream: agent-system/PAPERCLIP-BUDGET-INTEGRATION.md G2.
+ */
+const MAX_FUTURE_OCCURRED_AT_MS = 60 * 60 * 1000;
+
 export const createCostEventSchema = z.object({
   agentId: z.string().uuid(),
   issueId: z.string().uuid().optional().nullable(),
@@ -23,7 +39,13 @@ export const createCostEventSchema = z.object({
   // from model_pricing. Callers that already know the cost (e.g. heartbeat
   // forwarding Anthropic's response total) keep passing it explicitly.
   costCents: z.number().int().nonnegative().optional(),
-  occurredAt: z.string().datetime(),
+  occurredAt: z
+    .string()
+    .datetime()
+    .refine(
+      (value) => Date.parse(value) <= Date.now() + MAX_FUTURE_OCCURRED_AT_MS,
+      { message: "occurredAt must not be more than 1 hour in the future" },
+    ),
 }).transform((value) => ({
   ...value,
   biller: value.biller ?? value.provider,
