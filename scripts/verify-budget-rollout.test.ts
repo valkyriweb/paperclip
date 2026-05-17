@@ -278,9 +278,47 @@ describe("verify-budget-rollout gates", () => {
       assert.equal(r.passed, true);
     });
 
-    // Note: the partial unique index makes inserting duplicates impossible at
-    // the DB level, so we can't directly test the fail path without bypassing
-    // the index. The passing test still proves the query syntax is correct.
+    it("ignores null idempotency_key rows (heartbeat path emits with null)", async () => {
+      // The partial unique index has `WHERE idempotency_key IS NOT NULL`, so
+      // null rows can repeat freely. G6 must respect that — a heartbeat path
+      // that emits N events with null keys must not trip the gate.
+      await db.insert(costEvents).values(makeCostEvent({ idempotencyKey: null }));
+      await db.insert(costEvents).values(makeCostEvent({ idempotencyKey: null }));
+      await db.insert(costEvents).values(makeCostEvent({ idempotencyKey: null }));
+      const r = await gateG6(db, baseArgs, [companyId]);
+      assert.equal(r.passed, true);
+    });
+
+    // Fail-path coverage. The partial unique index from migration 0085 makes
+    // dup inserts impossible in normal operation. We temporarily drop the
+    // index so the gate query sees the duplicate, then restore it. This
+    // proves the gate's SQL would actually catch a regression that broke or
+    // removed the index (otherwise G6 silently green for the wrong reason).
+    it("fails when duplicates exist (index temporarily dropped)", async () => {
+      const indexName = "cost_events_company_idempotency_key_uq";
+      await db.execute(sql.raw(`DROP INDEX IF EXISTS "${indexName}"`));
+      try {
+        const dupKey = "dup-g6";
+        await db.insert(costEvents).values(makeCostEvent({ idempotencyKey: dupKey }));
+        await db.insert(costEvents).values(makeCostEvent({ idempotencyKey: dupKey }));
+        const r = await gateG6(db, baseArgs, [companyId]);
+        assert.equal(r.passed, false);
+        assert.ok(r.detail.includes(dupKey), `detail should mention duplicate key, got: ${r.detail}`);
+      } finally {
+        // Clean up duplicate rows BEFORE re-creating the unique index;
+        // otherwise CREATE UNIQUE INDEX fails with code 23505 ("Key ... is
+        // duplicated") and the next test inherits a broken schema.
+        await db.delete(costEvents);
+        // Restore the partial unique index so subsequent tests in this file
+        // (and the next describe block's beforeEach inserts) keep the same
+        // schema invariants the rest of the suite relies on.
+        await db.execute(sql.raw(
+          `CREATE UNIQUE INDEX IF NOT EXISTS "${indexName}" \
+           ON cost_events USING btree (company_id, idempotency_key) \
+           WHERE idempotency_key IS NOT NULL`,
+        ));
+      }
+    });
   });
 
   describe("G3 — agent + project policies exist", () => {
