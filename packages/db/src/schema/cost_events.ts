@@ -1,4 +1,5 @@
-import { pgTable, uuid, text, timestamp, integer, index } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, timestamp, integer, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { companies } from "./companies.js";
 import { agents } from "./agents.js";
 import { issues } from "./issues.js";
@@ -23,6 +24,10 @@ export const costEvents = pgTable(
     model: text("model").notNull(),
     inputTokens: integer("input_tokens").notNull().default(0),
     cachedInputTokens: integer("cached_input_tokens").notNull().default(0),
+    // Cache *write* tokens (Anthropic prompt-caching billing line, distinct
+    // from cache reads). Stored separately because cache writes are billed at
+    // a different rate per model and must be priced through model_pricing.
+    cacheCreationInputTokens: integer("cache_creation_input_tokens").notNull().default(0),
     outputTokens: integer("output_tokens").notNull().default(0),
     costCents: integer("cost_cents").notNull(),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
@@ -49,5 +54,14 @@ export const costEvents = pgTable(
       table.companyId,
       table.heartbeatRunId,
     ),
+    // Idempotency: retried emissions from any source (claude-bridge, Multica
+    // forwarder, local CLI scraper) can replay the same logical event with the
+    // same billing_code. Partial index — billing_code is nullable, NULL rows
+    // (e.g. existing heartbeat-driven rows) are excluded so the legacy writer
+    // path stays untouched. createEvent uses ON CONFLICT … DO UPDATE on this
+    // index to overwrite-on-replay rather than double-insert.
+    companyBillingCodeUq: uniqueIndex("cost_events_company_billing_code_uq")
+      .on(table.companyId, table.billingCode)
+      .where(sql`${table.billingCode} IS NOT NULL`),
   }),
 );

@@ -541,4 +541,86 @@ describeEmbeddedPostgres("applyPendingMigrations", () => {
     },
     20_000,
   );
+
+  it(
+    "migration 0084 creates model_pricing, adds cache_creation_input_tokens, and adds a partial unique index on (company_id, billing_code)",
+    async () => {
+      const connectionString = await createTempDatabase();
+      await applyPendingMigrations(connectionString);
+
+      const sql = postgres(connectionString, { max: 1, onnotice: () => {} });
+      try {
+        // 1. model_pricing table shape
+        const columns = await sql.unsafe<{ column_name: string; data_type: string; is_nullable: string }[]>(
+          `
+            SELECT column_name, data_type, is_nullable
+            FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'model_pricing'
+            ORDER BY column_name
+          `,
+        );
+        const columnNames = columns.map((row) => row.column_name);
+        expect(columnNames).toEqual([
+          "cache_write_cpm_micros",
+          "cached_input_cpm_micros",
+          "created_at",
+          "effective_at",
+          "input_cpm_micros",
+          "model",
+          "output_cpm_micros",
+          "provider",
+          "source",
+        ]);
+        // composite PK
+        const pk = await sql.unsafe<{ column_name: string }[]>(
+          `
+            SELECT a.attname AS column_name
+            FROM   pg_index i
+            JOIN   pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+            WHERE  i.indrelid = '"public"."model_pricing"'::regclass AND i.indisprimary
+            ORDER BY array_position(i.indkey, a.attnum)
+          `,
+        );
+        expect(pk.map((row) => row.column_name)).toEqual(["provider", "model", "effective_at"]);
+
+        // 2. cost_events gained cache_creation_input_tokens
+        const cacheWriteCol = await sql.unsafe<{ column_name: string; data_type: string; column_default: string | null }[]>(
+          `
+            SELECT column_name, data_type, column_default
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'cost_events'
+              AND column_name = 'cache_creation_input_tokens'
+          `,
+        );
+        expect(cacheWriteCol).toHaveLength(1);
+        expect(cacheWriteCol[0].data_type).toBe("integer");
+        expect(cacheWriteCol[0].column_default).toBe("0");
+
+        // 3. partial unique index on (company_id, billing_code) WHERE billing_code IS NOT NULL
+        const indexes = await sql.unsafe<{ indexname: string; indexdef: string }[]>(
+          `
+            SELECT indexname, indexdef
+            FROM pg_indexes
+            WHERE schemaname = 'public'
+              AND tablename = 'cost_events'
+              AND indexname = 'cost_events_company_billing_code_uq'
+          `,
+        );
+        expect(indexes).toHaveLength(1);
+        expect(indexes[0].indexdef).toMatch(/UNIQUE INDEX/);
+        expect(indexes[0].indexdef).toMatch(/\(company_id, billing_code\)/);
+        expect(indexes[0].indexdef).toMatch(/WHERE \(billing_code IS NOT NULL\)/);
+
+        // 4. constraint behaviour: two rows with same (company_id, billing_code) must conflict;
+        //    two NULL billing_code rows must not.
+        // Verify by checking pg_constraint / direct insert would require setting up FK
+        // dependencies (companies, agents). Skip the live-insert assertion; the partial
+        // UNIQUE index above is the operative guarantee and is verified by indexdef.
+      } finally {
+        await sql.end();
+      }
+    },
+    20_000,
+  );
 });
