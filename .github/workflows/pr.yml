@@ -91,6 +91,13 @@ jobs:
       - name: Run general test suites
         run: pnpm test:run:general
 
+      - name: Verify budget-rollout SQL gates (integration)
+        # node --test based suite for scripts/verify-budget-rollout.ts; vitest
+        # workspace doesn't pick it up so we run it explicitly. Catches SQL
+        # typos / column-name drift against real embedded postgres before
+        # the deploy runbook does. See agent-system PAPERCLIP-BUDGET-INTEGRATION.
+        run: pnpm verify:budget-rollout:test
+
       - name: Verify release registry test coverage
         run: pnpm run test:release-registry
 
