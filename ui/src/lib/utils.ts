@@ -93,15 +93,57 @@ export function formatDurationMs(ms: number): string {
   return remainingHours > 0 ? `${days}d ${remainingHours}h` : `${days}d`;
 }
 
-/** Map a raw provider slug to a display-friendly name. */
+/**
+ * Map a raw provider OR biller slug to a display-friendly name.
+ *
+ * The Costs dashboard's Billers tab passes biller strings here (not just
+ * providers), so this map must cover every biller our emitters can produce:
+ *
+ *   - Direct-API providers (anthropic, openai, ...): the slug from the
+ *     emitter or pricing seed.
+ *   - Hybrid CLI billers (claude-bridge, claude-code, openai-codex): set
+ *     by P4b watcher + claude-bridge emitter + Pi extension.
+ *   - Subscription-only providers (github-copilot).
+ *   - Forwarders (multica): the daemon's forwarder posts biller=multica.
+ *
+ * Anything not in the map falls back to the raw slug, which renders as
+ * lowercase ASCII on the dashboard — a smell that the slug needs adding
+ * here.
+ *
+ * Substream: agent-system/PAPERCLIP-BUDGET-INTEGRATION.md G2 UI follow-up.
+ */
 export function providerDisplayName(provider: string): string {
   const map: Record<string, string> = {
+    // Direct-API providers (covered by SERVER_METERED_PROVIDERS).
     anthropic: "Anthropic",
-    aws_bedrock: "AWS Bedrock",
     openai: "OpenAI",
-    openrouter: "OpenRouter",
-    chatgpt: "ChatGPT",
     google: "Google",
+    "google-vertex": "Google Vertex AI",
+    "amazon-bedrock": "Amazon Bedrock",
+    aws_bedrock: "AWS Bedrock", // legacy alias kept for older rows
+    "azure-openai-responses": "Azure OpenAI",
+    deepseek: "DeepSeek",
+    groq: "Groq",
+    xai: "xAI",
+    openrouter: "OpenRouter",
+    "vercel-ai-gateway": "Vercel AI Gateway",
+    mistral: "Mistral",
+    cohere: "Cohere",
+    perplexity: "Perplexity",
+
+    // Hybrid CLI billers (P2-claude-bridge + P4b watcher + Pi extension).
+    "claude-bridge": "Claude Bridge",
+    "claude-code": "Claude Code",
+    "openai-codex": "Codex CLI",
+
+    // Subscription-only providers.
+    "github-copilot": "GitHub Copilot",
+
+    // Forwarders / daemons.
+    multica: "Multica",
+
+    // Existing entries kept.
+    chatgpt: "ChatGPT",
     cursor: "Cursor",
     jetbrains: "JetBrains AI",
   };
