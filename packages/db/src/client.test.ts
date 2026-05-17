@@ -543,7 +543,7 @@ describeEmbeddedPostgres("applyPendingMigrations", () => {
   );
 
   it(
-    "migration 0084 creates model_pricing, adds cache_creation_input_tokens, and adds a partial unique index on (company_id, billing_code)",
+    "migrations 0084 + 0085 add pricing infra and a partial unique index on (company_id, idempotency_key)",
     async () => {
       const connectionString = await createTempDatabase();
       await applyPendingMigrations(connectionString);
@@ -597,26 +597,49 @@ describeEmbeddedPostgres("applyPendingMigrations", () => {
         expect(cacheWriteCol[0].data_type).toBe("integer");
         expect(cacheWriteCol[0].column_default).toBe("0");
 
-        // 3. partial unique index on (company_id, billing_code) WHERE billing_code IS NOT NULL
+        // 3. idempotency_key column exists on cost_events (added by 0085)
+        const idemCol = await sql.unsafe<{ column_name: string; data_type: string; is_nullable: string }[]>(
+          `
+            SELECT column_name, data_type, is_nullable
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'cost_events'
+              AND column_name = 'idempotency_key'
+          `,
+        );
+        expect(idemCol).toHaveLength(1);
+        expect(idemCol[0].data_type).toBe("text");
+        expect(idemCol[0].is_nullable).toBe("YES");
+
+        // 4. partial unique index on (company_id, idempotency_key) WHERE idempotency_key IS NOT NULL
+        //    (created by 0085). billing_code is now a free-text grouping label with no unique index.
         const indexes = await sql.unsafe<{ indexname: string; indexdef: string }[]>(
           `
             SELECT indexname, indexdef
             FROM pg_indexes
             WHERE schemaname = 'public'
               AND tablename = 'cost_events'
-              AND indexname = 'cost_events_company_billing_code_uq'
+              AND indexname = 'cost_events_company_idempotency_key_uq'
           `,
         );
         expect(indexes).toHaveLength(1);
         expect(indexes[0].indexdef).toMatch(/UNIQUE INDEX/);
-        expect(indexes[0].indexdef).toMatch(/\(company_id, billing_code\)/);
-        expect(indexes[0].indexdef).toMatch(/WHERE \(billing_code IS NOT NULL\)/);
+        expect(indexes[0].indexdef).toMatch(/\(company_id, idempotency_key\)/);
+        expect(indexes[0].indexdef).toMatch(/WHERE \(idempotency_key IS NOT NULL\)/);
 
-        // 4. constraint behaviour: two rows with same (company_id, billing_code) must conflict;
-        //    two NULL billing_code rows must not.
-        // Verify by checking pg_constraint / direct insert would require setting up FK
-        // dependencies (companies, agents). Skip the live-insert assertion; the partial
-        // UNIQUE index above is the operative guarantee and is verified by indexdef.
+        // 5. ensure NO unique index on billing_code remains (the original design error
+        //    that broke pre-existing plugin-orchestration-apis.test.ts where billing_code
+        //    is used as a shared grouping label across multiple events).
+        const billingCodeIdx = await sql.unsafe<{ indexname: string }[]>(
+          `
+            SELECT indexname
+            FROM pg_indexes
+            WHERE schemaname = 'public'
+              AND tablename = 'cost_events'
+              AND indexname = 'cost_events_company_billing_code_uq'
+          `,
+        );
+        expect(billingCodeIdx).toHaveLength(0);
       } finally {
         await sql.end();
       }
