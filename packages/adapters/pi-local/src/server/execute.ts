@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { inferOpenAiCompatibleBiller, type AdapterExecutionContext, type AdapterExecutionResult } from "@paperclipai/adapter-utils";
+import { classifyBillingType, inferOpenAiCompatibleBiller, type AdapterExecutionContext, type AdapterExecutionResult } from "@paperclipai/adapter-utils";
 import {
   adapterExecutionTargetIsRemote,
   adapterExecutionTargetRemoteCwd,
@@ -757,7 +757,11 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       provider: provider,
       biller: resolvePiBiller(runtimeEnv, provider),
       model: model,
-      billingType: "unknown",
+      // Classification follows the resolved provider + runtime env. For
+      // claude-bridge runs (the common case Luke uses to route Pi through his
+      // Anthropic subscription) the env is inspected to discriminate apikey vs
+      // OAuth mode — see classifyBillingType in @paperclipai/adapter-utils.
+      billingType: classifyBillingType(provider, runtimeEnv),
       costUsd: attempt.parsed.usage.costUsd,
       resultJson: {
         stdout: attempt.proc.stdout,

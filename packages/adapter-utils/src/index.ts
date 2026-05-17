@@ -61,7 +61,8 @@ export {
   redactCommandText,
 } from "./command-redaction.js";
 export { buildSandboxNpmInstallCommand } from "./sandbox-install-command.js";
-export { inferOpenAiCompatibleBiller } from "./billing.js";
+export { classifyBillingType, inferOpenAiCompatibleBiller } from "./billing.js";
+export type { BillingType } from "./billing.js";
 // Keep the root adapter-utils entry browser-safe because the UI imports it.
 // The sandbox callback bridge stays available via its dedicated subpath export.
 export type {
