@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, isNotNull, isNull, lt, lte, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, gte, isNotNull, isNull, lt, lte, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { Db } from "@paperclipai/db";
 import { activityLog, agents, companies, costEvents, heartbeatRuns, issues, modelPricing, projects } from "@paperclipai/db";
@@ -248,6 +248,15 @@ export function costService(db: Db, budgetHooks: BudgetServiceHooks = {}) {
       //    double-inserting.
       //  - billingCode absent (legacy heartbeat path) → plain INSERT, semantics
       //    unchanged.
+      // We need to know whether this write inserted a new row or replayed onto
+      // an existing billing-code row, so the budget evaluator only fires for
+      // genuine new spend (Q18 spec). Postgres exposes this via `xmax`: 0 for
+      // a brand-new row, non-zero for an updated row. Smuggle it through
+      // RETURNING as a synthetic `inserted` boolean.
+      const returning = {
+        ...getTableColumns(costEvents),
+        inserted: sql<boolean>`(xmax = 0)`.as("inserted"),
+      };
       const insertBuilder = db.insert(costEvents).values(insertValues);
       const event = await (data.billingCode
         ? insertBuilder
@@ -267,9 +276,9 @@ export function costService(db: Db, budgetHooks: BudgetServiceHooks = {}) {
                 occurredAt,
               },
             })
-            .returning()
+            .returning(returning)
             .then((rows) => rows[0])
-        : insertBuilder.returning().then((rows) => rows[0]));
+        : insertBuilder.returning(returning).then((rows) => rows[0]));
 
       const [agentMonthSpend, companyMonthSpend] = await Promise.all([
         getMonthlySpendTotal(db, { companyId, agentId: event.agentId }),
@@ -292,9 +301,18 @@ export function costService(db: Db, budgetHooks: BudgetServiceHooks = {}) {
         })
         .where(eq(companies.id, companyId));
 
-      await budgets.evaluateCostEvent(event);
+      // Q18: only evaluate budget thresholds on genuine insert. Replays of an
+      // already-recorded billing_code (network retry, idempotency) carry the
+      // same final usage numbers in every emitter we ship — re-evaluating is
+      // wasted work AND it spams activity_log with duplicate threshold-crossed
+      // entries even though createIncidentIfNeeded itself is dedup-safe.
+      if (event.inserted) {
+        await budgets.evaluateCostEvent(event);
+      }
 
-      return event;
+      // Strip the synthetic column before returning to the caller.
+      const { inserted: _inserted, ...eventOut } = event;
+      return eventOut;
     },
 
     summary: async (companyId: string, range?: CostDateRange) => {
