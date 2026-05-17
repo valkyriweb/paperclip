@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parsePiJsonl, isPiUnknownSessionError } from "./parse.js";
+import { parseModelProvider, parseModelId } from "./execute.js";
 
 describe("parsePiJsonl", () => {
   it("parses agent lifecycle and messages", () => {
@@ -269,5 +270,43 @@ describe("isPiUnknownSessionError", () => {
     expect(isPiUnknownSessionError("", "no session available")).toBe(true);
     expect(isPiUnknownSessionError("all good", "")).toBe(false);
     expect(isPiUnknownSessionError("working fine", "no errors")).toBe(false);
+  });
+});
+
+describe("model id parsing", () => {
+  // The pi-local adapter splits the agent's configured model id on the first
+  // `/`. Left side is the transport/provider namespace (e.g. "claude-bridge",
+  // "openrouter"); right side is the underlying model. This split must stay
+  // stable because heartbeat writes `cost_events.model = parseModelId(...)`,
+  // and Paperclip's `model_pricing` seed keys on the BARE model id. Without
+  // the strip, rows show `claude-bridge/claude-sonnet-4-6` and never match
+  // pricing rows — a regression spotted 2026-05-17 in smoke verification.
+  it("splits transport-prefixed model ids", () => {
+    expect(parseModelProvider("claude-bridge/claude-sonnet-4-6")).toBe("claude-bridge");
+    expect(parseModelId("claude-bridge/claude-sonnet-4-6")).toBe("claude-sonnet-4-6");
+  });
+
+  it("returns the bare id verbatim when no prefix is present", () => {
+    expect(parseModelProvider("claude-sonnet-4-6")).toBeNull();
+    expect(parseModelId("claude-sonnet-4-6")).toBe("claude-sonnet-4-6");
+  });
+
+  it("handles null and empty inputs", () => {
+    expect(parseModelProvider(null)).toBeNull();
+    expect(parseModelProvider("")).toBeNull();
+    expect(parseModelId(null)).toBeNull();
+    expect(parseModelId("")).toBeNull();
+  });
+
+  it("trims whitespace on both halves", () => {
+    expect(parseModelProvider("  claude-bridge / claude-sonnet-4-6  ")).toBe("claude-bridge");
+    expect(parseModelId("  claude-bridge / claude-sonnet-4-6  ")).toBe("claude-sonnet-4-6");
+  });
+
+  it("only splits on the first slash (multi-segment ids stay together)", () => {
+    // Hypothetical future transport like `openrouter/anthropic/claude-3-5`:
+    // provider is the FIRST segment, model id is everything after.
+    expect(parseModelProvider("openrouter/anthropic/claude-3-5")).toBe("openrouter");
+    expect(parseModelId("openrouter/anthropic/claude-3-5")).toBe("anthropic/claude-3-5");
   });
 });

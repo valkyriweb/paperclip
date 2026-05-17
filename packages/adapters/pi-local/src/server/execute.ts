@@ -64,14 +64,14 @@ function firstNonEmptyLine(text: string): string {
   );
 }
 
-function parseModelProvider(model: string | null): string | null {
+export function parseModelProvider(model: string | null): string | null {
   if (!model) return null;
   const trimmed = model.trim();
   if (!trimmed.includes("/")) return null;
   return trimmed.slice(0, trimmed.indexOf("/")).trim() || null;
 }
 
-function parseModelId(model: string | null): string | null {
+export function parseModelId(model: string | null): string | null {
   if (!model) return null;
   const trimmed = model.trim();
   if (!trimmed.includes("/")) return trimmed || null;
@@ -756,7 +756,16 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       sessionDisplayId: resolvedSessionId,
       provider: provider,
       biller: resolvePiBiller(runtimeEnv, provider),
-      model: model,
+      // Strip the transport prefix from the model id before reporting. The
+      // raw `model` is the agent's `claude-bridge/claude-sonnet-4-6` style
+      // string, which is the right shape for spawning the Pi process (Pi's
+      // model-resolver consumes it verbatim) but the wrong shape for the
+      // cost-events row: pricing seed keys on the bare model id and the UI
+      // already shows `provider` separately. `parseModelId(model)` returned
+      // `modelId` above; reuse it so the heartbeat layer writes `cost_events.
+      // model = "claude-sonnet-4-6"` instead of the prefixed form. Falls back
+      // to `model` for non-prefixed configs (no `/` in the string).
+      model: modelId ?? model,
       // Classification follows the resolved provider + runtime env. For
       // claude-bridge runs (the common case Luke uses to route Pi through his
       // Anthropic subscription) the env is inspected to discriminate apikey vs
