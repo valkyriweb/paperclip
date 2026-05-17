@@ -1,3 +1,7 @@
+// Re-export `sql` tagged template so workspace-root scripts can run raw SQL
+// through `db.execute(sql\`...\`)` without needing their own drizzle-orm
+// dependency. Used by scripts/verify-budget-rollout.ts.
+export { sql } from "drizzle-orm";
 export {
   createDb,
   getPostgresDataDirectory,
