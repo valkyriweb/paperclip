@@ -198,6 +198,26 @@ describe("verify-budget-rollout gates", () => {
       const r = await gateG2(db, baseArgs, [companyId]);
       assert.equal(r.passed, true);
     });
+
+    // The G2 query has NOT IN ('claude-bridge','openai-codex','claude-code')
+    // \u2014 three hybrid billers \u2014 but only one was being tested. If a
+    // future query edit drops openai-codex or claude-code from the list,
+    // those emitters would start tripping the gate on legitimate unknown
+    // rows. Cover all three:
+    for (const hybrid of ["openai-codex", "claude-code"] as const) {
+      it(`excludes hybrid ${hybrid} from the check`, async () => {
+        for (let i = 0; i < 5; i++) {
+          await db.insert(costEvents).values(makeCostEvent({
+            biller: hybrid,
+            provider: hybrid,
+            billingType: "unknown",
+            idempotencyKey: `${hybrid}-unk-${i}`,
+          }));
+        }
+        const r = await gateG2(db, baseArgs, [companyId]);
+        assert.equal(r.passed, true, `${hybrid} unknown rows should be ignored, got: ${r.detail}`);
+      });
+    }
   });
 
   describe("G2b — billing_type matches expected per biller", () => {
