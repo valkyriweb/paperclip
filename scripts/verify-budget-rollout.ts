@@ -172,7 +172,7 @@ export async function gateG2(
     WHERE company_id IN (${uuidIn(companyIds)})
       AND occurred_at >= now() - (${args.windowHours}::int || ' hours')::interval
       AND billing_type = 'unknown'
-      AND biller NOT IN ('claude-bridge', 'openai-codex')  -- hybrids legitimately unknown w/o env signal
+      AND biller NOT IN ('claude-bridge', 'openai-codex', 'claude-code')  -- hybrids legitimately unknown w/o env signal
     GROUP BY biller
     HAVING COUNT(*) > ${args.unknownThreshold}
     ORDER BY n DESC
@@ -206,8 +206,12 @@ export async function gateG2b(
   companyIds: string[],
 ): Promise<GateResult> {
   // metered_api billers that somehow ended up as subscription_included, or
-  // vice versa. The known-metered set must match SERVER_METERED_PROVIDERS in
-  // server/src/services/costs.ts.
+  // vice versa. Three classes:
+  //   - direct-API billers (anthropic, openai, etc.) MUST be metered_api
+  //   - subscription-tool billers (claude-code, claude-bridge w/ OAuth) MUST be
+  //     subscription_included (these are set by the emitter, never inferred)
+  //   - github-copilot is subscription_only
+  // Hybrid billers like openai-codex deliberately omitted: caller-disambiguated.
   const rows = await db.execute<{ biller: string; billing_type: string; n: string }>(sql`
     SELECT biller, billing_type, COUNT(*)::text AS n
     FROM cost_events
@@ -219,6 +223,10 @@ export async function gateG2b(
         OR
         (biller = 'github-copilot' AND billing_type = 'metered_api')
       )
+      -- Hybrid billers (claude-code, openai-codex, claude-bridge) intentionally
+      -- NOT checked here: they can legitimately be either type depending on
+      -- emitter config (API key vs Pro/Plus subscription). G2 still catches
+      -- the case where a hybrid biller has 'unknown' rows above threshold.
     GROUP BY biller, billing_type
     ORDER BY biller
   `);
