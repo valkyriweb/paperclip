@@ -23,7 +23,15 @@ export const createCostEventSchema = z.object({
   projectId: z.string().uuid().optional().nullable(),
   goalId: z.string().uuid().optional().nullable(),
   heartbeatRunId: z.string().uuid().optional().nullable(),
+  // Free-text logical-grouping label (e.g. "mission:alpha"). NOT unique:
+  // multiple events can share a billing_code for cost aggregation.
   billingCode: z.string().optional().nullable(),
+  // Per-event idempotency key for retry-safe upserts. When present, the
+  // server uses ON CONFLICT (company_id, idempotency_key) DO UPDATE so
+  // retries from external emitters replay onto the same row instead of
+  // double-inserting. Format is biller-defined and namespace-prefixed
+  // (e.g. "claude-bridge:<request-id>", "multica:<task-id>:<provider>:<model>").
+  idempotencyKey: z.string().min(1).optional().nullable(),
   provider: z.string().min(1),
   biller: z.string().min(1).optional(),
   billingType: z.enum(BILLING_TYPES).optional().default("unknown"),

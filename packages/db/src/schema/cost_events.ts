@@ -17,7 +17,15 @@ export const costEvents = pgTable(
     projectId: uuid("project_id").references(() => projects.id),
     goalId: uuid("goal_id").references(() => goals.id),
     heartbeatRunId: uuid("heartbeat_run_id").references(() => heartbeatRuns.id),
+    // Logical-grouping label (e.g. 'mission:alpha'). Free-text, NOT unique.
+    // Multiple cost_events can share a billing_code so the orchestration cost
+    // summary can aggregate by mission/project/business-unit.
     billingCode: text("billing_code"),
+    // Per-event idempotency key for retry-safe upserts from external emitters
+    // (claude-bridge request-id, Multica taskID:provider:model, Pi extension
+    // session-message). Partial unique index below; NULL rows (legacy
+    // heartbeat path) are excluded so the existing writer path stays untouched.
+    idempotencyKey: text("idempotency_key"),
     provider: text("provider").notNull(),
     biller: text("biller").notNull().default("unknown"),
     billingType: text("billing_type").notNull().default("unknown"),
@@ -55,13 +63,15 @@ export const costEvents = pgTable(
       table.heartbeatRunId,
     ),
     // Idempotency: retried emissions from any source (claude-bridge, Multica
-    // forwarder, local CLI scraper) can replay the same logical event with the
-    // same billing_code. Partial index — billing_code is nullable, NULL rows
-    // (e.g. existing heartbeat-driven rows) are excluded so the legacy writer
-    // path stays untouched. createEvent uses ON CONFLICT … DO UPDATE on this
-    // index to overwrite-on-replay rather than double-insert.
-    companyBillingCodeUq: uniqueIndex("cost_events_company_billing_code_uq")
-      .on(table.companyId, table.billingCode)
-      .where(sql`${table.billingCode} IS NOT NULL`),
+    // forwarder, local CLI scraper) can replay the same logical event with
+    // the same idempotency_key. Partial index — idempotency_key is nullable,
+    // NULL rows (e.g. existing heartbeat-driven rows) are excluded so the
+    // legacy writer path stays untouched. createEvent uses ON CONFLICT …
+    // DO UPDATE on this index to overwrite-on-replay rather than double-insert.
+    // (Originally tried using billing_code; that's a free-text grouping label
+    // shared across multiple events for a mission. Separated in 0085.)
+    companyIdempotencyKeyUq: uniqueIndex("cost_events_company_idempotency_key_uq")
+      .on(table.companyId, table.idempotencyKey)
+      .where(sql`${table.idempotencyKey} IS NOT NULL`),
   }),
 );
