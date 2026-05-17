@@ -1026,8 +1026,8 @@ describeEmbeddedPostgres("costService.createEvent server-side pricing", () => {
     expect(event.costCents).toBe(0);
   });
 
-  it("replays a billing-code event onto the same row (ON CONFLICT DO UPDATE)", async () => {
-    const billingCode = `bridge:test-session:42`;
+  it("replays an idempotency-keyed event onto the same row (ON CONFLICT DO UPDATE)", async () => {
+    const idempotencyKey = `bridge:test-session:42`;
     const first = await costs.createEvent(companyId, {
       agentId,
       provider: "anthropic",
@@ -1039,12 +1039,12 @@ describeEmbeddedPostgres("costService.createEvent server-side pricing", () => {
       cachedInputTokens: 0,
       cacheCreationInputTokens: 0,
       occurredAt: new Date("2026-05-15T00:00:00.000Z"),
-      billingCode,
+      idempotencyKey,
     } as any);
     expect(first.costCents).toBe(225); // 500k * 3 + 50k * 15 = 150 + 75 = 225c
 
-    // Same billing code, different token counts (e.g. caller computed final
-    // numbers after streaming): row is updated, not duplicated.
+    // Same idempotency key, different token counts (e.g. caller computed
+    // final numbers after streaming): row is updated, not duplicated.
     const second = await costs.createEvent(companyId, {
       agentId,
       provider: "anthropic",
@@ -1056,7 +1056,7 @@ describeEmbeddedPostgres("costService.createEvent server-side pricing", () => {
       cachedInputTokens: 0,
       cacheCreationInputTokens: 0,
       occurredAt: new Date("2026-05-15T00:00:00.000Z"),
-      billingCode,
+      idempotencyKey,
     } as any);
     expect(second.id).toBe(first.id);
     expect(second.inputTokens).toBe(1_000_000);
@@ -1082,7 +1082,7 @@ describeEmbeddedPostgres("costService.createEvent server-side pricing", () => {
       cachedInputTokens: 0,
       cacheCreationInputTokens: 0,
       occurredAt: new Date("2026-05-15T00:00:00.000Z"),
-      billingCode: `classifier-anthropic-1`,
+      idempotencyKey: `classifier-anthropic-1`,
     } as any);
     expect(event.billingType).toBe("metered_api");
     expect(event.costCents).toBe(300); // 1M * $3/Mtok = 300¢
@@ -1100,7 +1100,7 @@ describeEmbeddedPostgres("costService.createEvent server-side pricing", () => {
       cachedInputTokens: 0,
       cacheCreationInputTokens: 0,
       occurredAt: new Date("2026-05-15T00:00:00.000Z"),
-      billingCode: `classifier-openai-1`,
+      idempotencyKey: `classifier-openai-1`,
     } as any);
     expect(event.billingType).toBe("metered_api");
   });
@@ -1120,13 +1120,13 @@ describeEmbeddedPostgres("costService.createEvent server-side pricing", () => {
       cachedInputTokens: 0,
       cacheCreationInputTokens: 0,
       occurredAt: new Date("2026-05-15T00:00:00.000Z"),
-      billingCode: `classifier-bridge-1`,
+      idempotencyKey: `classifier-bridge-1`,
     } as any);
     expect(event.billingType).toBe("subscription_included");
     expect(event.costCents).toBe(0); // subscription override
   });
 
-  it("Q18: replay of same billing_code does NOT re-evaluate budget (no duplicate activity log)", async () => {
+  it("Q18: replay of same idempotency_key does NOT re-evaluate budget (no duplicate activity log)", async () => {
     // Q18 spec: gate evaluateCostEvent on inserted=true. Replays carry the
     // same final usage numbers from every emitter we ship, so re-evaluating
     // wastes work AND spams activity_log with duplicate threshold-crossed
@@ -1134,8 +1134,8 @@ describeEmbeddedPostgres("costService.createEvent server-side pricing", () => {
     // write is unconditional in the evaluator).
     //
     // Set a $1 hard-stop on the agent, post a $3 cost event with a stable
-    // billing_code (crosses both thresholds), assert one of each activity
-    // log row, then replay the SAME billing_code and assert no new rows.
+    // idempotency_key (crosses both thresholds), assert one of each activity
+    // log row, then replay the SAME key and assert no new rows.
     const policyId = randomUUID();
     await db.insert(budgetPolicies).values({
       id: policyId,
@@ -1151,7 +1151,7 @@ describeEmbeddedPostgres("costService.createEvent server-side pricing", () => {
       isActive: true,
     });
 
-    const billingCode = `q18-replay-test:${randomUUID()}`;
+    const idempotencyKey = `q18-replay-test:${randomUUID()}`;
     const eventBody = {
       agentId,
       provider: "anthropic",
@@ -1163,7 +1163,7 @@ describeEmbeddedPostgres("costService.createEvent server-side pricing", () => {
       cachedInputTokens: 0,
       cacheCreationInputTokens: 0,
       occurredAt: new Date("2026-05-15T00:00:00.000Z"),
-      billingCode,
+      idempotencyKey,
     } as any;
 
     // First insert → evaluator fires, opens incidents, writes activity log.
@@ -1188,7 +1188,7 @@ describeEmbeddedPostgres("costService.createEvent server-side pricing", () => {
     );
     expect(thresholdRowsAfterFirst.length).toBe(2); // one soft + one hard
 
-    // Replay: same billing_code, same body → ON CONFLICT DO UPDATE on the
+    // Replay: same idempotency_key, same body → ON CONFLICT DO UPDATE on the
     // same row. Q18 gate must skip budget evaluation entirely.
     const second = await costs.createEvent(companyId, eventBody);
     expect(second.id).toBe(first.id); // same row, not a duplicate insert
@@ -1231,7 +1231,7 @@ describeEmbeddedPostgres("costService.createEvent server-side pricing", () => {
       cachedInputTokens: 0,
       cacheCreationInputTokens: 0,
       occurredAt: new Date("2026-05-15T00:00:00.000Z"),
-      billingCode: `classifier-hybrid-1`,
+      idempotencyKey: `classifier-hybrid-1`,
     } as any);
     expect(event.billingType).toBe("unknown");
   });

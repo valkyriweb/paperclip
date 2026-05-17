@@ -128,7 +128,7 @@ describe("verify-budget-rollout gates", () => {
         await db.insert(costEvents).values(makeCostEvent({
           biller,
           provider: biller === "multica" ? "anthropic" : biller,
-          billingCode: `${biller}:1`,
+          idempotencyKey: `${biller}:1`,
         }));
       }
       const r = await gateG1(db, baseArgs, [companyId]);
@@ -136,8 +136,8 @@ describe("verify-budget-rollout gates", () => {
     });
 
     it("fails when one expected biller is missing", async () => {
-      await db.insert(costEvents).values(makeCostEvent({ biller: "anthropic", billingCode: "a:1" }));
-      await db.insert(costEvents).values(makeCostEvent({ biller: "openai", billingCode: "o:1" }));
+      await db.insert(costEvents).values(makeCostEvent({ biller: "anthropic", idempotencyKey: "a:1" }));
+      await db.insert(costEvents).values(makeCostEvent({ biller: "openai", idempotencyKey: "o:1" }));
       // claude-bridge and multica missing
       const r = await gateG1(db, baseArgs, [companyId]);
       assert.equal(r.passed, false);
@@ -151,7 +151,7 @@ describe("verify-budget-rollout gates", () => {
         await db.insert(costEvents).values(makeCostEvent({
           biller,
           occurredAt: old,
-          billingCode: `${biller}-old`,
+          idempotencyKey: `${biller}-old`,
         }));
       }
       const r = await gateG1(db, baseArgs, [companyId]);
@@ -192,7 +192,7 @@ describe("verify-budget-rollout gates", () => {
       await db.insert(costEvents).values(makeCostEvent({
         biller: "anthropic",
         billingType: "subscription_included",
-        billingCode: "wrong-classification",
+        idempotencyKey: "wrong-classification",
       }));
       const r = await gateG2b(db, baseArgs, [companyId]);
       assert.equal(r.passed, false);
@@ -244,7 +244,7 @@ describe("verify-budget-rollout gates", () => {
         costCents: 0,
         inputTokens: 1000,
         outputTokens: 100,
-        billingCode: "missing-pricing-1",
+        idempotencyKey: "missing-pricing-1",
       }));
       const r = await gateG5(db, baseArgs, [companyId]);
       assert.equal(r.passed, false);
@@ -253,10 +253,10 @@ describe("verify-budget-rollout gates", () => {
     });
   });
 
-  describe("G6 — no duplicate billing_codes", () => {
+  describe("G6 — no duplicate idempotency_keys", () => {
     it("passes when no duplicates exist", async () => {
-      await db.insert(costEvents).values(makeCostEvent({ billingCode: "unique-1" }));
-      await db.insert(costEvents).values(makeCostEvent({ billingCode: "unique-2" }));
+      await db.insert(costEvents).values(makeCostEvent({ idempotencyKey: "unique-1" }));
+      await db.insert(costEvents).values(makeCostEvent({ idempotencyKey: "unique-2" }));
       const r = await gateG6(db, baseArgs, [companyId]);
       assert.equal(r.passed, true);
     });

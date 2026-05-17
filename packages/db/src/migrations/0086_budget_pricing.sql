@@ -8,10 +8,9 @@
 -- 2. cost_events.cache_creation_input_tokens: separate cache-write counter,
 --    distinct from cached_input_tokens (which is cache *reads*). Anthropic
 --    bills these at a different rate.
--- 3. cost_events partial unique index on (company_id, billing_code): retry-safe
---    idempotency for sources that emit with a stable billing_code (claude-bridge
---    HTTP-direct, Multica forwarder, local CLI scraper). Existing heartbeat-
---    driven rows keep billing_code = NULL and are excluded from the constraint.
+-- (idempotency moved to migration 0085 — originally tried to use billing_code
+-- here, but billing_code is an existing logical-grouping label, not a per-event
+-- idempotency key. See 0085_cost_events_idempotency_key.sql.)
 
 CREATE TABLE IF NOT EXISTS "model_pricing" (
 	"provider" text NOT NULL,
@@ -31,7 +30,3 @@ CREATE INDEX IF NOT EXISTS "model_pricing_lookup_idx"
 --> statement-breakpoint
 ALTER TABLE "cost_events"
 	ADD COLUMN IF NOT EXISTS "cache_creation_input_tokens" integer DEFAULT 0 NOT NULL;
---> statement-breakpoint
-CREATE UNIQUE INDEX IF NOT EXISTS "cost_events_company_billing_code_uq"
-	ON "cost_events" USING btree ("company_id","billing_code")
-	WHERE "billing_code" IS NOT NULL;

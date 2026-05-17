@@ -17,7 +17,7 @@
  * G2b every row's billingType is consistent with the source's biller
  *     (anthropic/openai/google etc. → metered_api; github-copilot →
  *     subscription_included; claude-bridge can be either)
- * G6  no duplicate cost_events.billing_code per company ("without duplication")
+ * G6  no duplicate cost_events.idempotency_key per company ("without duplication")
  * G3  at least one budget_policy exists per scope kind we support
  *     ("agent-level and project-level budget policies")
  * G4  paused-by-budget scopes have not started new heartbeat runs after the
@@ -256,32 +256,32 @@ export async function gateG6(
 ): Promise<GateResult> {
   // The partial unique index should make this impossible at the DB level. If
   // it returns rows, something rewrote the index or bypassed createEvent.
-  const rows = await db.execute<{ company_id: string; billing_code: string; n: string }>(sql`
-    SELECT company_id, billing_code, COUNT(*)::text AS n
+  const rows = await db.execute<{ company_id: string; idempotency_key: string; n: string }>(sql`
+    SELECT company_id, idempotency_key, COUNT(*)::text AS n
     FROM cost_events
     WHERE company_id IN (${uuidIn(companyIds)})
-      AND billing_code IS NOT NULL
-    GROUP BY company_id, billing_code
+      AND idempotency_key IS NOT NULL
+    GROUP BY company_id, idempotency_key
     HAVING COUNT(*) > 1
     ORDER BY n DESC
     LIMIT 20
   `);
 
-  const list = rows as unknown as Array<{ company_id: string; billing_code: string; n: string }>;
+  const list = rows as unknown as Array<{ company_id: string; idempotency_key: string; n: string }>;
 
   if (list.length === 0) {
     return ok(
       "G6",
-      "no duplicate billing_code rows",
+      "no duplicate idempotency_key rows",
       `    ✓ partial unique index holds, ON CONFLICT path correct`,
     );
   }
   return fail(
     "G6",
-    "no duplicate billing_code rows",
+    "no duplicate idempotency_key rows",
     [
-      `    Found duplicate billing_codes (top 20):`,
-      ...list.map((r) => `    ${r.company_id} | ${r.billing_code} | ${r.n}`),
+      `    Found duplicate idempotency_keys (top 20):`,
+      ...list.map((r) => `    ${r.company_id} | ${r.idempotency_key} | ${r.n}`),
     ].join("\n"),
   );
 }

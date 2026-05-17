@@ -239,27 +239,31 @@ export function costService(db: Db, budgetHooks: BudgetServiceHooks = {}) {
       };
 
       // Two write paths:
-      //  - billingCode present → ON CONFLICT (company_id, billing_code) DO UPDATE
-      //    against the partial unique index added in migration 0084. Retried
-      //    emissions from a remote source replay onto the same row instead of
-      //    double-inserting.
-      //  - billingCode absent (legacy heartbeat path) → plain INSERT, semantics
-      //    unchanged.
-      // We need to know whether this write inserted a new row or replayed onto
-      // an existing billing-code row, so the budget evaluator only fires for
-      // genuine new spend (Q18 spec). Postgres exposes this via `xmax`: 0 for
-      // a brand-new row, non-zero for an updated row. Smuggle it through
-      // RETURNING as a synthetic `inserted` boolean.
+      //  - idempotencyKey present → ON CONFLICT (company_id, idempotency_key)
+      //    DO UPDATE against the partial unique index from migration 0085.
+      //    Retried emissions from a remote source replay onto the same row
+      //    instead of double-inserting.
+      //  - idempotencyKey absent (legacy heartbeat path or label-only writers)
+      //    → plain INSERT, semantics unchanged.
+      // billing_code is a separate concept: a free-text grouping label
+      // (e.g. "mission:alpha") that multiple events can share for cost
+      // roll-ups. It carries no unique constraint.
+      //
+      // We need to know whether this write inserted a new row or replayed
+      // onto an existing idempotency-key row, so the budget evaluator only
+      // fires for genuine new spend (Q18 spec). Postgres exposes this via
+      // `xmax`: 0 for a brand-new row, non-zero for an updated row. Smuggle
+      // it through RETURNING as a synthetic `inserted` boolean.
       const returning = {
         ...getTableColumns(costEvents),
         inserted: sql<boolean>`(xmax = 0)`.as("inserted"),
       };
       const insertBuilder = db.insert(costEvents).values(insertValues);
-      const event = await (data.billingCode
+      const event = await (data.idempotencyKey
         ? insertBuilder
             .onConflictDoUpdate({
-              target: [costEvents.companyId, costEvents.billingCode],
-              targetWhere: sql`${costEvents.billingCode} IS NOT NULL`,
+              target: [costEvents.companyId, costEvents.idempotencyKey],
+              targetWhere: sql`${costEvents.idempotencyKey} IS NOT NULL`,
               set: {
                 inputTokens,
                 cachedInputTokens,
