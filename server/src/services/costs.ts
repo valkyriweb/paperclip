@@ -16,6 +16,53 @@ const PRICING_PROVIDER_ALIASES: Record<string, string> = {
 };
 
 /**
+ * Providers that are billed per token against a paid API endpoint. The
+ * server-side classifier defaults to `metered_api` for these when the caller
+ * did not provide `billingType` (or sent the placeholder `unknown`). External
+ * emitters — Multica forwarder, Pi extension, P4b watcher — don't go through
+ * Paperclip's adapter framework so they can't run the @paperclipai/adapter-utils
+ * classifier; this server-side fallback covers them.
+ *
+ * Substream: agent-system/PAPERCLIP-BUDGET-INTEGRATION.md G2.
+ */
+const SERVER_METERED_PROVIDERS: ReadonlySet<string> = new Set([
+  "openai",
+  "anthropic",
+  "google",
+  "google-vertex",
+  "amazon-bedrock",
+  "azure-openai-responses",
+  "deepseek",
+  "groq",
+  "xai",
+  "openrouter",
+  "vercel-ai-gateway",
+  "mistral",
+  "cohere",
+  "perplexity",
+]);
+
+const SERVER_SUBSCRIPTION_ONLY_PROVIDERS: ReadonlySet<string> = new Set([
+  "github-copilot",
+]);
+
+/**
+ * Server-side billing-type classifier. Pure function over provider only — no
+ * env access. Used to fill in `billingType` when the caller didn't set it.
+ *
+ * Hybrid providers (claude-bridge, openai-codex) deliberately stay `unknown`
+ * here: the caller's env determines whether they're metered or subscription,
+ * and the server can't see it. Those emitters MUST set `billingType` themselves
+ * (claude-bridge does this in pi-claude-bridge/paperclip-billing.js).
+ */
+export function classifyBillingTypeFromProvider(provider: string | null | undefined): string {
+  if (!provider) return "unknown";
+  if (SERVER_METERED_PROVIDERS.has(provider)) return "metered_api";
+  if (SERVER_SUBSCRIPTION_ONLY_PROVIDERS.has(provider)) return "subscription_included";
+  return "unknown";
+}
+
+/**
  * Resolve the canonical `model_pricing` provider key for a cost_events row.
  */
 function pricingProviderFor(provider: string): string {
@@ -150,7 +197,14 @@ export function costService(db: Db, budgetHooks: BudgetServiceHooks = {}) {
         throw unprocessable("Agent does not belong to company");
       }
 
-      const billingType = data.billingType ?? "unknown";
+      // Fill missing/unknown billingType from provider. External emitters
+      // (Multica forwarder, Pi extension, watcher) post tokens without
+      // billingType; server-side classifier sets metered_api / subscription_included
+      // from the provider name so the dashboard's Billers tab doesn't show
+      // `unknown` for known billers (G2).
+      const callerBillingType = data.billingType ?? "unknown";
+      const billingType =
+        callerBillingType === "unknown" ? classifyBillingTypeFromProvider(data.provider) : callerBillingType;
       const inputTokens = data.inputTokens ?? 0;
       const cachedInputTokens = data.cachedInputTokens ?? 0;
       const cacheCreationInputTokens = data.cacheCreationInputTokens ?? 0;

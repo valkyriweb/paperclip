@@ -1056,4 +1056,85 @@ describeEmbeddedPostgres("costService.createEvent server-side pricing", () => {
     const allRows = await db.select().from(costEvents).where(eq(costEvents.companyId, companyId));
     expect(allRows).toHaveLength(1);
   });
+
+  it("server-side classifier fills metered_api when caller omits billingType (anthropic)", async () => {
+    // External emitters (Multica forwarder, Pi extension, P4b watcher) POST
+    // tokens without billingType. Server-side classifier must set metered_api
+    // for known metered providers so G2 holds (no `unknown` rows from a known
+    // biller). Substream G2.
+    const event = await costs.createEvent(companyId, {
+      agentId,
+      provider: "anthropic",
+      biller: "anthropic",
+      // billingType intentionally omitted
+      model: "claude-sonnet-4-6",
+      inputTokens: 1_000_000,
+      outputTokens: 0,
+      cachedInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      occurredAt: new Date("2026-05-15T00:00:00.000Z"),
+      billingCode: `classifier-anthropic-1`,
+    } as any);
+    expect(event.billingType).toBe("metered_api");
+    expect(event.costCents).toBe(300); // 1M * $3/Mtok = 300¢
+  });
+
+  it("server-side classifier fills metered_api when caller sends unknown (openai)", async () => {
+    const event = await costs.createEvent(companyId, {
+      agentId,
+      provider: "openai",
+      biller: "openai",
+      billingType: "unknown",
+      model: "gpt-5",
+      inputTokens: 1,
+      outputTokens: 1,
+      cachedInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      occurredAt: new Date("2026-05-15T00:00:00.000Z"),
+      billingCode: `classifier-openai-1`,
+    } as any);
+    expect(event.billingType).toBe("metered_api");
+  });
+
+  it("server-side classifier respects explicit billingType from caller", async () => {
+    // claude-bridge emitter sets billingType=subscription_included explicitly
+    // when OAuth is in use. Server must NOT downgrade that to metered_api just
+    // because the provider (anthropic) lives in the metered set.
+    const event = await costs.createEvent(companyId, {
+      agentId,
+      provider: "anthropic",
+      biller: "claude-bridge",
+      billingType: "subscription_included",
+      model: "claude-sonnet-4-6",
+      inputTokens: 100_000,
+      outputTokens: 50_000,
+      cachedInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      occurredAt: new Date("2026-05-15T00:00:00.000Z"),
+      billingCode: `classifier-bridge-1`,
+    } as any);
+    expect(event.billingType).toBe("subscription_included");
+    expect(event.costCents).toBe(0); // subscription override
+  });
+
+  it("server-side classifier leaves unknown for hybrid providers without env signal", async () => {
+    // claude-bridge and openai-codex are hybrid (subscription OR metered
+    // depending on env). Server can't see env; emitter must set explicitly.
+    // If no emitter set it, leave it `unknown` so it shows up in the dashboard
+    // gap report rather than silently misclassifying.
+    const event = await costs.createEvent(companyId, {
+      agentId,
+      provider: "claude-bridge",
+      biller: "claude-bridge",
+      // billingType omitted, provider is hybrid
+      model: "claude-sonnet-4-6",
+      inputTokens: 1,
+      outputTokens: 1,
+      cachedInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      occurredAt: new Date("2026-05-15T00:00:00.000Z"),
+      billingCode: `classifier-hybrid-1`,
+    } as any);
+    expect(event.billingType).toBe("unknown");
+  });
 });
