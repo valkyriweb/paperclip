@@ -3,6 +3,7 @@ import request from "supertest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { afterAll, afterEach, beforeAll } from "vitest";
 import { randomUUID } from "node:crypto";
+import { eq, sql as sqlTag } from "drizzle-orm";
 import {
   createDb,
   companies,
@@ -12,6 +13,7 @@ import {
   financeEvents,
   heartbeatRuns,
   issues,
+  modelPricing,
   projects,
 } from "@paperclipai/db";
 import { costService } from "../services/costs.ts";
@@ -842,5 +844,216 @@ describeEmbeddedPostgres("cost and finance aggregate overflow handling", () => {
     expect(summary.estimatedDebitCents).toBe(2_000_000_000);
     expect(byKindRow?.debitCents).toBe(4_000_000_000);
     expect(byKindRow?.netCents).toBe(4_000_000_000);
+  });
+});
+
+describeEmbeddedPostgres("costService.createEvent server-side pricing", () => {
+  let db!: ReturnType<typeof createDb>;
+  let costs!: ReturnType<typeof costService>;
+  let tempDb: Awaited<ReturnType<typeof startEmbeddedPostgresTestDatabase>> | null = null;
+  let companyId: string;
+  let agentId: string;
+
+  const ANTHROPIC_PRICING_EFFECTIVE_AT = new Date("2026-05-01T00:00:00.000Z");
+
+  beforeAll(async () => {
+    tempDb = await startEmbeddedPostgresTestDatabase("paperclip-cost-pricing-");
+    db = createDb(tempDb.connectionString);
+    costs = costService(db);
+  }, 20_000);
+
+  beforeEach(async () => {
+    companyId = randomUUID();
+    agentId = randomUUID();
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip Pricing Test",
+      issuePrefix: `P${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "Pricing Test Agent",
+      role: "engineer",
+      status: "active",
+      adapterType: "pi_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    });
+    // Anthropic claude-sonnet-4-6 pricing: \$3/Mtok input, \$15/Mtok output,
+    // \$0.30/Mtok cache read, \$3.75/Mtok cache write.
+    // CPM micros: 300_000_000 / 1_500_000_000 / 30_000_000 / 375_000_000.
+    await db
+      .insert(modelPricing)
+      .values({
+        provider: "anthropic",
+        model: "claude-sonnet-4-6",
+        effectiveAt: ANTHROPIC_PRICING_EFFECTIVE_AT,
+        inputCpmMicros: 300_000_000,
+        cachedInputCpmMicros: 30_000_000,
+        cacheWriteCpmMicros: 375_000_000,
+        outputCpmMicros: 1_500_000_000,
+        source: "test",
+      })
+      .onConflictDoNothing();
+  });
+
+  afterEach(async () => {
+    await db.delete(costEvents);
+    await db.delete(activityLog);
+    await db.delete(agents);
+    await db.delete(companies);
+    // Pricing table is shared across cases; deliberately not cleared.
+  });
+
+  afterAll(async () => {
+    await tempDb?.cleanup();
+  });
+
+  it("computes costCents from model_pricing when caller omits it", async () => {
+    const event = await costs.createEvent(companyId, {
+      agentId,
+      provider: "anthropic",
+      biller: "anthropic",
+      billingType: "metered_api",
+      model: "claude-sonnet-4-6",
+      inputTokens: 1_000_000,
+      cachedInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      outputTokens: 100_000,
+      occurredAt: new Date("2026-05-15T00:00:00.000Z"),
+      // costCents intentionally omitted
+    } as any);
+    // 1M input @ \$3/Mtok = 300¢ = 300 cents; 100k output @ \$15/Mtok = 150¢.
+    // Total ≈ 450 cents (\$4.50).
+    expect(event.costCents).toBe(450);
+  });
+
+  it("transport-aliases claude-bridge to anthropic for pricing lookup", async () => {
+    const event = await costs.createEvent(companyId, {
+      agentId,
+      provider: "claude-bridge",
+      biller: "claude-bridge",
+      billingType: "metered_api",
+      model: "claude-sonnet-4-6",
+      inputTokens: 1_000_000,
+      cachedInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      outputTokens: 0,
+      occurredAt: new Date("2026-05-15T00:00:00.000Z"),
+    } as any);
+    expect(event.provider).toBe("claude-bridge");
+    expect(event.biller).toBe("claude-bridge");
+    // Pricing was resolved via the anthropic alias even though the row reports
+    // provider=claude-bridge for attribution.
+    expect(event.costCents).toBe(300);
+  });
+
+  it("subscription_included always forces costCents to 0 regardless of input", async () => {
+    const event = await costs.createEvent(companyId, {
+      agentId,
+      provider: "claude-bridge",
+      biller: "claude-bridge",
+      billingType: "subscription_included",
+      model: "claude-sonnet-4-6",
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      cachedInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      occurredAt: new Date("2026-05-15T00:00:00.000Z"),
+      costCents: 99999, // caller-supplied bogus value, must be ignored
+    } as any);
+    expect(event.costCents).toBe(0);
+  });
+
+  it("trusts a positive caller-supplied costCents over the pricing table", async () => {
+    const event = await costs.createEvent(companyId, {
+      agentId,
+      provider: "anthropic",
+      biller: "anthropic",
+      billingType: "metered_api",
+      model: "claude-sonnet-4-6",
+      inputTokens: 1_000_000,
+      outputTokens: 100_000,
+      cachedInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      occurredAt: new Date("2026-05-15T00:00:00.000Z"),
+      costCents: 1234, // legacy heartbeat path: cost already computed upstream
+    } as any);
+    expect(event.costCents).toBe(1234);
+  });
+
+  it("prices cache reads and cache writes separately", async () => {
+    const event = await costs.createEvent(companyId, {
+      agentId,
+      provider: "anthropic",
+      biller: "anthropic",
+      billingType: "metered_api",
+      model: "claude-sonnet-4-6",
+      inputTokens: 0,
+      cachedInputTokens: 1_000_000, // \$0.30 = 30c
+      cacheCreationInputTokens: 1_000_000, // \$3.75 = 375c
+      outputTokens: 0,
+      occurredAt: new Date("2026-05-15T00:00:00.000Z"),
+    } as any);
+    expect(event.costCents).toBe(30 + 375); // 405
+  });
+
+  it("falls back to 0 when no pricing row matches", async () => {
+    const event = await costs.createEvent(companyId, {
+      agentId,
+      provider: "some-new-provider",
+      biller: "some-new-provider",
+      billingType: "metered_api",
+      model: "unknown-model",
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      cachedInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      occurredAt: new Date("2026-05-15T00:00:00.000Z"),
+    } as any);
+    expect(event.costCents).toBe(0);
+  });
+
+  it("replays a billing-code event onto the same row (ON CONFLICT DO UPDATE)", async () => {
+    const billingCode = `bridge:test-session:42`;
+    const first = await costs.createEvent(companyId, {
+      agentId,
+      provider: "anthropic",
+      biller: "anthropic",
+      billingType: "metered_api",
+      model: "claude-sonnet-4-6",
+      inputTokens: 500_000,
+      outputTokens: 50_000,
+      cachedInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      occurredAt: new Date("2026-05-15T00:00:00.000Z"),
+      billingCode,
+    } as any);
+    expect(first.costCents).toBe(225); // 500k * 3 + 50k * 15 = 150 + 75 = 225c
+
+    // Same billing code, different token counts (e.g. caller computed final
+    // numbers after streaming): row is updated, not duplicated.
+    const second = await costs.createEvent(companyId, {
+      agentId,
+      provider: "anthropic",
+      biller: "anthropic",
+      billingType: "metered_api",
+      model: "claude-sonnet-4-6",
+      inputTokens: 1_000_000,
+      outputTokens: 100_000,
+      cachedInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      occurredAt: new Date("2026-05-15T00:00:00.000Z"),
+      billingCode,
+    } as any);
+    expect(second.id).toBe(first.id);
+    expect(second.inputTokens).toBe(1_000_000);
+    expect(second.costCents).toBe(450);
+
+    const allRows = await db.select().from(costEvents).where(eq(costEvents.companyId, companyId));
+    expect(allRows).toHaveLength(1);
   });
 });
