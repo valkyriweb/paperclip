@@ -43,7 +43,8 @@
     "migrate": "pnpm run check:migrations && tsx src/migrate.ts",
     "seed": "tsx src/seed.ts",
     "seed:pricing": "tsx src/seed-model-pricing.ts",
-    "backfill:cost-cents": "tsx src/backfill-cost-cents.ts"
+    "backfill:cost-cents": "tsx src/backfill-cost-cents.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "@paperclipai/shared": "workspace:*",
