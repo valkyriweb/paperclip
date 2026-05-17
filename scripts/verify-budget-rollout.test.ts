@@ -197,6 +197,23 @@ describe("verify-budget-rollout gates", () => {
       const r = await gateG2b(db, baseArgs, [companyId]);
       assert.equal(r.passed, false);
     });
+
+    // Reverse case: subscription-only billers wrongly classified as
+    // metered_api. github-copilot is the only entry in SERVER_SUBSCRIPTION_ONLY_PROVIDERS
+    // today; the query has an OR branch for this case but no test had
+    // exercised it (runbook G2b advertises \"and vice versa for github-copilot\"
+    // \u2014 audit finding 2026-05-17).
+    it("fails when github-copilot is mis-classified as metered_api", async () => {
+      await db.insert(costEvents).values(makeCostEvent({
+        biller: "github-copilot",
+        provider: "github-copilot",
+        billingType: "metered_api",
+        idempotencyKey: "copilot-wrong-class",
+      }));
+      const r = await gateG2b(db, baseArgs, [companyId]);
+      assert.equal(r.passed, false);
+      assert.ok(r.detail.includes("github-copilot"));
+    });
   });
 
   describe("G5 — no metered rows with cost=0 and tokens>0", () => {
