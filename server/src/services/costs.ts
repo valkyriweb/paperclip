@@ -1,9 +1,91 @@
 import { and, desc, eq, gte, isNotNull, isNull, lt, lte, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { Db } from "@paperclipai/db";
-import { activityLog, agents, companies, costEvents, heartbeatRuns, issues, projects } from "@paperclipai/db";
+import { activityLog, agents, companies, costEvents, heartbeatRuns, issues, modelPricing, projects } from "@paperclipai/db";
 import { notFound, unprocessable } from "../errors.js";
 import { budgetService, type BudgetServiceHooks } from "./budgets.js";
+
+/**
+ * Transport-style providers whose cost should be priced as if they were the
+ * underlying billing provider. claude-bridge proxies Anthropic models through
+ * Luke's local subscription; attribution stays as 'claude-bridge' on the
+ * cost_events row, but the pricing lookup falls back to 'anthropic'.
+ */
+const PRICING_PROVIDER_ALIASES: Record<string, string> = {
+  "claude-bridge": "anthropic",
+};
+
+/**
+ * Resolve the canonical `model_pricing` provider key for a cost_events row.
+ */
+function pricingProviderFor(provider: string): string {
+  return PRICING_PROVIDER_ALIASES[provider] ?? provider;
+}
+
+/**
+ * Look up the latest `model_pricing` row whose effective_at <= occurredAt for
+ * the given (provider, model). Returns null when there is no matching row.
+ *
+ * Caller is responsible for transport-aliasing via `pricingProviderFor`.
+ */
+async function lookupPricing(
+  db: Db,
+  provider: string,
+  model: string,
+  occurredAt: Date,
+): Promise<{
+  inputCpmMicros: number;
+  cachedInputCpmMicros: number;
+  cacheWriteCpmMicros: number;
+  outputCpmMicros: number;
+} | null> {
+  const [row] = await db
+    .select({
+      inputCpmMicros: modelPricing.inputCpmMicros,
+      cachedInputCpmMicros: modelPricing.cachedInputCpmMicros,
+      cacheWriteCpmMicros: modelPricing.cacheWriteCpmMicros,
+      outputCpmMicros: modelPricing.outputCpmMicros,
+    })
+    .from(modelPricing)
+    .where(
+      and(
+        eq(modelPricing.provider, provider),
+        eq(modelPricing.model, model),
+        lte(modelPricing.effectiveAt, occurredAt),
+      ),
+    )
+    .orderBy(desc(modelPricing.effectiveAt))
+    .limit(1);
+  return row ?? null;
+}
+
+/**
+ * Compute the cents cost of a token-priced event from a model_pricing row.
+ *
+ * Pricing rates are stored as `cpm_micros` = micro-cents per *million* tokens.
+ * Multiplying by raw token count therefore gives `(micro-cents × tokens) /
+ * million-token`, which is in units of micro-cents × 1e6. Divide by 1e6 to
+ * collapse the "per million tokens" factor, then by 1e6 again to convert
+ * micro-cents → cents — i.e. divide by 1e12 total.
+ *
+ * Sanity check: 1_000_000 input tokens at Anthropic Sonnet input rate
+ * ($3/Mtok → 300_000_000 cpm_micros) should cost 300¢ = $3.
+ *   (1e6 × 3e8) / 1e12 = 3e14 / 1e12 = 300. ✓
+ *
+ * Math.round before truncation so small charges (sub-cent) round to nearest
+ * cent rather than getting clobbered to 0.
+ */
+export function computeCostCents(
+  tokens: { inputTokens: number; cachedInputTokens: number; cacheCreationInputTokens: number; outputTokens: number },
+  pricing: { inputCpmMicros: number; cachedInputCpmMicros: number; cacheWriteCpmMicros: number; outputCpmMicros: number },
+): number {
+  const microCentTokenProduct =
+    tokens.inputTokens * pricing.inputCpmMicros +
+    tokens.cachedInputTokens * pricing.cachedInputCpmMicros +
+    tokens.cacheCreationInputTokens * pricing.cacheWriteCpmMicros +
+    tokens.outputTokens * pricing.outputCpmMicros;
+  return Math.max(0, Math.round(microCentTokenProduct / 1e12));
+}
 
 export interface CostDateRange {
   from?: Date;
@@ -51,7 +133,12 @@ async function getMonthlySpendTotal(
 export function costService(db: Db, budgetHooks: BudgetServiceHooks = {}) {
   const budgets = budgetService(db, budgetHooks);
   return {
-    createEvent: async (companyId: string, data: Omit<typeof costEvents.$inferInsert, "companyId">) => {
+    createEvent: async (
+      companyId: string,
+      data: Omit<typeof costEvents.$inferInsert, "companyId" | "costCents"> & {
+        costCents?: number | null;
+      },
+    ) => {
       const agent = await db
         .select()
         .from(agents)
@@ -63,17 +150,72 @@ export function costService(db: Db, budgetHooks: BudgetServiceHooks = {}) {
         throw unprocessable("Agent does not belong to company");
       }
 
-      const event = await db
-        .insert(costEvents)
-        .values({
-          ...data,
-          companyId,
-          biller: data.biller ?? data.provider,
-          billingType: data.billingType ?? "unknown",
-          cachedInputTokens: data.cachedInputTokens ?? 0,
-        })
-        .returning()
-        .then((rows) => rows[0]);
+      const billingType = data.billingType ?? "unknown";
+      const inputTokens = data.inputTokens ?? 0;
+      const cachedInputTokens = data.cachedInputTokens ?? 0;
+      const cacheCreationInputTokens = data.cacheCreationInputTokens ?? 0;
+      const outputTokens = data.outputTokens ?? 0;
+      const occurredAt = data.occurredAt instanceof Date ? data.occurredAt : new Date(data.occurredAt);
+
+      // Resolve costCents: subscription rows always 0; explicit numeric input wins;
+      // otherwise look up the model_pricing row for (aliased provider, model, time)
+      // and compute server-side. Falls back to 0 when no pricing row matches —
+      // the dashboard then surfaces the gap (zero cost but non-zero tokens) so
+      // an operator can add a manual pricing entry.
+      let costCents: number;
+      if (billingType === "subscription_included") {
+        costCents = 0;
+      } else if (typeof data.costCents === "number" && data.costCents > 0) {
+        costCents = data.costCents;
+      } else {
+        const pricing = await lookupPricing(db, pricingProviderFor(data.provider), data.model, occurredAt);
+        costCents = pricing
+          ? computeCostCents(
+              { inputTokens, cachedInputTokens, cacheCreationInputTokens, outputTokens },
+              pricing,
+            )
+          : (typeof data.costCents === "number" ? data.costCents : 0);
+      }
+
+      const insertValues = {
+        ...data,
+        companyId,
+        biller: data.biller ?? data.provider,
+        billingType,
+        cachedInputTokens,
+        cacheCreationInputTokens,
+        costCents,
+      };
+
+      // Two write paths:
+      //  - billingCode present → ON CONFLICT (company_id, billing_code) DO UPDATE
+      //    against the partial unique index added in migration 0084. Retried
+      //    emissions from a remote source replay onto the same row instead of
+      //    double-inserting.
+      //  - billingCode absent (legacy heartbeat path) → plain INSERT, semantics
+      //    unchanged.
+      const insertBuilder = db.insert(costEvents).values(insertValues);
+      const event = await (data.billingCode
+        ? insertBuilder
+            .onConflictDoUpdate({
+              target: [costEvents.companyId, costEvents.billingCode],
+              targetWhere: sql`${costEvents.billingCode} IS NOT NULL`,
+              set: {
+                inputTokens,
+                cachedInputTokens,
+                cacheCreationInputTokens,
+                outputTokens,
+                costCents,
+                billingType,
+                biller: insertValues.biller,
+                provider: data.provider,
+                model: data.model,
+                occurredAt,
+              },
+            })
+            .returning()
+            .then((rows) => rows[0])
+        : insertBuilder.returning().then((rows) => rows[0]));
 
       const [agentMonthSpend, companyMonthSpend] = await Promise.all([
         getMonthlySpendTotal(db, { companyId, agentId: event.agentId }),
