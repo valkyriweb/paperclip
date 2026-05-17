@@ -30,6 +30,7 @@ import {
   gateG2b,
   gateG3,
   gateG4,
+  gateG5,
   gateG6,
   type Args,
 } from "./verify-budget-rollout.js";
@@ -195,6 +196,60 @@ describe("verify-budget-rollout gates", () => {
       }));
       const r = await gateG2b(db, baseArgs, [companyId]);
       assert.equal(r.passed, false);
+    });
+  });
+
+  describe("G5 — no metered rows with cost=0 and tokens>0", () => {
+    it("passes when every metered row has a non-zero cost", async () => {
+      await db.insert(costEvents).values(makeCostEvent({
+        billingType: "metered_api",
+        costCents: 5,
+        inputTokens: 1000,
+        outputTokens: 100,
+      }));
+      const r = await gateG5(db, baseArgs, [companyId]);
+      assert.equal(r.passed, true);
+    });
+
+    it("ignores subscription_included rows (legitimately zero)", async () => {
+      await db.insert(costEvents).values(makeCostEvent({
+        biller: "claude-code",
+        billingType: "subscription_included",
+        costCents: 0,
+        inputTokens: 1000,
+        outputTokens: 100,
+      }));
+      const r = await gateG5(db, baseArgs, [companyId]);
+      assert.equal(r.passed, true);
+    });
+
+    it("ignores zero-token metered rows (legitimately zero — handshake/metadata)", async () => {
+      await db.insert(costEvents).values(makeCostEvent({
+        billingType: "metered_api",
+        costCents: 0,
+        inputTokens: 0,
+        cachedInputTokens: 0,
+        cacheCreationInputTokens: 0,
+        outputTokens: 0,
+      }));
+      const r = await gateG5(db, baseArgs, [companyId]);
+      assert.equal(r.passed, true);
+    });
+
+    it("fails when a metered row has tokens but no resolved price", async () => {
+      await db.insert(costEvents).values(makeCostEvent({
+        biller: "anthropic",
+        model: "claude-future-unreleased",
+        billingType: "metered_api",
+        costCents: 0,
+        inputTokens: 1000,
+        outputTokens: 100,
+        billingCode: "missing-pricing-1",
+      }));
+      const r = await gateG5(db, baseArgs, [companyId]);
+      assert.equal(r.passed, false);
+      assert.ok(r.detail.includes("claude-future-unreleased"));
+      assert.ok(r.detail.includes("add a model_pricing row"));
     });
   });
 
