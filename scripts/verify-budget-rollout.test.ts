@@ -173,6 +173,25 @@ describe("verify-budget-rollout gates", () => {
       assert.ok(r.detail.includes("anthropic"));
     });
 
+    it("respects --unknown-threshold (does not fail until threshold exceeded)", async () => {
+      // Insert 3 unknown anthropic rows. With threshold=2, gate should pass
+      // (3 is not > 2 only if we count `>`; query uses `HAVING COUNT(*) > N`,
+      // so threshold 2 trips at 3 rows; threshold 3 trips at 4 rows).
+      for (let i = 0; i < 3; i++) {
+        await db.insert(costEvents).values(makeCostEvent({
+          biller: "anthropic",
+          billingType: "unknown",
+          idempotencyKey: `unk-${i}`,
+        }));
+      }
+      const passing = await gateG2(db, { ...baseArgs, unknownThreshold: 3 }, [companyId]);
+      assert.equal(passing.passed, true, `threshold 3 with 3 rows should pass (HAVING > N strictly), got: ${passing.detail}`);
+
+      const failing = await gateG2(db, { ...baseArgs, unknownThreshold: 2 }, [companyId]);
+      assert.equal(failing.passed, false, `threshold 2 with 3 rows should fail`);
+      assert.ok(failing.detail.includes("anthropic"));
+    });
+
     it("excludes hybrid claude-bridge from the check", async () => {
       // claude-bridge legitimately stays unknown without env signal
       await db.insert(costEvents).values(makeCostEvent({ biller: "claude-bridge", billingType: "unknown" }));
@@ -323,6 +342,33 @@ describe("verify-budget-rollout gates", () => {
 
   describe("G3 — agent + project policies exist", () => {
     it("reports no policies when none exist", async () => {
+      const r = await gateG3(db, baseArgs, [companyId]);
+      assert.equal(r.passed, false);
+      assert.ok(r.detail.includes("no active budget policies"));
+    });
+
+    it("ignores inactive policies (is_active=false) and zero-amount policies", async () => {
+      // Both rows must be skipped by the gate's WHERE clause; without them
+      // the gate must still report "no active policies". Locks in the
+      // is_active = true AND amount > 0 filter.
+      await db.insert(budgetPolicies).values({
+        companyId,
+        scopeType: "agent",
+        scopeId: agentId,
+        metric: "billed_cents",
+        windowKind: "calendar_month_utc",
+        amount: 10000,
+        isActive: false, // <-- inactive: must be ignored
+      });
+      await db.insert(budgetPolicies).values({
+        companyId,
+        scopeType: "project",
+        scopeId: projectId,
+        metric: "billed_cents",
+        windowKind: "calendar_month_utc",
+        amount: 0, // <-- zero amount: must be ignored
+        isActive: true,
+      });
       const r = await gateG3(db, baseArgs, [companyId]);
       assert.equal(r.passed, false);
       assert.ok(r.detail.includes("no active budget policies"));
