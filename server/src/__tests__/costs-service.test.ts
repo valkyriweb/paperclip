@@ -9,6 +9,9 @@ import {
   companies,
   agents,
   activityLog,
+  approvals,
+  budgetPolicies,
+  budgetIncidents,
   costEvents,
   financeEvents,
   heartbeatRuns,
@@ -901,6 +904,12 @@ describeEmbeddedPostgres("costService.createEvent server-side pricing", () => {
   });
 
   afterEach(async () => {
+    // Order matters — budget_incidents → approvals → budget_policies, then
+    // generic tables, then companies last. Q18 replay test creates a hard
+    // incident which inserts an approvals row referencing the company.
+    await db.delete(budgetIncidents);
+    await db.delete(approvals);
+    await db.delete(budgetPolicies);
     await db.delete(costEvents);
     await db.delete(activityLog);
     await db.delete(agents);
@@ -1115,6 +1124,95 @@ describeEmbeddedPostgres("costService.createEvent server-side pricing", () => {
     } as any);
     expect(event.billingType).toBe("subscription_included");
     expect(event.costCents).toBe(0); // subscription override
+  });
+
+  it("Q18: replay of same billing_code does NOT re-evaluate budget (no duplicate activity log)", async () => {
+    // Q18 spec: gate evaluateCostEvent on inserted=true. Replays carry the
+    // same final usage numbers from every emitter we ship, so re-evaluating
+    // wastes work AND spams activity_log with duplicate threshold-crossed
+    // entries (createIncidentIfNeeded itself is dedup-safe, but the log
+    // write is unconditional in the evaluator).
+    //
+    // Set a $1 hard-stop on the agent, post a $3 cost event with a stable
+    // billing_code (crosses both thresholds), assert one of each activity
+    // log row, then replay the SAME billing_code and assert no new rows.
+    const policyId = randomUUID();
+    await db.insert(budgetPolicies).values({
+      id: policyId,
+      companyId,
+      scopeType: "agent",
+      scopeId: agentId,
+      metric: "billed_cents",
+      windowKind: "calendar_month_utc",
+      amount: 100, // $1 hard-stop
+      warnPercent: 80,
+      hardStopEnabled: true,
+      notifyEnabled: true,
+      isActive: true,
+    });
+
+    const billingCode = `q18-replay-test:${randomUUID()}`;
+    const eventBody = {
+      agentId,
+      provider: "anthropic",
+      biller: "anthropic",
+      billingType: "metered_api",
+      model: "claude-sonnet-4-6",
+      inputTokens: 1_000_000, // → 300¢ > $1 hard-stop → fires both soft + hard
+      outputTokens: 0,
+      cachedInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      occurredAt: new Date("2026-05-15T00:00:00.000Z"),
+      billingCode,
+    } as any;
+
+    // First insert → evaluator fires, opens incidents, writes activity log.
+    const first = await costs.createEvent(companyId, eventBody);
+    expect(first.costCents).toBe(300);
+    expect((first as any).inserted).toBeUndefined(); // synthetic column stripped
+
+    const incidentsAfterFirst = await db
+      .select()
+      .from(budgetIncidents)
+      .where(eq(budgetIncidents.policyId, policyId));
+    expect(incidentsAfterFirst.length).toBeGreaterThanOrEqual(1);
+
+    const activityAfterFirst = await db
+      .select()
+      .from(activityLog)
+      .where(eq(activityLog.companyId, companyId));
+    const thresholdRowsAfterFirst = activityAfterFirst.filter(
+      (r) =>
+        r.action === "budget.soft_threshold_crossed" ||
+        r.action === "budget.hard_threshold_crossed",
+    );
+    expect(thresholdRowsAfterFirst.length).toBe(2); // one soft + one hard
+
+    // Replay: same billing_code, same body → ON CONFLICT DO UPDATE on the
+    // same row. Q18 gate must skip budget evaluation entirely.
+    const second = await costs.createEvent(companyId, eventBody);
+    expect(second.id).toBe(first.id); // same row, not a duplicate insert
+
+    const incidentsAfterSecond = await db
+      .select()
+      .from(budgetIncidents)
+      .where(eq(budgetIncidents.policyId, policyId));
+    // Same count (createIncidentIfNeeded would have deduped even without the
+    // gate, but we still want to be sure).
+    expect(incidentsAfterSecond.length).toBe(incidentsAfterFirst.length);
+
+    const activityAfterSecond = await db
+      .select()
+      .from(activityLog)
+      .where(eq(activityLog.companyId, companyId));
+    const thresholdRowsAfterSecond = activityAfterSecond.filter(
+      (r) =>
+        r.action === "budget.soft_threshold_crossed" ||
+        r.action === "budget.hard_threshold_crossed",
+    );
+    // The critical assertion: replay did NOT add another activity log row.
+    // Without the Q18 gate this would be 4 (2 from each evaluator call).
+    expect(thresholdRowsAfterSecond.length).toBe(2);
   });
 
   it("server-side classifier leaves unknown for hybrid providers without env signal", async () => {
