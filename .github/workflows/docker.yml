@@ -14,10 +14,7 @@ permissions:
 
 jobs:
   build-and-push:
-    # Bermont fork: build on self-hosted Mac mini (M1) for paperclip-specific
-    # workflows. amd64-only — the lue-kube cluster runs amd64 and arm64
-    # emulation on M1 (or on hosted runners) doubles build time for no gain.
-    runs-on: ${{ github.ref == 'refs/heads/bermont' && fromJSON('["self-hosted", "macOS", "ARM64", "mac-mini", "paperclip"]') || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 60
     concurrency:
       group: docker-${{ github.ref }}
