@@ -1010,6 +1010,58 @@ describeEmbeddedPostgres("costService.createEvent server-side pricing", () => {
     expect(event.costCents).toBe(30 + 375); // 405
   });
 
+  it("matches pricing rows across dot/dash model-name variants (gpt-5.5 ↔ gpt-5-5)", async () => {
+    // Seed the dash-form row that build-pricing-seed.py produces from
+    // vendor_model_id="openai/gpt-5.5".
+    await db
+      .insert(modelPricing)
+      .values({
+        provider: "openai",
+        model: "gpt-5-5", // <-- dash form, as stored by the seed
+        effectiveAt: new Date("2026-05-01T00:00:00.000Z"),
+        inputCpmMicros: 125_000_000, // \$1.25/Mtok input
+        cachedInputCpmMicros: 12_500_000, // \$0.125/Mtok cache read
+        cacheWriteCpmMicros: 0,
+        outputCpmMicros: 1_000_000_000, // \$10/Mtok output
+        source: "test",
+      })
+      .onConflictDoNothing();
+
+    // Emitter sends the dot form (e.g. Multica forwarder relaying Pi's
+    // model name verbatim). Pricing lookup must collapse `.` to `-` and
+    // match the seed row.
+    const dotForm = await costs.createEvent(companyId, {
+      agentId,
+      provider: "openai",
+      biller: "multica",
+      billingType: "metered_api",
+      model: "gpt-5.5", // <-- dot form on the wire
+      inputTokens: 1_000_000,
+      cachedInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      outputTokens: 100_000,
+      occurredAt: new Date("2026-05-15T00:00:00.000Z"),
+    } as any);
+    // 1M input @ \$1.25 = 125¢; 100k output @ \$10/Mtok = 100¢; total 225¢.
+    expect(dotForm.costCents).toBe(225);
+
+    // Emitter sends the dash form (e.g. heartbeat path, already-normalized
+    // model registries). Same lookup must still match.
+    const dashForm = await costs.createEvent(companyId, {
+      agentId,
+      provider: "openai",
+      biller: "multica",
+      billingType: "metered_api",
+      model: "gpt-5-5", // <-- dash form on the wire
+      inputTokens: 1_000_000,
+      cachedInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      outputTokens: 100_000,
+      occurredAt: new Date("2026-05-15T00:00:00.000Z"),
+    } as any);
+    expect(dashForm.costCents).toBe(225);
+  });
+
   it("falls back to 0 when no pricing row matches", async () => {
     const event = await costs.createEvent(companyId, {
       agentId,

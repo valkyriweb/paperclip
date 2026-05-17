@@ -71,10 +71,36 @@ function pricingProviderFor(provider: string): string {
 }
 
 /**
+ * Normalize a model name for pricing lookup by collapsing `.` to `-`.
+ *
+ * The vercel-ai-gateway seed stores models as `gpt-5-5` / `claude-3-5-haiku`
+ * (dash form) even though their canonical `vendor_model_id` uses dots
+ * (`openai/gpt-5.5`, `anthropic/claude-3.5-haiku`). 86 of 180 seed rows hit
+ * this transform. Emitters in the wild send either form depending on which
+ * SDK or model registry they read from:
+ *   - Multica forwarder relays whatever Pi reports (often the dot form)
+ *   - Claude-bridge relays whatever Anthropic returns (sometimes either)
+ *   - Heartbeat path historically sent the seed (dash) form
+ *
+ * Rather than force every emitter to know the seed's exact transform, we
+ * normalize both sides of the comparison at lookup time. Strict eq on a
+ * computed expression — `replace(model, '.', '-') = $normalized` — so the
+ * single query catches all four pairings (dot/dot, dot/dash, dash/dot,
+ * dash/dash) without a fallback round-trip.
+ *
+ * Discovered 2026-05-17 during smoke #5 (provider=pi, model=gpt-5.5 priced
+ * at 0¢ despite seed row "gpt-5-5" existing).
+ */
+function normalizeModelForPricing(model: string): string {
+  return model.replace(/\./g, "-");
+}
+
+/**
  * Look up the latest `model_pricing` row whose effective_at <= occurredAt for
  * the given (provider, model). Returns null when there is no matching row.
  *
  * Caller is responsible for transport-aliasing via `pricingProviderFor`.
+ * Model name comparison is dot/dash-insensitive (see `normalizeModelForPricing`).
  */
 async function lookupPricing(
   db: Db,
@@ -87,6 +113,7 @@ async function lookupPricing(
   cacheWriteCpmMicros: number;
   outputCpmMicros: number;
 } | null> {
+  const normalizedModel = normalizeModelForPricing(model);
   const [row] = await db
     .select({
       inputCpmMicros: modelPricing.inputCpmMicros,
@@ -98,7 +125,7 @@ async function lookupPricing(
     .where(
       and(
         eq(modelPricing.provider, provider),
-        eq(modelPricing.model, model),
+        sql`replace(${modelPricing.model}, '.', '-') = ${normalizedModel}`,
         lte(modelPricing.effectiveAt, occurredAt),
       ),
     )
