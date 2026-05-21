@@ -1,6 +1,7 @@
 import type {
   AdapterExecutionContext,
   AdapterExecutionResult,
+  AdapterModel,
   AdapterRuntimeServiceReport,
 } from "@paperclipai/adapter-utils";
 import {
@@ -84,6 +85,14 @@ type GatewayClientOptions = {
 type GatewayClientRequestOptions = {
   timeoutMs: number;
   expectFinal?: boolean;
+};
+
+type OpenClawGatewayModelEntry = {
+  id?: unknown;
+  key?: unknown;
+  name?: unknown;
+  provider?: unknown;
+  alias?: unknown;
 };
 
 const PROTOCOL_VERSION = 4;
@@ -548,6 +557,97 @@ function resolveTransportProfilePaperclipApiUrl(profile: string | null): string 
     return nonEmpty(process.env.PAPERCLIP_INTERNAL_API_URL) ?? CLUSTER_PAPERCLIP_API_URL;
   }
   return null;
+}
+
+function resolveGatewayUrl(config: Record<string, unknown>): string {
+  const transportProfile = nonEmpty(config.transportProfile);
+  return resolveTransportProfileUrl(transportProfile) ?? asString(config.url, "").trim();
+}
+
+function buildGatewayConnectParams(input: {
+  nonce: string;
+  clientId: string;
+  clientVersion: string;
+  clientMode: string;
+  role: string;
+  scopes: string[];
+  authToken: string | null;
+  password: string | null;
+  deviceToken: string | null;
+  deviceFamily: string | null;
+  deviceIdentity: GatewayDeviceIdentity | null;
+}): Record<string, unknown> {
+  const signedAtMs = Date.now();
+  const connectParams: Record<string, unknown> = {
+    minProtocol: MIN_PROTOCOL_VERSION,
+    maxProtocol: PROTOCOL_VERSION,
+    client: {
+      id: input.clientId,
+      version: input.clientVersion,
+      platform: process.platform,
+      ...(input.deviceFamily ? { deviceFamily: input.deviceFamily } : {}),
+      mode: input.clientMode,
+    },
+    role: input.role,
+    scopes: input.scopes,
+    auth:
+      input.authToken || input.password || input.deviceToken
+        ? {
+            ...(input.authToken ? { token: input.authToken } : {}),
+            ...(input.deviceToken ? { deviceToken: input.deviceToken } : {}),
+            ...(input.password ? { password: input.password } : {}),
+          }
+        : undefined,
+  };
+
+  if (input.deviceIdentity) {
+    const payload = buildDeviceAuthPayloadV3({
+      deviceId: input.deviceIdentity.deviceId,
+      clientId: input.clientId,
+      clientMode: input.clientMode,
+      role: input.role,
+      scopes: input.scopes,
+      signedAtMs,
+      token: input.authToken,
+      nonce: input.nonce,
+      platform: process.platform,
+      deviceFamily: input.deviceFamily,
+    });
+    connectParams.device = {
+      id: input.deviceIdentity.deviceId,
+      publicKey: input.deviceIdentity.publicKeyRawBase64Url,
+      signature: signDevicePayload(input.deviceIdentity.privateKeyPem, payload),
+      signedAt: signedAtMs,
+      nonce: input.nonce,
+    };
+  }
+
+  return connectParams;
+}
+
+function normalizeOpenClawGatewayModel(entry: OpenClawGatewayModelEntry): AdapterModel | null {
+  const key = nonEmpty(entry.key);
+  const provider = nonEmpty(entry.provider) ?? (key?.includes("/") ? key.split("/", 1)[0] : null);
+  const id = nonEmpty(entry.id) ?? (key && provider ? key.slice(provider.length + 1) : null);
+  if (!provider || !id) return null;
+
+  const modelId = `${provider}/${id}`;
+  const displayName = nonEmpty(entry.alias) ?? nonEmpty(entry.name) ?? id;
+  return {
+    id: modelId,
+    label: displayName === id ? modelId : `${displayName} (${modelId})`,
+  };
+}
+
+function dedupeModels(models: AdapterModel[]): AdapterModel[] {
+  const seen = new Set<string>();
+  const result: AdapterModel[] = [];
+  for (const model of models) {
+    if (!model.id || seen.has(model.id)) continue;
+    seen.add(model.id);
+    result.push(model);
+  }
+  return result;
 }
 
 function rawDataToString(data: unknown): string {
@@ -1068,9 +1168,76 @@ function extractResultText(value: unknown): string | null {
   return nonEmpty(record.text) ?? nonEmpty(record.summary) ?? null;
 }
 
+export async function listModels(ctx?: { adapterConfig?: Record<string, unknown> | null }): Promise<AdapterModel[]> {
+  const config = parseObject(ctx?.adapterConfig);
+  const urlValue = resolveGatewayUrl(config);
+  if (!urlValue) return [];
+
+  const parsedUrl = normalizeUrl(urlValue);
+  if (!parsedUrl || (parsedUrl.protocol !== "ws:" && parsedUrl.protocol !== "wss:")) return [];
+
+  const headers = toStringRecord(config.headers);
+  const authToken = resolveAuthToken(config, headers);
+  const password = nonEmpty(config.password);
+  const deviceToken = nonEmpty(config.deviceToken);
+  if (authToken && !headerMapHasIgnoreCase(headers, "authorization")) {
+    headers.authorization = toAuthorizationHeaderValue(authToken);
+  }
+
+  const clientId = nonEmpty(config.clientId) ?? DEFAULT_CLIENT_ID;
+  const clientMode = nonEmpty(config.clientMode) ?? DEFAULT_CLIENT_MODE;
+  const clientVersion = nonEmpty(config.clientVersion) ?? DEFAULT_CLIENT_VERSION;
+  const role = nonEmpty(config.role) ?? DEFAULT_ROLE;
+  const scopes = normalizeScopes(config.scopes);
+  const deviceFamily = nonEmpty(config.deviceFamily);
+  const disableDeviceAuth = parseBoolean(config.disableDeviceAuth, false);
+  const connectTimeoutMs = 10_000;
+
+  const client = new GatewayWsClient({
+    url: parsedUrl.toString(),
+    headers,
+    onEvent: () => undefined,
+    onLog: async () => undefined,
+  });
+
+  try {
+    const deviceIdentity = disableDeviceAuth ? null : resolveDeviceIdentity(config);
+    await client.connect(
+      (nonce) => buildGatewayConnectParams({
+        nonce,
+        clientId,
+        clientVersion,
+        clientMode,
+        role,
+        scopes,
+        authToken,
+        password,
+        deviceToken,
+        deviceFamily,
+        deviceIdentity,
+      }),
+      connectTimeoutMs,
+    );
+    const payload = await client.request<{ models?: unknown }>(
+      "models.list",
+      { view: "configured" },
+      { timeoutMs: connectTimeoutMs },
+    );
+    const models = Array.isArray(payload.models) ? payload.models : [];
+    return dedupeModels(
+      models
+        .map((entry) => normalizeOpenClawGatewayModel(parseObject(entry) as OpenClawGatewayModelEntry))
+        .filter((model): model is AdapterModel => Boolean(model)),
+    );
+  } catch {
+    return [];
+  } finally {
+    client.close();
+  }
+}
+
 export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExecutionResult> {
-  const transportProfile = nonEmpty(ctx.config.transportProfile);
-  const urlValue = resolveTransportProfileUrl(transportProfile) ?? asString(ctx.config.url, "").trim();
+  const urlValue = resolveGatewayUrl(ctx.config);
   if (!urlValue) {
     return {
       exitCode: 1,
@@ -1160,6 +1327,16 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     idempotencyKey: ctx.runId,
   };
   delete agentParams.text;
+  const configuredModel = nonEmpty(ctx.config.model);
+  if (configuredModel) {
+    const separatorIndex = configuredModel.indexOf("/");
+    if (separatorIndex > 0 && separatorIndex < configuredModel.length - 1) {
+      agentParams.provider = configuredModel.slice(0, separatorIndex);
+      agentParams.model = configuredModel.slice(separatorIndex + 1);
+    } else {
+      agentParams.model = configuredModel;
+    }
+  }
   agentParams.paperclip = paperclipPayload;
 
   const configuredAgentId = nonEmpty(ctx.config.agentId);
@@ -1281,53 +1458,22 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 
       await ctx.onLog("stdout", `[openclaw-gateway] connecting to ${parsedUrl.toString()}\n`);
 
-      const hello = await client.connect((nonce) => {
-        const signedAtMs = Date.now();
-        const connectParams: Record<string, unknown> = {
-          minProtocol: MIN_PROTOCOL_VERSION,
-          maxProtocol: PROTOCOL_VERSION,
-          client: {
-            id: clientId,
-            version: clientVersion,
-            platform: process.platform,
-            ...(deviceFamily ? { deviceFamily } : {}),
-            mode: clientMode,
-          },
+      const hello = await client.connect(
+        (nonce) => buildGatewayConnectParams({
+          nonce,
+          clientId,
+          clientVersion,
+          clientMode,
           role,
           scopes,
-          auth:
-            authToken || password || deviceToken
-              ? {
-                  ...(authToken ? { token: authToken } : {}),
-                  ...(deviceToken ? { deviceToken } : {}),
-                  ...(password ? { password } : {}),
-                }
-              : undefined,
-        };
-
-        if (deviceIdentity) {
-          const payload = buildDeviceAuthPayloadV3({
-            deviceId: deviceIdentity.deviceId,
-            clientId,
-            clientMode,
-            role,
-            scopes,
-            signedAtMs,
-            token: authToken,
-            nonce,
-            platform: process.platform,
-            deviceFamily,
-          });
-          connectParams.device = {
-            id: deviceIdentity.deviceId,
-            publicKey: deviceIdentity.publicKeyRawBase64Url,
-            signature: signDevicePayload(deviceIdentity.privateKeyPem, payload),
-            signedAt: signedAtMs,
-            nonce,
-          };
-        }
-        return connectParams;
-      }, connectTimeoutMs);
+          authToken,
+          password,
+          deviceToken,
+          deviceFamily,
+          deviceIdentity,
+        }),
+        connectTimeoutMs,
+      );
 
       await ctx.onLog(
         "stdout",

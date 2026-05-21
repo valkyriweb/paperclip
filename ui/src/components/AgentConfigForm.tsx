@@ -395,9 +395,15 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
   );
 
   // Fetch adapter models for the effective adapter type
+  const modelListAgentId = isCreate ? null : props.agent.id;
   const modelQueryKey = selectedCompanyId
-    ? queryKeys.agents.adapterModels(selectedCompanyId, adapterType, currentDefaultEnvironmentId || null)
-    : ["agents", "none", "adapter-models", adapterType];
+    ? queryKeys.agents.adapterModels(
+        selectedCompanyId,
+        adapterType,
+        currentDefaultEnvironmentId || null,
+        modelListAgentId,
+      )
+    : ["agents", "none", "adapter-models", adapterType, modelListAgentId];
   const {
     data: fetchedModels,
     error: fetchedModelsError,
@@ -405,6 +411,7 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
     queryKey: modelQueryKey,
     queryFn: () => agentsApi.adapterModels(selectedCompanyId!, adapterType, {
       environmentId: currentDefaultEnvironmentId || null,
+      agentId: modelListAgentId,
     }),
     enabled: Boolean(selectedCompanyId),
   });
@@ -577,7 +584,10 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
     setRefreshingModels(true);
     setRefreshModelsError(null);
     try {
-      const refreshed = await agentsApi.adapterModels(selectedCompanyId, adapterType, { refresh: true });
+      const refreshed = await agentsApi.adapterModels(selectedCompanyId, adapterType, {
+        refresh: true,
+        agentId: modelListAgentId,
+      });
       queryClient.setQueryData(modelQueryKey, refreshed);
     } catch (error) {
       setRefreshModelsError(error instanceof Error ? error.message : "Failed to refresh adapter models.");
@@ -1055,7 +1065,7 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                       return result.data?.model ?? null;
                     }}
                 onRefreshModels={
-                  adapterType === "codex_local" || adapterType === "acpx_local"
+                  adapterType === "codex_local" || adapterType === "acpx_local" || adapterType === "openclaw_gateway"
                     ? handleRefreshModels
                     : undefined
                 }

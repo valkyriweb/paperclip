@@ -1377,6 +1377,12 @@ export function agentRoutes(
       ? ["1", "true", "yes"].includes(req.query.refresh.toLowerCase())
       : false;
     const environmentId = asNonEmptyString(req.query.environmentId);
+    const agentId = asNonEmptyString(req.query.agentId);
+    const agent = agentId ? await svc.getById(agentId) : null;
+    if (agentId && (!agent || agent.companyId !== companyId || agent.adapterType !== type)) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
     const environment = environmentId ? await environmentsSvc.getById(environmentId) : null;
     if (environmentId && (!environment || environment.companyId !== companyId)) {
       res.status(404).json({ error: "Environment not found" });
@@ -1387,9 +1393,10 @@ export function agentRoutes(
       res.json(adapter.models ?? []);
       return;
     }
+    const modelListContext = agent ? { adapterConfig: agent.adapterConfig } : undefined;
     const models = refresh
-      ? await refreshAdapterModels(type)
-      : await listAdapterModels(type);
+      ? await refreshAdapterModels(type, modelListContext)
+      : await listAdapterModels(type, modelListContext);
     res.json(models);
   });
 

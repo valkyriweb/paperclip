@@ -545,9 +545,11 @@ export function NewIssueDialog() {
   const { data: assigneeAdapterModels } = useQuery({
     queryKey:
       effectiveCompanyId && assigneeAdapterType
-        ? queryKeys.agents.adapterModels(effectiveCompanyId, assigneeAdapterType)
-        : ["agents", "none", "adapter-models", assigneeAdapterType ?? "none"],
-    queryFn: () => agentsApi.adapterModels(effectiveCompanyId!, assigneeAdapterType!),
+        ? queryKeys.agents.adapterModels(effectiveCompanyId, assigneeAdapterType, null, selectedAssigneeAgentId)
+        : ["agents", "none", "adapter-models", assigneeAdapterType ?? "none", selectedAssigneeAgentId],
+    queryFn: () => agentsApi.adapterModels(effectiveCompanyId!, assigneeAdapterType!, {
+      agentId: selectedAssigneeAgentId,
+    }),
     enabled: Boolean(effectiveCompanyId) && newIssueOpen && supportsAssigneeOverrides,
   });
 

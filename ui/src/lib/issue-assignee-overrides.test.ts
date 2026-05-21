@@ -40,6 +40,22 @@ describe("buildAssigneeAdapterOverrides", () => {
     ).toEqual({ modelProfile: "cheap" });
   });
 
+  it("custom lane sends OpenClaw provider/model selections", () => {
+    expect(
+      buildAssigneeAdapterOverrides({
+        adapterType: "openclaw_gateway",
+        lane: "custom",
+        modelOverride: "openai-codex/gpt-5.2",
+        thinkingEffortOverride: "high",
+        chrome: true,
+      }),
+    ).toEqual({
+      adapterConfig: {
+        model: "openai-codex/gpt-5.2",
+      },
+    });
+  });
+
   it("custom lane preserves explicit model + thinking effort + chrome overrides", () => {
     expect(
       buildAssigneeAdapterOverrides({

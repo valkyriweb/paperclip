@@ -356,7 +356,7 @@ export interface ServerAdapterModule {
   sessionManagement?: import("./session-compaction.js").AdapterSessionManagement;
   supportsLocalAgentJwt?: boolean;
   models?: AdapterModel[];
-  listModels?: () => Promise<AdapterModel[]>;
+  listModels?: (ctx?: { adapterConfig?: Record<string, unknown> | null }) => Promise<AdapterModel[]>;
   modelProfiles?: AdapterModelProfileDefinition[];
   listModelProfiles?: () => Promise<AdapterModelProfileDefinition[]>;
   /**

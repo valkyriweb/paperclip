@@ -557,12 +557,7 @@ export function IssueProperties({
   const supportsAssigneeOverrides = Boolean(
     assigneeAdapterType && ISSUE_OVERRIDE_ADAPTER_TYPES.has(assigneeAdapterType),
   );
-  const assigneeSupportsCheapLane = Boolean(
-    supportsAssigneeOverrides
-      && (assigneeAdapterType === "claude_local"
-        || assigneeAdapterType === "codex_local"
-        || assigneeAdapterType === "opencode_local"),
-  );
+  const assigneeSupportsCheapLane = supportsAssigneeOverrides;
   const assigneeOverrideLane = overrideLane(assigneeAdapterOverrides);
   const assigneeOverrideAdapterConfig = asRecord(assigneeAdapterOverrides?.adapterConfig);
   const assigneeOverrideModel =
@@ -576,9 +571,11 @@ export function IssueProperties({
   const { data: assigneeAdapterModels } = useQuery({
     queryKey:
       companyId && assigneeAdapterType
-        ? queryKeys.agents.adapterModels(companyId, assigneeAdapterType)
-        : ["agents", "none", "adapter-models", assigneeAdapterType ?? "none"],
-    queryFn: () => agentsApi.adapterModels(companyId!, assigneeAdapterType!),
+        ? queryKeys.agents.adapterModels(companyId, assigneeAdapterType, null, assignee?.id ?? null)
+        : ["agents", "none", "adapter-models", assigneeAdapterType ?? "none", assignee?.id ?? null],
+    queryFn: () => agentsApi.adapterModels(companyId!, assigneeAdapterType!, {
+      agentId: assignee?.id ?? null,
+    }),
     enabled: Boolean(companyId) && showAssigneeAdapterOptions && supportsAssigneeOverrides,
   });
   const { data: assigneeCheapProfiles } = useQuery({

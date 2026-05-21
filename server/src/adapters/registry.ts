@@ -104,11 +104,13 @@ import {
 } from "@paperclipai/adapter-opencode-local";
 import {
   execute as openclawGatewayExecute,
+  listModels as listOpenClawGatewayModels,
   testEnvironment as openclawGatewayTestEnvironment,
 } from "@paperclipai/adapter-openclaw-gateway/server";
 import {
   agentConfigurationDoc as openclawGatewayAgentConfigurationDoc,
   models as openclawGatewayModels,
+  modelProfiles as openclawGatewayModelProfiles,
 } from "@paperclipai/adapter-openclaw-gateway";
 import { listCodexModels, refreshCodexModels } from "./codex-models.js";
 import { listCursorModels } from "./cursor-models.js";
@@ -386,6 +388,8 @@ const openclawGatewayAdapter: ServerAdapterModule = {
   execute: openclawGatewayExecute,
   testEnvironment: openclawGatewayTestEnvironment,
   models: openclawGatewayModels,
+  listModels: listOpenClawGatewayModels,
+  modelProfiles: openclawGatewayModelProfiles,
   supportsLocalAgentJwt: false,
   supportsInstructionsBundle: false,
   requiresMaterializedRuntimeSkills: false,
@@ -652,17 +656,23 @@ export function getServerAdapter(type: string): ServerAdapterModule {
   return findActiveServerAdapter(type) ?? processAdapter;
 }
 
-export async function listAdapterModels(type: string): Promise<{ id: string; label: string }[]> {
+export async function listAdapterModels(
+  type: string,
+  ctx?: { adapterConfig?: Record<string, unknown> | null },
+): Promise<{ id: string; label: string }[]> {
   const adapter = findActiveServerAdapter(type);
   if (!adapter) return [];
   if (adapter.listModels) {
-    const discovered = await adapter.listModels();
+    const discovered = await adapter.listModels(ctx);
     if (discovered.length > 0) return discovered;
   }
   return adapter.models ?? [];
 }
 
-export async function refreshAdapterModels(type: string): Promise<{ id: string; label: string }[]> {
+export async function refreshAdapterModels(
+  type: string,
+  ctx?: { adapterConfig?: Record<string, unknown> | null },
+): Promise<{ id: string; label: string }[]> {
   const adapter = findActiveServerAdapter(type);
   if (!adapter) return [];
   if (adapter.refreshModels) {
@@ -670,7 +680,7 @@ export async function refreshAdapterModels(type: string): Promise<{ id: string; 
     if (refreshed.length > 0) return refreshed;
   }
   if (adapter.listModels) {
-    const discovered = await adapter.listModels();
+    const discovered = await adapter.listModels(ctx);
     if (discovered.length > 0) return discovered;
   }
   return adapter.models ?? [];

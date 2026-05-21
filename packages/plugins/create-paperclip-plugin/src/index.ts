@@ -734,6 +734,12 @@ function runCli() {
   console.log(`Created plugin scaffold at ${out}`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+const modulePath = fileURLToPath(import.meta.url);
+const entrypointPath = process.argv[1] ? path.resolve(process.argv[1]) : "";
+const isCreatePluginEntrypoint =
+  path.resolve(modulePath) === entrypointPath &&
+  modulePath.includes(`${path.sep}create-paperclip-plugin${path.sep}`);
+
+if (isCreatePluginEntrypoint) {
   runCli();
 }

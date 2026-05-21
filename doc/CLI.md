@@ -13,6 +13,18 @@ Use repo script in development:
 pnpm paperclipai --help
 ```
 
+The built/global binary is `paperclipai`. In Docker images, `/usr/local/bin/paperclipai`
+wraps the checked-out app source directly:
+
+```sh
+exec node --import /app/server/node_modules/tsx/dist/loader.mjs /app/cli/src/index.ts "$@"
+```
+
+Do not replace that wrapper with an npm-installed `dist/index.js` shim unless the
+image smoke proves `paperclipai --help` and a safe `paperclipai issue ...` command
+both work. A broken shim can recursively execute itself and fail with
+`SyntaxError: Unexpected identifier 'node'`.
+
 First-time local bootstrap + run:
 
 ```sh
@@ -120,7 +132,19 @@ pnpm paperclipai issue update <issue-id> [--status in_progress] [--comment "..."
 pnpm paperclipai issue comment <issue-id> --body "..." [--reopen]
 pnpm paperclipai issue checkout <issue-id> --agent-id <agent-id> [--expected-statuses todo,backlog,blocked]
 pnpm paperclipai issue release <issue-id>
+pnpm paperclipai issue delete <issue-id> [--yes]
+pnpm paperclipai issue heartbeat-context <issue-id>
+pnpm paperclipai issue comments-list <issue-id>
+pnpm paperclipai issue comment-get <issue-id> <comment-id>
+pnpm paperclipai issue create-child <parent-issue-id> --payload '{...}'
+pnpm paperclipai issue document ...
+pnpm paperclipai issue work-product ...
+pnpm paperclipai issue interaction ...
+pnpm paperclipai issue feedback ...
 ```
+
+`issue --help` is the source of truth for niche subcommands. There is no
+`issue attachment-upload` command in this CLI build.
 
 ## Agent Commands
 
