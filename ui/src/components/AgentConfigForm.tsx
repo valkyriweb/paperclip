@@ -1453,6 +1453,70 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
         </div>
       ) : null}
 
+      {!isLocal && (
+        <div className={cn(!cards && "border-b border-border")}>
+          {cards
+            ? <h3 className="text-sm font-medium mb-3">Runtime configuration</h3>
+            : <div className="px-4 py-2 text-xs font-medium text-muted-foreground">Runtime configuration</div>
+          }
+          <div className={cn(cards ? "border border-border rounded-lg p-4 space-y-3" : "px-4 pb-3 space-y-3")}>
+            {adapterType === "openclaw_gateway" && (
+              <>
+                {supportsModelProfiles && (
+                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Paperclip call model</div>
+                )}
+                <ModelDropdown
+                  models={models}
+                  value={currentModelId}
+                  onChange={(v) =>
+                    isCreate
+                      ? set!({ model: v })
+                      : mark("adapterConfig", "model", v || undefined)
+                  }
+                  open={modelOpen}
+                  onOpenChange={setModelOpen}
+                  allowDefault
+                  groupByProvider
+                  creatable
+                  detectedModel={null}
+                  detectedModelCandidates={[]}
+                  onRefreshModels={handleRefreshModels}
+                  refreshingModels={refreshingModels}
+                  defaultLabel="OpenClaw agent default"
+                  emptyDetectHint="Select a live OpenClaw model or enter provider/model manually."
+                />
+                <p className="text-xs text-muted-foreground">
+                  Used only as the provider/model override when Paperclip calls this OpenClaw agent. It does not edit the agent's OpenClaw runtime configuration.
+                </p>
+                {(refreshModelsError || fetchedModelsError) && (
+                  <p className="text-xs text-destructive">
+                    {refreshModelsError
+                      ?? (fetchedModelsError instanceof Error
+                        ? fetchedModelsError.message
+                        : "Failed to load OpenClaw models.")}
+                  </p>
+                )}
+
+                {supportsModelProfiles && (
+                  <CheapModelSection
+                    enabled={currentCheapEnabled}
+                    model={currentCheapModel}
+                    models={models}
+                    adapterType={adapterType}
+                    adapterDefaultModel={adapterCheapDefaultModel}
+                    onEnabledChange={setCheapEnabled}
+                    onModelChange={setCheapModel}
+                    open={cheapModelOpen}
+                    onOpenChange={setCheapModelOpen}
+                  />
+                )}
+              </>
+            )}
+            <uiAdapter.ConfigFields {...adapterFieldProps} />
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
