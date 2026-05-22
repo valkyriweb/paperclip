@@ -1392,9 +1392,18 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
     const roleCandidates = await db
       .select()
       .from(agents)
-      .where(and(eq(agents.companyId, issue.companyId), inArray(agents.role, ["cto", "ceo"])))
-      .orderBy(sql`case when ${agents.role} = 'cto' then 0 else 1 end`, asc(agents.createdAt));
+      .where(and(eq(agents.companyId, issue.companyId), inArray(agents.role, ["cto", "coo", "ceo"])))
+      .orderBy(
+        sql`case when ${agents.role} = 'cto' then 0 when ${agents.role} = 'coo' then 1 else 2 end`,
+        asc(agents.createdAt),
+      );
     candidateIds.push(...roleCandidates.map((agent) => agent.id));
+    // The assignee is intentionally retained as a last-resort candidate. The
+    // downstream code at ~L1949 uses recoveryAction.ownerAgentId === assignee
+    // as a signal to re-wake the stranded agent for a bounded retry (with
+    // attemptCount tracking) before escalating to the board. Removing the
+    // fallback short-circuits that retry loop and rushes board escalation;
+    // the behaviour is covered by heartbeat-process-recovery.test.ts.
     if (issue.assigneeAgentId) candidateIds.push(issue.assigneeAgentId);
 
     const seen = new Set<string>();
