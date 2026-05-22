@@ -87,6 +87,8 @@ interface IssueDraft {
   assigneeModelOverride: string;
   assigneeThinkingEffort: string;
   assigneeChrome: boolean;
+  startDate?: string;
+  dueDate?: string;
   executionWorkspaceMode?: string;
   selectedExecutionWorkspaceId?: string;
   useIsolatedExecutionWorkspace?: boolean;
@@ -164,6 +166,18 @@ function saveDraft(draft: IssueDraft) {
 
 function clearDraft() {
   localStorage.removeItem(DRAFT_KEY);
+}
+
+function dateInputToIso(value: string) {
+  return value ? new Date(`${value}T00:00:00.000Z`).toISOString() : null;
+}
+
+function formatDateInputLabel(value: string) {
+  if (!value) return "";
+  return new Date(`${value}T00:00:00.000Z`).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
 }
 
 function isTextDocumentFile(file: File) {
@@ -426,6 +440,8 @@ export function NewIssueDialog() {
   const [assigneeModelOverride, setAssigneeModelOverride] = useState("");
   const [assigneeThinkingEffort, setAssigneeThinkingEffort] = useState("");
   const [assigneeChrome, setAssigneeChrome] = useState(false);
+  const [startDate, setStartDate] = useState("");
+  const [dueDate, setDueDate] = useState("");
   const [executionWorkspaceMode, setExecutionWorkspaceMode] = useState<string>("shared_workspace");
   const [selectedExecutionWorkspaceId, setSelectedExecutionWorkspaceId] = useState("");
   const [workMode, setWorkMode] = useState<IssueWorkMode>("standard");
@@ -656,6 +672,8 @@ export function NewIssueDialog() {
       assigneeModelOverride,
       assigneeThinkingEffort,
       assigneeChrome,
+      startDate,
+      dueDate,
       executionWorkspaceMode,
       selectedExecutionWorkspaceId,
       workMode,
@@ -673,6 +691,8 @@ export function NewIssueDialog() {
     assigneeModelOverride,
     assigneeThinkingEffort,
     assigneeChrome,
+    startDate,
+    dueDate,
     executionWorkspaceMode,
     selectedExecutionWorkspaceId,
     workMode,
@@ -710,6 +730,8 @@ export function NewIssueDialog() {
     assigneeModelOverride,
     assigneeThinkingEffort,
     assigneeChrome,
+    startDate,
+    dueDate,
     executionWorkspaceMode,
     selectedExecutionWorkspaceId,
     workMode,
@@ -730,6 +752,8 @@ export function NewIssueDialog() {
     executionWorkspaceDefaultProjectId.current = null;
 
     const draft = loadDraft();
+    setStartDate("");
+    setDueDate("");
     if (newIssueDefaults.parentId) {
       const nextWorkMode = isIssueWorkMode(newIssueDefaults.workMode) ? newIssueDefaults.workMode : "standard";
       const defaultProjectId = newIssueDefaults.projectId ?? "";
@@ -807,6 +831,8 @@ export function NewIssueDialog() {
       setAssigneeModelOverride(draft.assigneeModelOverride ?? "");
       setAssigneeThinkingEffort(draft.assigneeThinkingEffort ?? "");
       setAssigneeChrome(draft.assigneeChrome ?? false);
+      setStartDate(draft.startDate ?? "");
+      setDueDate(draft.dueDate ?? "");
       setExecutionWorkspaceMode(
         hasExplicitExecutionWorkspaceId || hasExplicitExecutionWorkspaceMode
           ? defaultExecutionWorkspaceModeForIssueDefaults(newIssueDefaults, restoredProject)
@@ -903,6 +929,8 @@ export function NewIssueDialog() {
     setAssigneeModelOverride("");
     setAssigneeThinkingEffort("");
     setAssigneeChrome(false);
+    setStartDate("");
+    setDueDate("");
     setExecutionWorkspaceMode("shared_workspace");
     setSelectedExecutionWorkspaceId("");
     setWorkMode("standard");
@@ -930,6 +958,8 @@ export function NewIssueDialog() {
     setAssigneeModelOverride("");
     setAssigneeThinkingEffort("");
     setAssigneeChrome(false);
+    setStartDate("");
+    setDueDate("");
     setExecutionWorkspaceMode("shared_workspace");
     setSelectedExecutionWorkspaceId("");
     setWorkMode("standard");
@@ -990,6 +1020,8 @@ export function NewIssueDialog() {
       ...(newIssueDefaults.goalId ? { goalId: newIssueDefaults.goalId } : {}),
       ...(projectId ? { projectId } : {}),
       ...(projectWorkspaceId ? { projectWorkspaceId } : {}),
+      ...(startDate ? { startDate: dateInputToIso(startDate) } : {}),
+      ...(dueDate ? { dueDate: dateInputToIso(dueDate) } : {}),
       ...(assigneeAdapterOverrides ? { assigneeAdapterOverrides } : {}),
       ...(executionWorkspacePolicy?.enabled ? { executionWorkspacePreference: executionWorkspaceMode } : {}),
       ...(executionWorkspaceMode === "reuse_existing" && selectedExecutionWorkspaceId
@@ -1966,6 +1998,29 @@ export function NewIssueDialog() {
             </PopoverContent>
           </Popover>
 
+          {startDate ? (
+            <button
+              type="button"
+              className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-accent/50 transition-colors"
+              onClick={() => setMoreOpen(true)}
+              title="Start date"
+            >
+              <Calendar className="h-3 w-3" />
+              {formatDateInputLabel(startDate)}
+            </button>
+          ) : null}
+          {dueDate ? (
+            <button
+              type="button"
+              className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-accent/50 transition-colors"
+              onClick={() => setMoreOpen(true)}
+              title="Due date"
+            >
+              <Calendar className="h-3 w-3" />
+              Due {formatDateInputLabel(dueDate)}
+            </button>
+          ) : null}
+
           {/* More (dates) */}
           <Popover open={moreOpen} onOpenChange={setMoreOpen}>
             <PopoverTrigger asChild>
@@ -1973,15 +2028,43 @@ export function NewIssueDialog() {
                 <MoreHorizontal className="h-3 w-3" />
               </button>
             </PopoverTrigger>
-            <PopoverContent className="w-44 p-1" align="start">
-              <button className="flex items-center gap-2 w-full px-2 py-1.5 text-xs rounded hover:bg-accent/50 text-muted-foreground">
-                <Calendar className="h-3 w-3" />
-                Start date
-              </button>
-              <button className="flex items-center gap-2 w-full px-2 py-1.5 text-xs rounded hover:bg-accent/50 text-muted-foreground">
-                <Calendar className="h-3 w-3" />
-                Due date
-              </button>
+            <PopoverContent className="w-56 p-2" align="start">
+              <label className="block space-y-1 text-xs text-muted-foreground">
+                <span className="flex items-center gap-2">
+                  <Calendar className="h-3 w-3" />
+                  Start date
+                </span>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(event) => setStartDate(event.target.value)}
+                  className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground outline-none"
+                />
+              </label>
+              <label className="mt-2 block space-y-1 text-xs text-muted-foreground">
+                <span className="flex items-center gap-2">
+                  <Calendar className="h-3 w-3" />
+                  Due date
+                </span>
+                <input
+                  type="date"
+                  value={dueDate}
+                  onChange={(event) => setDueDate(event.target.value)}
+                  className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground outline-none"
+                />
+              </label>
+              {(startDate || dueDate) ? (
+                <button
+                  type="button"
+                  className="mt-2 w-full rounded px-2 py-1 text-left text-xs text-muted-foreground hover:bg-accent/50"
+                  onClick={() => {
+                    setStartDate("");
+                    setDueDate("");
+                  }}
+                >
+                  Clear dates
+                </button>
+              ) : null}
             </PopoverContent>
           </Popover>
         </div>

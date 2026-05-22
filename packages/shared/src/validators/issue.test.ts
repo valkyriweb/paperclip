@@ -280,6 +280,27 @@ describe("issue validators", () => {
     expect(parsed.requestDepth).toBe(MAX_ISSUE_REQUEST_DEPTH);
   });
 
+  it("accepts planned start and due dates", () => {
+    const parsed = createIssueSchema.parse({
+      title: "Schedule work",
+      startDate: "2026-05-25T00:00:00.000Z",
+      dueDate: "2026-05-30T00:00:00.000Z",
+    });
+
+    expect(parsed.startDate).toEqual(new Date("2026-05-25T00:00:00.000Z"));
+    expect(parsed.dueDate).toEqual(new Date("2026-05-30T00:00:00.000Z"));
+  });
+
+  it("allows clearing planned dates on update", () => {
+    const parsed = updateIssueSchema.parse({
+      startDate: null,
+      dueDate: null,
+    });
+
+    expect(parsed.startDate).toBeNull();
+    expect(parsed.dueDate).toBeNull();
+  });
+
   it("accepts the cheap model profile in issue assignee adapter overrides", () => {
     const parsed = createIssueSchema.parse({
       title: "Run a cheap heartbeat",

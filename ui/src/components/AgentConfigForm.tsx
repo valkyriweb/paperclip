@@ -1476,6 +1476,7 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                   open={modelOpen}
                   onOpenChange={setModelOpen}
                   allowDefault
+                  required={false}
                   groupByProvider
                   creatable
                   detectedModel={null}

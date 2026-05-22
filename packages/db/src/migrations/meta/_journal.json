@@ -617,6 +617,13 @@
       "when": 1779379200000,
       "tag": "0087_cost_events_idempotency_key",
       "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1779448200000,
+      "tag": "0088_issue_schedule_dates",
+      "breakpoints": true
     }
   ]
 }

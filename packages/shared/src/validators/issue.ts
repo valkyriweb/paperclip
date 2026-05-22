@@ -323,6 +323,13 @@ const issueRequestDepthInputSchema = z
   .nonnegative()
   .transform((value) => clampIssueRequestDepth(value));
 
+const nullableDateTimeInputSchema = z
+  .string()
+  .datetime()
+  .transform((value) => new Date(value))
+  .optional()
+  .nullable();
+
 type IssueCreateStatusDefaultInput = {
   status?: unknown;
   assigneeAgentId?: unknown;
@@ -385,6 +392,8 @@ const createIssueBaseSchema = z.object({
   executionWorkspaceId: z.string().uuid().optional().nullable(),
   executionWorkspacePreference: z.enum(ISSUE_EXECUTION_WORKSPACE_PREFERENCES).optional().nullable(),
   executionWorkspaceSettings: issueExecutionWorkspaceSettingsSchema.optional().nullable(),
+  startDate: nullableDateTimeInputSchema,
+  dueDate: nullableDateTimeInputSchema,
   labelIds: z.array(z.string().uuid()).optional(),
 });
 
