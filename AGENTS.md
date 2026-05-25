@@ -157,6 +157,8 @@ When adding endpoints:
 
 ## 10. Pull Request Requirements
 
+**PR target is always the fork, never upstream.** This clone has `origin=valkyriweb/paperclip` (fork) and `upstream=paperclipai/paperclip` (read-only). Luke has READ permission on upstream. Every `gh pr create` must target `valkyriweb/paperclip` — pass `--repo valkyriweb/paperclip` explicitly if there is any doubt. Do **not** pass `--repo paperclipai/paperclip`. Violated 2026-05-17 (PRs #6197–#6200, all closed).
+
 When creating a pull request (via `gh pr create` or any other method), you **must** read and fill in every section of [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md). Do not craft ad-hoc PR bodies — use the template as the structure for your PR description. Required sections:
 
 - **Thinking Path** — trace reasoning from project context to this change (see `CONTRIBUTING.md` for examples)

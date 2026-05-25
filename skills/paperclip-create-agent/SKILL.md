@@ -95,6 +95,15 @@ Before submitting, walk the draft-review checklist end-to-end and fix any item t
 
 ### 8. Submit hire request
 
+Before creating anything, check for an equivalent pending hire. Do not submit the same hire twice.
+
+```sh
+curl -sS "$PAPERCLIP_API_URL/api/companies/$PAPERCLIP_COMPANY_ID/approvals?status=pending" \
+  -H "Authorization: Bearer $PAPERCLIP_API_KEY"
+```
+
+If a pending `hire_agent` approval already has the same `payload.name`, `payload.role`, and `payload.reportsTo`, treat it as the live request: link it to the source issue if needed, comment on that existing approval/issue, and stop. Do **not** call `/agent-hires` again unless the board explicitly requested a revised separate candidate.
+
 ```sh
 curl -sS -X POST "$PAPERCLIP_API_URL/api/companies/$PAPERCLIP_COMPANY_ID/agent-hires" \
   -H "Authorization: Bearer $PAPERCLIP_API_KEY" \
@@ -131,7 +140,7 @@ curl -sS -X POST "$PAPERCLIP_API_URL/api/approvals/<approval-id>/comments" \
   -d '{"body":"## CTO hire request submitted\n\n- Approval: [<approval-id>](/approvals/<approval-id>)\n- Pending agent: [<agent-ref>](/agents/<agent-url-key-or-id>)\n- Source issue: [<issue-ref>](/issues/<issue-identifier-or-id>)\n\nUpdated prompt and adapter config per board feedback."}'
 ```
 
-If the approval already exists and needs manual linking to the issue:
+If the approval already exists and needs manual linking to the issue, link that approval by id. This endpoint only attaches an existing approval; if you see a second pending hire afterward, you submitted `/agent-hires` twice somewhere else — reject/archive the duplicate and keep the first request canonical.
 
 ```sh
 curl -sS -X POST "$PAPERCLIP_API_URL/api/issues/<issue-id>/approvals" \
