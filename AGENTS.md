@@ -218,3 +218,28 @@ PR #2218 (`feat/external-adapter-phase1`) adds external adapter support. See roo
 - `createServerAdapter()` must include ALL optional fields (especially `detectModel`)
 - Built-in UI adapters can shadow external plugin parsers — remove built-in when fully externalizing
 - Reference external adapters: Hermes (`@henkey/hermes-paperclip-adapter` or `file:`) and Droid (npm)
+
+### First-Party Plugin Packages
+
+These live under `packages/plugins/` after the upstream `v2026.525.x` merge. They are workspace packages in this checkout, not global installs.
+
+Installable/operator-facing packages:
+
+- `@paperclipai/plugin-cloudflare-sandbox` — Cloudflare sandbox provider for Paperclip environments.
+- `@paperclipai/plugin-daytona` — Daytona sandbox provider.
+- `@paperclipai/plugin-e2b` — E2B sandbox provider.
+- `@paperclipai/plugin-exe-dev` — exe.dev sandbox provider.
+- `@paperclipai/plugin-modal` — Modal sandbox provider. Configure via **Company Settings → Environments** with Modal app/image/token fields; Node 22+ is the vendor-supported runtime, Node 20 is best-effort.
+- `@paperclipai/plugin-workspace-diff` — execution workspace Changes/diff tab plugin.
+- `@paperclipai/plugin-sdk` — plugin authoring SDK.
+- `@paperclipai/create-paperclip-plugin` — plugin scaffold/create helper.
+
+Private/reference/dev packages:
+
+- `@paperclipai/plugin-fake-sandbox` — deterministic fake sandbox provider for tests/dev.
+- `@paperclipai/plugin-llm-wiki` — local-file LLM Wiki ingestion/query/lint workflows; currently private.
+- `packages/plugins/examples/plugin-hello-world-example` — dashboard widget reference plugin.
+- `packages/plugins/examples/plugin-file-browser-example` — project sidebar/detail file browser example.
+- `packages/plugins/examples/plugin-kitchen-sink-example` — broad plugin API reference.
+- `packages/plugins/examples/plugin-authoring-smoke-example` — plugin authoring smoke fixture.
+- `packages/plugins/examples/plugin-orchestration-smoke-example` — orchestration API smoke fixture.
