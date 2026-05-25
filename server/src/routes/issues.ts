@@ -426,8 +426,24 @@ function recoveryOutcomeForDisposition(status: string) {
   return status === "blocked" ? "blocked" : "restored";
 }
 
-function isMissingDispositionResolvedByStatus(status: unknown): status is string {
-  return typeof status === "string" && status !== "in_progress";
+function missingDispositionResolutionForIssueUpdate(input: {
+  previousStatus: string;
+  nextStatus: unknown;
+}): { outcome: "blocked" | "restored"; note: string } | null {
+  if (typeof input.nextStatus !== "string") return null;
+
+  if (input.nextStatus === "in_progress") {
+    if (input.previousStatus !== "blocked") return null;
+    return {
+      outcome: "restored",
+      note: "Issue moved from blocked back to in_progress, restoring active work.",
+    };
+  }
+
+  return {
+    outcome: recoveryOutcomeForDisposition(input.nextStatus),
+    note: `Issue status changed to ${input.nextStatus}, which records a valid disposition.`,
+  };
 }
 
 async function relationRecoveryActionMap(
@@ -3169,13 +3185,17 @@ export function issueRoutes(
       return;
     }
 
-    if (isMissingDispositionResolvedByStatus(updateFields.status)) {
+    const missingDispositionResolution = missingDispositionResolutionForIssueUpdate({
+      previousStatus: existing.status,
+      nextStatus: updateFields.status,
+    });
+    if (missingDispositionResolution) {
       await recoveryActionsSvc.resolveActiveMissingDispositionForIssue({
         companyId: issue.companyId,
         sourceIssueId: issue.id,
         status: "resolved",
-        outcome: recoveryOutcomeForDisposition(updateFields.status),
-        resolutionNote: `Issue status changed to ${updateFields.status}, which records a valid disposition.`,
+        outcome: missingDispositionResolution.outcome,
+        resolutionNote: missingDispositionResolution.note,
       });
     }
 

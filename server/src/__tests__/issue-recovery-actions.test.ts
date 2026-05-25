@@ -5,9 +5,15 @@ import { and, eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   agents,
+  agentRuntimeState,
+  agentWakeupRequests,
   activityLog,
   companies,
+  companySkills,
   createDb,
+  environmentLeases,
+  heartbeatRunEvents,
+  heartbeatRuns,
   issueComments,
   issueRecoveryActions,
   issueRelations,
@@ -128,12 +134,26 @@ describeEmbeddedPostgres("issue recovery actions", () => {
   }, 30_000);
 
   afterEach(async () => {
-    await db.delete(issueRecoveryActions);
-    await db.delete(issueComments);
-    await db.delete(activityLog);
-    await db.delete(issues);
-    await db.delete(agents);
-    await db.delete(companies);
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        await db.delete(companySkills);
+        await db.delete(issueRecoveryActions);
+        await db.delete(issueComments);
+        await db.delete(activityLog);
+        await db.delete(environmentLeases);
+        await db.delete(heartbeatRunEvents);
+        await db.delete(heartbeatRuns);
+        await db.delete(agentWakeupRequests);
+        await db.delete(agentRuntimeState);
+        await db.delete(issues);
+        await db.delete(agents);
+        await db.delete(companies);
+        return;
+      } catch (error) {
+        if (attempt === 4) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    }
   });
 
   afterAll(async () => {
@@ -525,6 +545,49 @@ describeEmbeddedPostgres("issue recovery actions", () => {
       status: "resolved",
       outcome: "blocked",
       resolutionNote: "Issue status changed to blocked, which records a valid disposition.",
+    });
+    expect(resolved?.resolvedAt).toBeTruthy();
+
+    const detail = await request(app).get(`/api/issues/${sourceIssueId}`).expect(200);
+    expect(detail.body.activeRecoveryAction).toBeNull();
+  });
+
+  it("auto-resolves a missing-disposition recovery action when blocked work is restored", async () => {
+    const { companyId, managerId, coderId, sourceIssueId } = await seedCompany();
+    await db.update(issues).set({ status: "blocked", assigneeAgentId: managerId }).where(eq(issues.id, sourceIssueId));
+    const recoveryActionSvc = issueRecoveryActionService(db);
+    const action = await recoveryActionSvc.upsertSourceScoped({
+      companyId,
+      sourceIssueId,
+      kind: "missing_disposition",
+      ownerType: "agent",
+      ownerAgentId: managerId,
+      previousOwnerAgentId: coderId,
+      returnOwnerAgentId: coderId,
+      cause: "successful_run_missing_issue_disposition",
+      fingerprint: "missing-disposition:restored-work",
+      evidence: { sourceRunId: "run-1" },
+      nextAction: "Choose a valid issue disposition.",
+      wakePolicy: { type: "wake_owner" },
+    });
+    const app = createApp();
+
+    const updated = await request(app)
+      .patch(`/api/issues/${sourceIssueId}`)
+      .send({ status: "in_progress", assigneeAgentId: coderId })
+      .expect(200);
+
+    expect(updated.body).toMatchObject({ id: sourceIssueId, status: "in_progress", assigneeAgentId: coderId });
+    expect(await recoveryActionSvc.getActiveForIssue(companyId, sourceIssueId)).toBeNull();
+
+    const [resolved] = await db
+      .select()
+      .from(issueRecoveryActions)
+      .where(eq(issueRecoveryActions.id, action.id));
+    expect(resolved).toMatchObject({
+      status: "resolved",
+      outcome: "restored",
+      resolutionNote: "Issue moved from blocked back to in_progress, restoring active work.",
     });
     expect(resolved?.resolvedAt).toBeTruthy();
 
