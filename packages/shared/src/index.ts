@@ -113,6 +113,7 @@ export {
   PLUGIN_CAPABILITIES,
   PLUGIN_UI_SLOT_TYPES,
   PLUGIN_UI_SLOT_ENTITY_TYPES,
+  PLUGIN_RESERVED_COMPANY_SETTINGS_ROUTE_SEGMENTS,
   PLUGIN_LAUNCHER_PLACEMENT_ZONES,
   PLUGIN_LAUNCHER_ACTIONS,
   PLUGIN_LAUNCHER_BOUNDS,
@@ -228,6 +229,7 @@ export {
   type PluginCapability,
   type PluginUiSlotType,
   type PluginUiSlotEntityType,
+  type PluginReservedCompanySettingsRouteSegment,
   type PluginLauncherPlacementZone,
   type PluginLauncherAction,
   type PluginLauncherBounds,
@@ -552,12 +554,18 @@ export type {
   CompanyPortabilityImportResult,
   CompanyPortabilityExportRequest,
   EnvBinding,
+  EnvPlainBinding,
+  EnvSecretRefBinding,
   AgentEnvConfig,
   CompanySecret,
   CompanySecretProviderConfig,
   SecretProviderConfigPayload,
   SecretProviderConfigHealthDetails,
   SecretProviderConfigHealthResponse,
+  SecretProviderConfigDiscoveryCandidate,
+  SecretProviderConfigDiscoveryPreviewResult,
+  SecretProviderConfigDiscoverySample,
+  SecretProviderConfigDiscoverySignal,
   CompanySecretBinding,
   CompanySecretBindingTarget,
   CompanySecretUsageBinding,
@@ -578,6 +586,7 @@ export type {
   SecretVersionSelector,
   SecretVersionStatus,
   Routine,
+  RoutineEnvConfig,
   RoutineManagedByPlugin,
   RoutineVariable,
   RoutineVariableDefaultValue,
@@ -652,6 +661,18 @@ export {
   upsertSidebarOrderPreferenceSchema,
   type UpsertSidebarOrderPreference,
 } from "./validators/sidebar-preferences.js";
+export {
+  resourceMembershipStateSchema,
+  updateResourceMembershipSchema,
+  type UpdateResourceMembership,
+} from "./validators/resource-memberships.js";
+export {
+  RESOURCE_MEMBERSHIP_STATES,
+  type ResourceMembershipResourceType,
+  type ResourceMembershipState,
+  type ResourceMemberships,
+  type ResourceMembershipUpdateResult,
+} from "./types/resource-memberships.js";
 
 export { workspaceRuntimeControlTargetSchema } from "./validators/execution-workspace.js";
 export {
@@ -680,6 +701,22 @@ export {
   MIN_ISSUE_GRAPH_LIVENESS_AUTO_RECOVERY_LOOKBACK_HOURS,
   MAX_ISSUE_GRAPH_LIVENESS_AUTO_RECOVERY_LOOKBACK_HOURS,
 } from "./types/instance.js";
+
+export type {
+  CloudUpstreamConnectStartResponse,
+  CloudUpstreamActivationDecision,
+  CloudUpstreamActivationEntityType,
+  CloudUpstreamConnection,
+  CloudUpstreamConflict,
+  CloudUpstreamPreview,
+  CloudUpstreamRun,
+  CloudUpstreamRunEvent,
+  CloudUpstreamsState,
+  CloudUpstreamStep,
+  CloudUpstreamSummaryCount,
+  CloudUpstreamTarget,
+  CloudUpstreamWarning,
+} from "./types/cloud-upstream.js";
 
 export {
   getClosedIsolatedExecutionWorkspaceMessage,
@@ -886,6 +923,7 @@ export {
   createSecretSchema,
   createSecretProviderConfigSchema,
   updateSecretProviderConfigSchema,
+  secretProviderConfigDiscoveryPreviewSchema,
   remoteSecretImportPreviewSchema,
   remoteSecretImportSchema,
   remoteSecretImportSelectionSchema,
@@ -912,6 +950,7 @@ export {
   type CreateSecret,
   type CreateSecretProviderConfig,
   type UpdateSecretProviderConfig,
+  type SecretProviderConfigDiscoveryPreview,
   type RemoteSecretImportPreview,
   type RemoteSecretImport,
   type RemoteSecretImportSelection,
@@ -1048,22 +1087,27 @@ export { deriveProjectUrlKey, normalizeProjectUrlKey, hasNonAsciiContent } from 
 export {
   AGENT_MENTION_SCHEME,
   PROJECT_MENTION_SCHEME,
+  ROUTINE_MENTION_SCHEME,
   SKILL_MENTION_SCHEME,
   USER_MENTION_SCHEME,
   buildAgentMentionHref,
   buildProjectMentionHref,
+  buildRoutineMentionHref,
   buildSkillMentionHref,
   buildUserMentionHref,
   extractAgentMentionIds,
   extractProjectMentionIds,
+  extractRoutineMentionIds,
   extractSkillMentionIds,
   extractUserMentionIds,
   parseAgentMentionHref,
   parseProjectMentionHref,
+  parseRoutineMentionHref,
   parseSkillMentionHref,
   parseUserMentionHref,
   type ParsedAgentMention,
   type ParsedProjectMention,
+  type ParsedRoutineMention,
   type ParsedSkillMention,
   type ParsedUserMention,
 } from "./project-mentions.js";

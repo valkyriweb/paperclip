@@ -52,6 +52,11 @@ export {
   type UpsertSidebarOrderPreference,
 } from "./sidebar-preferences.js";
 export {
+  resourceMembershipStateSchema,
+  updateResourceMembershipSchema,
+  type UpdateResourceMembership,
+} from "./resource-memberships.js";
+export {
   companySkillSourceTypeSchema,
   companySkillTrustLevelSchema,
   companySkillCompatibilitySchema,
@@ -295,6 +300,7 @@ export {
   createSecretSchema,
   createSecretProviderConfigSchema,
   updateSecretProviderConfigSchema,
+  secretProviderConfigDiscoveryPreviewSchema,
   remoteSecretImportPreviewSchema,
   remoteSecretImportSchema,
   remoteSecretImportSelectionSchema,
@@ -311,6 +317,7 @@ export {
   type CreateSecret,
   type CreateSecretProviderConfig,
   type UpdateSecretProviderConfig,
+  type SecretProviderConfigDiscoveryPreview,
   type RemoteSecretImportPreview,
   type RemoteSecretImport,
   type RemoteSecretImportSelection,
