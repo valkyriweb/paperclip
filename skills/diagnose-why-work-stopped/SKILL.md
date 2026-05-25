@@ -1,13 +1,6 @@
 ---
 name: diagnose-why-work-stopped
-description: >
-  How to handle "why did this work stop / why is this looping?" assignments.
-  Forensics first on the named tree, surface the exact stop-point, frame the
-  fix as a general product rule that respects three invariants (productive
-  work continues, only real blockers stop work, no infinite loops), and
-  deliver a plan — no code changes — gated by board/CTO approval before
-  child issues are created. Use whenever the issue title or body asks for
-  forensics on a stalled, looping, or "went too deep" tree.
+description: Diagnose stalled/looping work trees: forensics, exact stop point, general product rule, no code, board/CTO-gated child issues.
 ---
 
 # Diagnose Why Work Stopped
