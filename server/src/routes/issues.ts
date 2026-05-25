@@ -422,6 +422,14 @@ type RecoveryActionsLister = {
   ) => Promise<Map<string, NonNullable<IssueRelationIssueSummary["activeRecoveryAction"]>>>;
 };
 
+function recoveryOutcomeForDisposition(status: string) {
+  return status === "blocked" ? "blocked" : "restored";
+}
+
+function isMissingDispositionResolvedByStatus(status: unknown): status is string {
+  return typeof status === "string" && status !== "in_progress";
+}
+
 async function relationRecoveryActionMap(
   recoveryActionsSvc: RecoveryActionsLister,
   companyId: string,
@@ -3159,6 +3167,16 @@ export function issueRoutes(
     if (!issue) {
       res.status(404).json({ error: "Issue not found" });
       return;
+    }
+
+    if (isMissingDispositionResolvedByStatus(updateFields.status)) {
+      await recoveryActionsSvc.resolveActiveMissingDispositionForIssue({
+        companyId: issue.companyId,
+        sourceIssueId: issue.id,
+        status: "resolved",
+        outcome: recoveryOutcomeForDisposition(updateFields.status),
+        resolutionNote: `Issue status changed to ${updateFields.status}, which records a valid disposition.`,
+      });
     }
 
     let cancelledStatusRunId: string | null = null;

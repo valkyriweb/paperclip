@@ -261,7 +261,6 @@ export function issueRecoveryActionService(db: Db) {
     input: ResolveIssueRecoveryActionInput,
     dbOrTx: DbOrTransaction = db,
   ): Promise<IssueRecoveryAction | null> {
-    const now = new Date();
     const predicates = [
       eq(issueRecoveryActions.companyId, input.companyId),
       eq(issueRecoveryActions.sourceIssueId, input.sourceIssueId),
@@ -271,6 +270,31 @@ export function issueRecoveryActionService(db: Db) {
       predicates.push(eq(issueRecoveryActions.id, input.actionId));
     }
 
+    return resolveFirstMatchingActiveAction(input, predicates, dbOrTx);
+  }
+
+  async function resolveActiveMissingDispositionForIssue(
+    input: Omit<ResolveIssueRecoveryActionInput, "actionId">,
+    dbOrTx: DbOrTransaction = db,
+  ): Promise<IssueRecoveryAction | null> {
+    return resolveFirstMatchingActiveAction(
+      input,
+      [
+        eq(issueRecoveryActions.companyId, input.companyId),
+        eq(issueRecoveryActions.sourceIssueId, input.sourceIssueId),
+        eq(issueRecoveryActions.kind, "missing_disposition"),
+        inArray(issueRecoveryActions.status, [...ACTIVE_RECOVERY_ACTION_STATUSES]),
+      ],
+      dbOrTx,
+    );
+  }
+
+  async function resolveFirstMatchingActiveAction(
+    input: Omit<ResolveIssueRecoveryActionInput, "actionId">,
+    predicates: ReturnType<typeof eq>[],
+    dbOrTx: DbOrTransaction,
+  ): Promise<IssueRecoveryAction | null> {
+    const now = new Date();
     const [updated] = await dbOrTx
       .update(issueRecoveryActions)
       .set({
@@ -290,6 +314,7 @@ export function issueRecoveryActionService(db: Db) {
     getActiveForIssue,
     listActiveForIssues,
     resolveActiveForIssue,
+    resolveActiveMissingDispositionForIssue,
     upsertSourceScoped,
   };
 }

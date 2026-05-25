@@ -492,6 +492,46 @@ describeEmbeddedPostgres("issue recovery actions", () => {
     expect(list.body.actions).toHaveLength(1);
   });
 
+  it("auto-resolves a missing-disposition recovery action when the issue records a valid disposition", async () => {
+    const { companyId, managerId, sourceIssueId } = await seedCompany();
+    const recoveryActionSvc = issueRecoveryActionService(db);
+    const action = await recoveryActionSvc.upsertSourceScoped({
+      companyId,
+      sourceIssueId,
+      kind: "missing_disposition",
+      ownerType: "agent",
+      ownerAgentId: managerId,
+      cause: "successful_run_missing_issue_disposition",
+      fingerprint: "missing-disposition:fingerprint",
+      evidence: { sourceRunId: "run-1" },
+      nextAction: "Choose a valid issue disposition.",
+      wakePolicy: { type: "wake_owner" },
+    });
+    const app = createApp();
+
+    const updated = await request(app)
+      .patch(`/api/issues/${sourceIssueId}`)
+      .send({ status: "blocked" })
+      .expect(200);
+
+    expect(updated.body).toMatchObject({ id: sourceIssueId, status: "blocked" });
+    expect(await recoveryActionSvc.getActiveForIssue(companyId, sourceIssueId)).toBeNull();
+
+    const [resolved] = await db
+      .select()
+      .from(issueRecoveryActions)
+      .where(eq(issueRecoveryActions.id, action.id));
+    expect(resolved).toMatchObject({
+      status: "resolved",
+      outcome: "blocked",
+      resolutionNote: "Issue status changed to blocked, which records a valid disposition.",
+    });
+    expect(resolved?.resolvedAt).toBeTruthy();
+
+    const detail = await request(app).get(`/api/issues/${sourceIssueId}`).expect(200);
+    expect(detail.body.activeRecoveryAction).toBeNull();
+  });
+
   it("resolves an active recovery action and removes it from active projections", async () => {
     const { companyId, managerId, sourceIssueId } = await seedCompany();
     const recoveryActionSvc = issueRecoveryActionService(db);
