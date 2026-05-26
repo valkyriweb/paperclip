@@ -59,10 +59,45 @@ WORKDIR /app
 COPY --chown=node:node --from=build /app /app
 RUN npm install --global --omit=dev @anthropic-ai/claude-code@latest @openai/codex@latest opencode-ai \
   && apt-get update \
-  && apt-get install -y --no-install-recommends openssh-client jq \
+  && apt-get install -y --no-install-recommends openssh-client jq unzip ca-certificates \
   && rm -rf /var/lib/apt/lists/* \
   && mkdir -p /paperclip \
   && chown node:node /paperclip
+
+ARG OTEL_AUTO_VERSION=0.75.0
+ARG OTEL_API_VERSION=1.9.1
+ARG TRACELOOP_SDK_VERSION=0.26.0
+ARG OP_VERSION=2.30.3
+ARG PINCHTAB_VERSION=0.8.6
+
+RUN mkdir -p /opt/otel \
+  && cd /opt/otel \
+  && npm init -y >/dev/null \
+  && npm install --omit=dev --no-audit --no-fund --loglevel=error \
+    @opentelemetry/api@${OTEL_API_VERSION} \
+    @opentelemetry/auto-instrumentations-node@${OTEL_AUTO_VERSION} \
+    @traceloop/node-server-sdk@${TRACELOOP_SDK_VERSION} \
+  && chown -R node:node /opt/otel \
+  && rm -rf /root/.npm
+
+COPY docker/traceloop-init.js /opt/otel/preload/traceloop-init.js
+COPY docker/agent-skills/browser-toolkit/ /opt/agent-skills/canonical/browser-toolkit/
+COPY docker/agent-skills/sbsa-online-banking/ /opt/agent-skills/canonical/sbsa-online-banking/
+RUN chown -R node:node /opt/otel/preload /opt/agent-skills
+
+RUN ARCH=$(dpkg --print-architecture) \
+  && curl -fsSL "https://cache.agilebits.com/dist/1P/op2/pkg/v${OP_VERSION}/op_linux_${ARCH}_v${OP_VERSION}.zip" -o /tmp/op.zip \
+  && unzip /tmp/op.zip -d /usr/local/bin \
+  && rm /tmp/op.zip \
+  && chmod +x /usr/local/bin/op
+
+RUN HOME=/opt/pinchtab-home npm install -g pinchtab@${PINCHTAB_VERSION} --loglevel=error \
+  && BIN=$(find /opt/pinchtab-home -name 'pinchtab-linux-amd64' -print -quit) \
+  && [ -n "$BIN" ] || (echo "pinchtab postinstall did not write a binary" >&2; exit 1) \
+  && mkdir -p /usr/local/share/pinchtab \
+  && cp "$BIN" /usr/local/share/pinchtab/pinchtab-linux-amd64 \
+  && chmod +x /usr/local/share/pinchtab/pinchtab-linux-amd64 \
+  && rm -rf /opt/pinchtab-home /paperclip/.npm /root/.npm
 
 COPY scripts/docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
@@ -81,7 +116,15 @@ ENV NODE_ENV=production \
   PAPERCLIP_CONFIG=/paperclip/instances/default/config.json \
   PAPERCLIP_DEPLOYMENT_MODE=authenticated \
   PAPERCLIP_DEPLOYMENT_EXPOSURE=private \
-  OPENCODE_ALLOW_ALL_MODELS=true
+  OPENCODE_ALLOW_ALL_MODELS=true \
+  NODE_PATH=/opt/otel/node_modules \
+  NODE_OPTIONS="--require @opentelemetry/auto-instrumentations-node/register --require /opt/otel/preload/traceloop-init.js" \
+  OTEL_NODE_RESOURCE_DETECTORS=env,host,os,container \
+  OTEL_TRACES_SAMPLER=parentbased_traceidratio \
+  OTEL_TRACES_SAMPLER_ARG=1.0 \
+  OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \
+  OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental \
+  PINCHTAB_BINARY_PATH=/usr/local/share/pinchtab/pinchtab-linux-amd64
 
 VOLUME ["/paperclip"]
 EXPOSE 3100
