@@ -59,10 +59,13 @@ WORKDIR /app
 COPY --chown=node:node --from=build /app /app
 RUN npm install --global --omit=dev @anthropic-ai/claude-code@latest @openai/codex@latest opencode-ai \
   && apt-get update \
-  && apt-get install -y --no-install-recommends openssh-client jq unzip ca-certificates \
+  && apt-get install -y --no-install-recommends openssh-client jq unzip ca-certificates python3-venv \
+  && python3 -m venv /opt/google-ads-python \
+  && /opt/google-ads-python/bin/pip install --no-cache-dir google-ads \
+  && /opt/google-ads-python/bin/python -c "from google.ads.googleads.client import GoogleAdsClient" \
   && rm -rf /var/lib/apt/lists/* \
   && mkdir -p /paperclip \
-  && chown node:node /paperclip
+  && chown -R node:node /paperclip /opt/google-ads-python
 
 ARG OTEL_AUTO_VERSION=0.75.0
 ARG OTEL_API_VERSION=1.9.1
@@ -117,6 +120,7 @@ ENV NODE_ENV=production \
   PAPERCLIP_DEPLOYMENT_MODE=authenticated \
   PAPERCLIP_DEPLOYMENT_EXPOSURE=private \
   OPENCODE_ALLOW_ALL_MODELS=true \
+  PATH=/opt/google-ads-python/bin:$PATH \
   NODE_PATH=/opt/otel/node_modules \
   NODE_OPTIONS="--require @opentelemetry/auto-instrumentations-node/register --require /opt/otel/preload/traceloop-init.js" \
   OTEL_NODE_RESOURCE_DETECTORS=env,host,os,container \
