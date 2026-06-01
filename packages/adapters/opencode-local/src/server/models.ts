@@ -194,6 +194,16 @@ export async function ensureOpenCodeModelConfiguredAndAvailable(input: {
   }
 
   if (!models.some((entry) => entry.id === model)) {
+    // Tolerate a syntactically valid provider/model id that simply isn't in the
+    // discovered list (e.g. a freshly added bridge model). `model` already
+    // passed requireOpenCodeModelId, so let the runtime validate it instead of
+    // hard-failing the run here.
+    if (isValidOpenCodeModelId(model)) {
+      console.warn(
+        `Configured OpenCode model "${model}" was not in the discovered model list; allowing the runtime to validate it.`,
+      );
+      return models;
+    }
     const sample = models.slice(0, 12).map((entry) => entry.id).join(", ");
     throw new Error(
       `Configured OpenCode model is unavailable: ${model}. Available models: ${sample}${models.length > 12 ? ", ..." : ""}`,
