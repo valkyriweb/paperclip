@@ -278,6 +278,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: mcr.microsoft.com/playwright:v1.58.2-noble
+      options: --user pwuser
     timeout-minutes: 30
 
     steps:
