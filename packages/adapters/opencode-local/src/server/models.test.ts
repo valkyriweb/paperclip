@@ -1,4 +1,7 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   ensureOpenCodeModelConfiguredAndAvailable,
   listOpenCodeModels,
@@ -6,10 +9,30 @@ import {
   resetOpenCodeModelsCacheForTests,
 } from "./models.js";
 
+// Fake `opencode models` that prints a fixed model list to stdout. Used to
+// exercise the availability gate without depending on a real opencode install.
+let fakeDir: string;
+let fakeCommand: string;
+
+beforeAll(() => {
+  fakeDir = mkdtempSync(join(tmpdir(), "paperclip-fake-opencode-"));
+  fakeCommand = join(fakeDir, "fake-opencode.sh");
+  writeFileSync(
+    fakeCommand,
+    "#!/bin/sh\nprintf 'xai/grok-4\\n'\n",
+    { mode: 0o755 },
+  );
+});
+
+afterAll(() => {
+  rmSync(fakeDir, { recursive: true, force: true });
+});
+
 describe("openCode models", () => {
   afterEach(() => {
     delete process.env.PAPERCLIP_OPENCODE_COMMAND;
     resetOpenCodeModelsCacheForTests();
+    vi.restoreAllMocks();
   });
 
   it("returns an empty list when discovery command is unavailable", async () => {
@@ -43,5 +66,16 @@ describe("openCode models", () => {
         model: "openai/gpt-5",
       }),
     ).rejects.toThrow("Failed to start command");
+  });
+
+  it("accepts an unlisted but provider/model-shaped id with a warning", async () => {
+    process.env.PAPERCLIP_OPENCODE_COMMAND = fakeCommand;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const models = await ensureOpenCodeModelConfiguredAndAvailable({
+      model: "claude-bridge/some-new-model",
+    });
+    expect(models.some((entry) => entry.id === "xai/grok-4")).toBe(true);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain("claude-bridge/some-new-model");
   });
 });
