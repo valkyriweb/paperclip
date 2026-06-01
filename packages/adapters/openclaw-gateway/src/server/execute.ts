@@ -1236,6 +1236,27 @@ export async function listModels(ctx?: { adapterConfig?: Record<string, unknown>
   }
 }
 
+function classifyGatewayFailure(message: string): "transient" | "terminal" {
+  const lower = message.toLowerCase();
+  const transientMarkers = [
+    "econnrefused",
+    "econnreset",
+    "etimedout",
+    "ehostunreach",
+    "enetunreach",
+    "socket hang up",
+    "gateway not connected",
+    "gateway closed before open",
+    "gateway closed (",
+    "gateway websocket open timeout",
+    "gateway connect challenge timeout",
+    "gateway request timeout",
+    "websocket error",
+    "service restart",
+  ];
+  return transientMarkers.some((marker) => lower.includes(marker)) ? "transient" : "terminal";
+}
+
 export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExecutionResult> {
   const urlValue = resolveGatewayUrl(ctx.config);
   if (!urlValue) {
@@ -1384,10 +1405,22 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   let autoPairAttempted = false;
   let latestResultPayload: unknown = null;
 
+  // Resilience: retry transient connect/disconnect failures and long-poll the run across
+  // reconnects so a single gateway blip (pod restart, ws drop) or a slow-but-live agent no
+  // longer permanently fails the heartbeat run. The overall budget stays waitTimeoutMs.
+  const maxConnectAttempts = parseOptionalPositiveInteger(ctx.config.maxConnectAttempts) ?? 5;
+  const retryBackoffBaseMs = parseOptionalPositiveInteger(ctx.config.retryBackoffMs) ?? 1_000;
+  const retryBackoffCapMs = parseOptionalPositiveInteger(ctx.config.retryBackoffCapMs) ?? 15_000;
+  const overallDeadline = Date.now() + waitTimeoutMs;
+  const waitSliceMs = Math.max(1_000, Math.min(60_000, waitTimeoutMs));
+  const trackedRunIds = new Set<string>([ctx.runId]);
+  const assistantChunks: string[] = [];
+  let lifecycleError: string | null = null;
+  let acceptedRunId: string | null = null;
+  let acceptedPayload: Record<string, unknown> | null = null;
+  let connectAttempts = 0;
+
   while (true) {
-    const trackedRunIds = new Set<string>([ctx.runId]);
-    const assistantChunks: string[] = [];
-    let lifecycleError: string | null = null;
     let deviceIdentity: GatewayDeviceIdentity | null = null;
 
     const onEvent = async (frame: GatewayEventFrame) => {
@@ -1480,53 +1513,87 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         `[openclaw-gateway] connected protocol=${asNumber(asRecord(hello)?.protocol, PROTOCOL_VERSION)}\n`,
       );
 
-      const acceptedPayload = await client.request<Record<string, unknown>>("agent", agentParams, {
-        timeoutMs: connectTimeoutMs,
-      });
+      let runFinished = false;
+      if (!acceptedRunId) {
+        acceptedPayload = await client.request<Record<string, unknown>>("agent", agentParams, {
+          timeoutMs: connectTimeoutMs,
+        });
 
-      latestResultPayload = acceptedPayload;
+        latestResultPayload = acceptedPayload;
 
-      const acceptedStatus = nonEmpty(acceptedPayload?.status)?.toLowerCase() ?? "";
-      const acceptedRunId = nonEmpty(acceptedPayload?.runId) ?? ctx.runId;
-      trackedRunIds.add(acceptedRunId);
+        const acceptedStatus = nonEmpty(acceptedPayload?.status)?.toLowerCase() ?? "";
+        acceptedRunId = nonEmpty(acceptedPayload?.runId) ?? ctx.runId;
+        trackedRunIds.add(acceptedRunId);
 
-      await ctx.onLog(
-        "stdout",
-        `[openclaw-gateway] agent accepted runId=${acceptedRunId} status=${acceptedStatus || "unknown"}\n`,
-      );
-
-      if (acceptedStatus === "error") {
-        const errorMessage =
-          nonEmpty(acceptedPayload?.summary) ?? lifecycleError ?? "OpenClaw gateway agent request failed";
-        return {
-          exitCode: 1,
-          signal: null,
-          timedOut: false,
-          errorMessage,
-          errorCode: "openclaw_gateway_agent_error",
-          resultJson: acceptedPayload,
-        };
-      }
-
-      if (acceptedStatus !== "ok") {
-        const waitPayload = await client.request<Record<string, unknown>>(
-          "agent.wait",
-          { runId: acceptedRunId, timeoutMs: waitTimeoutMs },
-          { timeoutMs: waitTimeoutMs + connectTimeoutMs },
+        await ctx.onLog(
+          "stdout",
+          `[openclaw-gateway] agent accepted runId=${acceptedRunId} status=${acceptedStatus || "unknown"}\n`,
         );
 
-        latestResultPayload = waitPayload;
+        if (acceptedStatus === "error") {
+          const errorMessage =
+            nonEmpty(acceptedPayload?.summary) ?? lifecycleError ?? "OpenClaw gateway agent request failed";
+          return {
+            exitCode: 1,
+            signal: null,
+            timedOut: false,
+            errorMessage,
+            errorCode: "openclaw_gateway_agent_error",
+            resultJson: acceptedPayload,
+          };
+        }
 
-        const waitStatus = nonEmpty(waitPayload?.status)?.toLowerCase() ?? "";
-        if (waitStatus === "timeout") {
+        runFinished = acceptedStatus === "ok";
+      } else {
+        await ctx.onLog(
+          "stdout",
+          `[openclaw-gateway] reconnected; resuming agent.wait for runId=${acceptedRunId}\n`,
+        );
+      }
+
+      // Long-poll the run in bounded slices: a `timeout` here means the gateway's per-call
+      // window elapsed while the agent is still live, so we re-poll until the overall
+      // deadline. A mid-run ws drop throws and is caught below, which reconnects and resumes
+      // waiting by runId instead of abandoning a run that is still executing on the gateway.
+      while (!runFinished) {
+        const remaining = overallDeadline - Date.now();
+        if (remaining <= 0) {
           return {
             exitCode: 1,
             signal: null,
             timedOut: true,
             errorMessage: `OpenClaw gateway run timed out after ${waitTimeoutMs}ms`,
             errorCode: "openclaw_gateway_wait_timeout",
-            resultJson: waitPayload,
+            resultJson: asRecord(latestResultPayload),
           };
+        }
+
+        const slice = Math.max(1_000, Math.min(remaining, waitSliceMs));
+        const sliceStartedAt = Date.now();
+        const waitPayload = await client.request<Record<string, unknown>>(
+          "agent.wait",
+          { runId: acceptedRunId, timeoutMs: slice },
+          { timeoutMs: slice + connectTimeoutMs },
+        );
+
+        latestResultPayload = waitPayload;
+        // A successful response proves the socket is healthy: reset the connect-retry budget
+        // so it is spent per disconnect episode, not cumulatively across a long-lived run.
+        connectAttempts = 0;
+
+        const waitStatus = nonEmpty(waitPayload?.status)?.toLowerCase() ?? "";
+        if (waitStatus === "timeout") {
+          // Throttle if the gateway returned its window far faster than requested so a
+          // misbehaving instant-timeout gateway cannot hot-loop agent.wait until the deadline.
+          const elapsed = Date.now() - sliceStartedAt;
+          if (elapsed < 500) {
+            await new Promise((resolve) => setTimeout(resolve, 500 - elapsed));
+          }
+          await ctx.onLog(
+            "stdout",
+            `[openclaw-gateway] run still active after ${slice}ms slice; re-polling (runId=${acceptedRunId})\n`,
+          );
+          continue;
         }
 
         if (waitStatus === "error") {
@@ -1553,6 +1620,8 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
             resultJson: waitPayload,
           };
         }
+
+        break;
       }
 
       const summaryFromEvents = assistantChunks.join("").trim();
@@ -1639,6 +1708,27 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
           "stderr",
           `[openclaw-gateway] auto-pairing failed: ${pairResult.reason}\n`,
         );
+      }
+
+      if (!pairingRequired) {
+        connectAttempts += 1;
+        const failureClass = classifyGatewayFailure(message);
+        if (
+          failureClass === "transient" &&
+          connectAttempts < maxConnectAttempts &&
+          Date.now() < overallDeadline
+        ) {
+          const backoffMs = Math.min(
+            retryBackoffCapMs,
+            retryBackoffBaseMs * 2 ** (connectAttempts - 1),
+          );
+          await ctx.onLog(
+            "stderr",
+            `[openclaw-gateway] transient gateway failure (attempt ${connectAttempts}/${maxConnectAttempts}): ${message}; reconnecting in ${backoffMs}ms\n`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, backoffMs));
+          continue;
+        }
       }
 
       const detailedMessage = pairingRequired
