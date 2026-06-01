@@ -92,6 +92,8 @@ function registerModuleMocks() {
     issueRecoveryActionService: () => ({
       getActiveForIssue: vi.fn(async () => null),
       listActiveForIssues: vi.fn(async () => new Map()),
+      resolveActiveForIssue: vi.fn(async () => undefined),
+      resolveActiveMissingDispositionForIssue: vi.fn(async () => undefined),
     }),
     issueReferenceService: () => ({
       deleteDocumentSource: async () => undefined,
