@@ -1420,6 +1420,29 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   let acceptedPayload: Record<string, unknown> | null = null;
   let connectAttempts = 0;
 
+  // Loop guard: abort a run that is busy-spinning the same tool call (e.g. polling a
+  // backgrounded shell step) instead of letting it burn the whole wait budget. The output
+  // silence watchdog cannot catch this because such a run streams output continuously.
+  const loopGuardEnabled = parseBoolean(ctx.config.loopGuardEnabled, true);
+  const loopGuardWindow = parseOptionalPositiveInteger(ctx.config.loopGuardWindow) ?? 12;
+  const loopGuardThreshold = Math.min(
+    loopGuardWindow,
+    parseOptionalPositiveInteger(ctx.config.loopGuardThreshold) ?? 9,
+  );
+  const recentToolSignatures: string[] = [];
+  let loopDetected: { signature: string; count: number } | null = null;
+  let activeClient: GatewayWsClient | null = null;
+  const loopFailure = (): AdapterExecutionResult => ({
+    exitCode: 1,
+    signal: null,
+    timedOut: false,
+    errorMessage: `OpenClaw gateway run aborted: repeated tool call ${JSON.stringify(
+      loopDetected?.signature ?? "",
+    )} ${loopDetected?.count ?? 0}/${loopGuardWindow} recent actions (suspected loop)`,
+    errorCode: "openclaw_gateway_loop_detected",
+    resultJson: asRecord(latestResultPayload),
+  });
+
   while (true) {
     let deviceIdentity: GatewayDeviceIdentity | null = null;
 
@@ -1469,6 +1492,37 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
           lifecycleError = nonEmpty(data.error) ?? nonEmpty(data.message) ?? lifecycleError;
         }
       }
+
+      if (
+        loopGuardEnabled &&
+        !loopDetected &&
+        stream === "item" &&
+        nonEmpty(data.kind)?.toLowerCase() === "tool" &&
+        nonEmpty(data.phase)?.toLowerCase() === "start"
+      ) {
+        // `title` carries the per-invocation command/description and is the only per-call
+        // discriminator emitted on tool items (no args/input field exists). Require it: if a
+        // gateway omits it, fail OPEN (skip detection) rather than collapse every same-named
+        // tool (e.g. a normal burst of reads/bash) to one signature and abort a productive run.
+        const toolTitle = nonEmpty(data.title);
+        if (toolTitle) {
+          const toolName = nonEmpty(data.name) ?? "tool";
+          const signature = `${toolName}::${toolTitle}`.toLowerCase().slice(0, 200);
+          recentToolSignatures.push(signature);
+          if (recentToolSignatures.length > loopGuardWindow) recentToolSignatures.shift();
+          if (recentToolSignatures.length >= loopGuardWindow) {
+            const count = recentToolSignatures.filter((entry) => entry === signature).length;
+            if (count >= loopGuardThreshold) {
+              loopDetected = { signature, count };
+              await ctx.onLog(
+                "stderr",
+                `[openclaw-gateway] loop guard tripped: tool ${JSON.stringify(signature)} repeated ${count}/${loopGuardWindow} recent actions; aborting run ${runId}\n`,
+              );
+              activeClient?.close();
+            }
+          }
+        }
+      }
     };
 
     const client = new GatewayWsClient({
@@ -1477,6 +1531,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       onEvent,
       onLog: ctx.onLog,
     });
+    activeClient = client;
 
     try {
       deviceIdentity = disableDeviceAuth ? null : resolveDeviceIdentity(parseObject(ctx.config));
@@ -1545,6 +1600,9 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 
         runFinished = acceptedStatus === "ok";
       } else {
+        // Drop the pre-drop signature window so a post-reconnect item replay cannot mix with
+        // stale counts and false-trip the loop guard on an otherwise healthy resumed run.
+        recentToolSignatures.length = 0;
         await ctx.onLog(
           "stdout",
           `[openclaw-gateway] reconnected; resuming agent.wait for runId=${acceptedRunId}\n`,
@@ -1556,6 +1614,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       // deadline. A mid-run ws drop throws and is caught below, which reconnects and resumes
       // waiting by runId instead of abandoning a run that is still executing on the gateway.
       while (!runFinished) {
+        if (loopDetected) return loopFailure();
         const remaining = overallDeadline - Date.now();
         if (remaining <= 0) {
           return {
@@ -1669,6 +1728,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         ...(summary ? { summary } : {}),
       };
     } catch (err) {
+      if (loopDetected) return loopFailure();
       const message = err instanceof Error ? err.message : String(err);
       const lower = message.toLowerCase();
       const timedOut = lower.includes("timeout");
@@ -1751,6 +1811,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       };
     } finally {
       client.close();
+      activeClient = null;
     }
   }
 }

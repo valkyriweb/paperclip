@@ -11,11 +11,16 @@ interface ScriptedGatewayOptions {
   // simulate a gateway restart during the connect handshake.
   connectionMode?: (index: number) => "normal" | "drop";
   timeoutDelayMs?: number;
+  // Tool `item` events emitted on the first agent.wait, to drive the loop guard.
+  emitItemsOnWait?: Array<{ name: string; title: string }>;
+  // What to send after emitting items: a wait step, or undefined to hold (no response).
+  respondAfterItems?: WaitStep;
 }
 
 function createScriptedGateway(opts: ScriptedGatewayOptions) {
   let connectionIndex = -1;
   let waitCursor = 0;
+  let emittedItems = false;
   const wss = new WebSocketServer({ port: 0 });
 
   wss.on("connection", (ws: WebSocket) => {
@@ -42,6 +47,35 @@ function createScriptedGateway(opts: ScriptedGatewayOptions) {
         return;
       }
       if (frame.method === "agent.wait") {
+        if (opts.emitItemsOnWait && !emittedItems) {
+          emittedItems = true;
+          for (const item of opts.emitItemsOnWait) {
+            ws.send(
+              JSON.stringify({
+                type: "event",
+                event: "agent",
+                payload: {
+                  runId: "run-remote-1",
+                  stream: "item",
+                  data: { kind: "tool", name: item.name, title: item.title, phase: "start" },
+                },
+              }),
+            );
+          }
+          if (!opts.respondAfterItems) return; // hold: let the loop guard abort
+          ws.send(
+            JSON.stringify({
+              type: "res",
+              id: frame.id,
+              ok: true,
+              payload:
+                opts.respondAfterItems === "ok"
+                  ? { status: "ok", payloads: [{ text: "done" }] }
+                  : { status: opts.respondAfterItems },
+            }),
+          );
+          return;
+        }
         const step = opts.waitScript[Math.min(waitCursor, opts.waitScript.length - 1)];
         waitCursor += 1;
         if (step === "drop") {
@@ -139,6 +173,56 @@ describe("execute resilience", () => {
       expect(result.exitCode).toBe(0);
       expect(result.summary).toBe("done");
       expect(gateway.connections()).toBeGreaterThanOrEqual(2);
+    } finally {
+      await gateway.close();
+    }
+  });
+
+  it("aborts a run that busy-loops the same tool call (loop guard)", async () => {
+    const gateway = createScriptedGateway({
+      waitScript: ["ok"],
+      emitItemsOnWait: Array.from({ length: 15 }, () => ({ name: "exec", title: "cat /tmp/pc_out.txt" })),
+      // hold after emitting: the guard must abort before any wait response
+    });
+    await gateway.ready;
+    try {
+      const result = await execute(buildCtx(gateway.url(), { waitTimeoutMs: 8_000 }));
+      expect(result.exitCode).toBe(1);
+      expect(result.timedOut).toBe(false);
+      expect(result.errorCode).toBe("openclaw_gateway_loop_detected");
+    } finally {
+      await gateway.close();
+    }
+  });
+
+  it("does not false-positive on distinct tool calls", async () => {
+    const gateway = createScriptedGateway({
+      waitScript: ["ok"],
+      emitItemsOnWait: Array.from({ length: 12 }, (_v, i) => ({ name: "exec", title: `step-${i}` })),
+      respondAfterItems: "ok",
+    });
+    await gateway.ready;
+    try {
+      const result = await execute(buildCtx(gateway.url(), { waitTimeoutMs: 30_000 }));
+      expect(result.exitCode).toBe(0);
+      expect(result.summary).toBe("done");
+    } finally {
+      await gateway.close();
+    }
+  });
+
+  it("fails open (no abort) when tool items carry no title to discriminate on", async () => {
+    const gateway = createScriptedGateway({
+      waitScript: ["ok"],
+      // Same tool name, no title: must NOT collapse to one signature and trip the guard.
+      emitItemsOnWait: Array.from({ length: 12 }, () => ({ name: "read", title: "" })),
+      respondAfterItems: "ok",
+    });
+    await gateway.ready;
+    try {
+      const result = await execute(buildCtx(gateway.url(), { waitTimeoutMs: 30_000 }));
+      expect(result.exitCode).toBe(0);
+      expect(result.summary).toBe("done");
     } finally {
       await gateway.close();
     }
