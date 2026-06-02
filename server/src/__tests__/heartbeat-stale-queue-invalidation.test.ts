@@ -802,7 +802,7 @@ describeEmbeddedPostgres("heartbeat stale queued-run invalidation", () => {
       return run?.status === "cancelled";
     });
 
-    const [run, wakeup] = await Promise.all([
+    const [run, wakeup, agent] = await Promise.all([
       db
         .select({
           status: heartbeatRuns.status,
@@ -817,6 +817,11 @@ describeEmbeddedPostgres("heartbeat stale queued-run invalidation", () => {
         .from(agentWakeupRequests)
         .where(eq(agentWakeupRequests.id, wakeupRequestId))
         .then((rows) => rows[0] ?? null),
+      db
+        .select({ status: agents.status })
+        .from(agents)
+        .where(eq(agents.id, agentId))
+        .then((rows) => rows[0] ?? null),
     ]);
 
     expect(run?.status).toBe("cancelled");
@@ -824,6 +829,7 @@ describeEmbeddedPostgres("heartbeat stale queued-run invalidation", () => {
     expect(run?.resultJson).toMatchObject({ stopReason: "issue_continuation_waiting_on_review" });
     expect(wakeup?.status).toBe("skipped");
     expect(wakeup?.error).toContain("continuation summary says the executor should wait");
+    expect(agent?.status).toBe("idle");
     expect(countExecuteCallsForRun(runId)).toBe(0);
   });
 });
