@@ -6103,6 +6103,8 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
       },
     });
 
+    await finalizeAgentStatus(run.agentId, "cancelled");
+
     return cancelled;
   }
 
@@ -6305,6 +6307,8 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
       message: staleness.reason,
       payload: staleness.details,
     });
+
+    await finalizeAgentStatus(run.agentId, "cancelled");
 
     return cancelled;
   }
