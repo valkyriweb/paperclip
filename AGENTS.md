@@ -157,6 +157,8 @@ When adding endpoints:
 
 ## 10. Pull Request Requirements
 
+**PR target is always the fork, never upstream.** This clone has `origin=valkyriweb/paperclip` (fork) and `upstream=paperclipai/paperclip` (read-only). Luke has READ permission on upstream. Every `gh pr create` must target `valkyriweb/paperclip` — pass `--repo valkyriweb/paperclip` explicitly if there is any doubt. Do **not** pass `--repo paperclipai/paperclip`. Violated 2026-05-17 (PRs #6197–#6200, all closed).
+
 When creating a pull request (via `gh pr create` or any other method), you **must** read and fill in every section of [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md). Do not craft ad-hoc PR bodies — use the template as the structure for your PR description. Required sections:
 
 - **Thinking Path** — trace reasoning from project context to this change (see `CONTRIBUTING.md` for examples)
@@ -216,3 +218,28 @@ PR #2218 (`feat/external-adapter-phase1`) adds external adapter support. See roo
 - `createServerAdapter()` must include ALL optional fields (especially `detectModel`)
 - Built-in UI adapters can shadow external plugin parsers — remove built-in when fully externalizing
 - Reference external adapters: Hermes (`@henkey/hermes-paperclip-adapter` or `file:`) and Droid (npm)
+
+### First-Party Plugin Packages
+
+These live under `packages/plugins/` after the upstream `v2026.525.x` merge. They are workspace packages in this checkout, not global installs.
+
+Installable/operator-facing packages:
+
+- `@paperclipai/plugin-cloudflare-sandbox` — Cloudflare sandbox provider for Paperclip environments.
+- `@paperclipai/plugin-daytona` — Daytona sandbox provider.
+- `@paperclipai/plugin-e2b` — E2B sandbox provider.
+- `@paperclipai/plugin-exe-dev` — exe.dev sandbox provider.
+- `@paperclipai/plugin-modal` — Modal sandbox provider. Configure via **Company Settings → Environments** with Modal app/image/token fields; Node 22+ is the vendor-supported runtime, Node 20 is best-effort.
+- `@paperclipai/plugin-workspace-diff` — execution workspace Changes/diff tab plugin.
+- `@paperclipai/plugin-sdk` — plugin authoring SDK.
+- `@paperclipai/create-paperclip-plugin` — plugin scaffold/create helper.
+
+Private/reference/dev packages:
+
+- `@paperclipai/plugin-fake-sandbox` — deterministic fake sandbox provider for tests/dev.
+- `@paperclipai/plugin-llm-wiki` — local-file LLM Wiki ingestion/query/lint workflows; currently private.
+- `packages/plugins/examples/plugin-hello-world-example` — dashboard widget reference plugin.
+- `packages/plugins/examples/plugin-file-browser-example` — project sidebar/detail file browser example.
+- `packages/plugins/examples/plugin-kitchen-sink-example` — broad plugin API reference.
+- `packages/plugins/examples/plugin-authoring-smoke-example` — plugin authoring smoke fixture.
+- `packages/plugins/examples/plugin-orchestration-smoke-example` — orchestration API smoke fixture.

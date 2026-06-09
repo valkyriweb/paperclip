@@ -7,6 +7,20 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+export function asObject(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+export function asBoolean(value: unknown, fallback: boolean) {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+export function asFiniteNumber(value: unknown, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
 export function formatCents(cents: number): string {
   return `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
@@ -61,15 +75,75 @@ export function formatTokens(n: number): string {
   return String(n);
 }
 
-/** Map a raw provider slug to a display-friendly name. */
+/** Humanize a millisecond duration into a compact `1h 2m`, `45m 12s`, `12s` string. */
+export function formatDurationMs(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return "0s";
+  const totalSeconds = Math.round(ms / 1000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes < 60) return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  if (hours < 24) {
+    return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+  }
+  const days = Math.floor(hours / 24);
+  const remainingHours = hours % 24;
+  return remainingHours > 0 ? `${days}d ${remainingHours}h` : `${days}d`;
+}
+
+/**
+ * Map a raw provider OR biller slug to a display-friendly name.
+ *
+ * The Costs dashboard's Billers tab passes biller strings here (not just
+ * providers), so this map must cover every biller our emitters can produce:
+ *
+ *   - Direct-API providers (anthropic, openai, ...): the slug from the
+ *     emitter or pricing seed.
+ *   - Hybrid CLI billers (claude-bridge, claude-code, openai-codex): set
+ *     by P4b watcher + claude-bridge emitter + Pi extension.
+ *   - Subscription-only providers (github-copilot).
+ *   - Forwarders (multica): the daemon's forwarder posts biller=multica.
+ *
+ * Anything not in the map falls back to the raw slug, which renders as
+ * lowercase ASCII on the dashboard — a smell that the slug needs adding
+ * here.
+ *
+ * Substream: agent-system/PAPERCLIP-BUDGET-INTEGRATION.md G2 UI follow-up.
+ */
 export function providerDisplayName(provider: string): string {
   const map: Record<string, string> = {
+    // Direct-API providers (covered by SERVER_METERED_PROVIDERS).
     anthropic: "Anthropic",
-    aws_bedrock: "AWS Bedrock",
     openai: "OpenAI",
-    openrouter: "OpenRouter",
-    chatgpt: "ChatGPT",
     google: "Google",
+    "google-vertex": "Google Vertex AI",
+    "amazon-bedrock": "Amazon Bedrock",
+    aws_bedrock: "AWS Bedrock", // legacy alias kept for older rows
+    "azure-openai-responses": "Azure OpenAI",
+    deepseek: "DeepSeek",
+    groq: "Groq",
+    xai: "xAI",
+    openrouter: "OpenRouter",
+    "vercel-ai-gateway": "Vercel AI Gateway",
+    mistral: "Mistral",
+    cohere: "Cohere",
+    perplexity: "Perplexity",
+
+    // Hybrid CLI billers (P2-claude-bridge + P4b watcher + Pi extension).
+    "claude-bridge": "Claude Bridge",
+    "claude-code": "Claude Code",
+    "openai-codex": "Codex CLI",
+
+    // Subscription-only providers.
+    "github-copilot": "GitHub Copilot",
+
+    // Forwarders / daemons.
+    multica: "Multica",
+
+    // Existing entries kept.
+    chatgpt: "ChatGPT",
     cursor: "Cursor",
     jetbrains: "JetBrains AI",
   };

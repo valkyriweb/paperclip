@@ -3,6 +3,16 @@ export const label = "OpenClaw Gateway";
 
 export const models: { id: string; label: string }[] = [];
 
+export const modelProfiles = [
+  {
+    key: "cheap" as const,
+    label: "Cheap",
+    description: "Use the agent's configured low-cost OpenClaw model lane.",
+    adapterConfig: {},
+    source: "adapter_default" as const,
+  },
+];
+
 export const agentConfigurationDoc = `# openclaw_gateway agent configuration
 
 Adapter: openclaw_gateway
@@ -31,6 +41,7 @@ Gateway connect identity fields:
 - disableDeviceAuth (boolean, optional): disable signed device payload in connect params (default false)
 
 Request behavior fields:
+- model (string, optional): provider/model id from OpenClaw models.list, e.g. openai-codex/gpt-5.2; sent as gateway provider/model override
 - payloadTemplate (object, optional): additional fields merged into gateway agent params
 - workspaceRuntime (object, optional): reserved workspace runtime metadata; workspace runtime services are manually controlled from the workspace UI and are not auto-started by heartbeats
 - timeoutSec (number, optional): adapter timeout in seconds (default 120)

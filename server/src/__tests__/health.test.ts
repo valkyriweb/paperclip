@@ -64,6 +64,29 @@ describe("GET /health", () => {
     });
   });
 
+  it("returns 503 with live route still healthy when the DB probe hangs past the timeout", async () => {
+    process.env.PAPERCLIP_HEALTH_DB_TIMEOUT_MS = "50";
+    const db = {
+      // Never resolves — simulates a saturated pool / unreachable Postgres.
+      execute: vi.fn().mockReturnValue(new Promise(() => {})),
+    } as unknown as Db;
+    const app = createApp(db);
+
+    const liveRes = await request(app).get("/health/live");
+    expect(liveRes.status).toBe(200);
+    expect(liveRes.body).toEqual({ status: "ok" });
+
+    const res = await request(app).get("/health");
+    expect(res.status).toBe(503);
+    expect(res.body).toEqual({
+      status: "unhealthy",
+      version: serverVersion,
+      error: "database_unreachable",
+    });
+
+    delete process.env.PAPERCLIP_HEALTH_DB_TIMEOUT_MS;
+  }, 15_000);
+
   it("redacts detailed metadata for anonymous requests in authenticated mode", async () => {
     const devServerStatus = await import("../dev-server-status.js");
     vi.spyOn(devServerStatus, "readPersistedDevServerStatus").mockReturnValue(undefined);

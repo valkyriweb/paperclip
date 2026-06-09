@@ -1,0 +1,5136 @@
+{
+  "schema_version": 1,
+  "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+  "source_snapshot_path": "reference/vercel-ai-gateway/models.json",
+  "row_count": 180,
+  "skipped": {
+    "non_language": 85,
+    "no_input_output": 6
+  },
+  "rows": [
+    {
+      "provider": "alibaba",
+      "model": "qwen-3-14b",
+      "vendor_model_id": "alibaba/qwen-3-14b",
+      "vendor_display_name": "Qwen3-14B",
+      "input_per_token_usd": "0.00000012",
+      "output_per_token_usd": "0.00000024",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1743465600,
+      "context_window": 40960,
+      "max_output_tokens": 16384,
+      "tags": [
+        "reasoning",
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "alibaba",
+      "model": "qwen-3-235b",
+      "vendor_model_id": "alibaba/qwen-3-235b",
+      "vendor_display_name": "Qwen3 235B A22b Instruct 2507",
+      "input_per_token_usd": "0.0000006",
+      "output_per_token_usd": "0.0000012",
+      "cache_read_per_token_usd": "0.0000006",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1743465600,
+      "context_window": 131000,
+      "max_output_tokens": 40000,
+      "tags": [
+        "tool-use",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "alibaba",
+      "model": "qwen-3-30b",
+      "vendor_model_id": "alibaba/qwen-3-30b",
+      "vendor_display_name": "Qwen3-30B-A3B",
+      "input_per_token_usd": "0.00000008",
+      "output_per_token_usd": "0.00000029",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1743465600,
+      "context_window": 40960,
+      "max_output_tokens": 16384,
+      "tags": [
+        "reasoning",
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "alibaba",
+      "model": "qwen-3-32b",
+      "vendor_model_id": "alibaba/qwen-3-32b",
+      "vendor_display_name": "Qwen 3 32B",
+      "input_per_token_usd": "0.00000016",
+      "output_per_token_usd": "0.00000064",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1743465600,
+      "context_window": 128000,
+      "max_output_tokens": 8192,
+      "tags": [
+        "reasoning",
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "alibaba",
+      "model": "qwen-3-6-max-preview",
+      "vendor_model_id": "alibaba/qwen-3.6-max-preview",
+      "vendor_display_name": "Qwen 3.6 Max Preview",
+      "input_per_token_usd": "0.0000013",
+      "output_per_token_usd": "0.0000078",
+      "cache_read_per_token_usd": "0.00000026",
+      "cache_write_per_token_usd": "0.000001625",
+      "tiers_json": {
+        "input_tiers": [
+          {
+            "cost": "0.0000013",
+            "min": 0,
+            "max": 128000
+          },
+          {
+            "cost": "0.000002",
+            "min": 128000
+          }
+        ],
+        "output_tiers": [
+          {
+            "cost": "0.0000078",
+            "min": 0,
+            "max": 128000
+          },
+          {
+            "cost": "0.000012",
+            "min": 128000
+          }
+        ],
+        "input_cache_read_tiers": [
+          {
+            "cost": "0.00000026",
+            "min": 0,
+            "max": 128000
+          },
+          {
+            "cost": "0.0000002",
+            "min": 128000
+          }
+        ],
+        "input_cache_write_tiers": [
+          {
+            "cost": "0.000001625",
+            "min": 0,
+            "max": 128000
+          },
+          {
+            "cost": "0.0000025",
+            "min": 128000
+          }
+        ]
+      },
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1776643200,
+      "context_window": 240000,
+      "max_output_tokens": 64000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching",
+        "file-input",
+        "vision"
+      ]
+    },
+    {
+      "provider": "alibaba",
+      "model": "qwen3-235b-a22b-thinking",
+      "vendor_model_id": "alibaba/qwen3-235b-a22b-thinking",
+      "vendor_display_name": "Qwen3 VL 235B A22B Thinking",
+      "input_per_token_usd": "0.0000004",
+      "output_per_token_usd": "0.000004",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1758672000,
+      "context_window": 131072,
+      "max_output_tokens": 32768,
+      "tags": [
+        "vision",
+        "reasoning",
+        "tool-use",
+        "file-input"
+      ]
+    },
+    {
+      "provider": "alibaba",
+      "model": "qwen3-5-flash",
+      "vendor_model_id": "alibaba/qwen3.5-flash",
+      "vendor_display_name": "Qwen 3.5 Flash",
+      "input_per_token_usd": "0.0000001",
+      "output_per_token_usd": "0.0000004",
+      "cache_read_per_token_usd": "0.000000001",
+      "cache_write_per_token_usd": "0.000000125",
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1771891200,
+      "context_window": 1000000,
+      "max_output_tokens": 64000,
+      "tags": [
+        "vision",
+        "explicit-caching",
+        "file-input",
+        "reasoning",
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "alibaba",
+      "model": "qwen3-5-plus",
+      "vendor_model_id": "alibaba/qwen3.5-plus",
+      "vendor_display_name": "Qwen 3.5 Plus",
+      "input_per_token_usd": "0.0000004",
+      "output_per_token_usd": "0.0000024",
+      "cache_read_per_token_usd": "0.00000004",
+      "cache_write_per_token_usd": "0.0000005",
+      "tiers_json": {
+        "input_tiers": [
+          {
+            "cost": "0.0000004",
+            "min": 0,
+            "max": 256001
+          },
+          {
+            "cost": "0.0000012",
+            "min": 256001
+          }
+        ],
+        "output_tiers": [
+          {
+            "cost": "0.0000024",
+            "min": 0,
+            "max": 256001
+          },
+          {
+            "cost": "0.0000072",
+            "min": 256001
+          }
+        ],
+        "input_cache_read_tiers": [
+          {
+            "cost": "0.00000004",
+            "min": 0,
+            "max": 256001
+          },
+          {
+            "cost": "0.00000012",
+            "min": 256001
+          }
+        ],
+        "input_cache_write_tiers": [
+          {
+            "cost": "0.0000005",
+            "min": 0,
+            "max": 256001
+          },
+          {
+            "cost": "0.0000015",
+            "min": 256001
+          }
+        ]
+      },
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1771200000,
+      "context_window": 1000000,
+      "max_output_tokens": 64000,
+      "tags": [
+        "vision",
+        "explicit-caching",
+        "file-input",
+        "reasoning",
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "alibaba",
+      "model": "qwen3-6-27b",
+      "vendor_model_id": "alibaba/qwen3.6-27b",
+      "vendor_display_name": "Qwen 3.6 27B",
+      "input_per_token_usd": "0.0000006",
+      "output_per_token_usd": "0.0000036",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1776816000,
+      "context_window": 256000,
+      "max_output_tokens": 256000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching",
+        "file-input",
+        "vision"
+      ]
+    },
+    {
+      "provider": "alibaba",
+      "model": "qwen3-6-plus",
+      "vendor_model_id": "alibaba/qwen3.6-plus",
+      "vendor_display_name": "Qwen 3.6 Plus",
+      "input_per_token_usd": "0.0000005",
+      "output_per_token_usd": "0.000003",
+      "cache_read_per_token_usd": "0.0000001",
+      "cache_write_per_token_usd": "0.000000625",
+      "tiers_json": {
+        "input_tiers": [
+          {
+            "cost": "0.0000005",
+            "min": 0,
+            "max": 256000
+          },
+          {
+            "cost": "0.000002",
+            "min": 256000
+          }
+        ],
+        "output_tiers": [
+          {
+            "cost": "0.000003",
+            "min": 0,
+            "max": 256000
+          },
+          {
+            "cost": "0.000006",
+            "min": 256000
+          }
+        ],
+        "input_cache_read_tiers": [
+          {
+            "cost": "0.0000001",
+            "min": 0,
+            "max": 256000
+          },
+          {
+            "cost": "0.0000002",
+            "min": 256000
+          }
+        ],
+        "input_cache_write_tiers": [
+          {
+            "cost": "0.000000625",
+            "min": 0,
+            "max": 256000
+          },
+          {
+            "cost": "0.0000025",
+            "min": 256000
+          }
+        ]
+      },
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1775088000,
+      "context_window": 1000000,
+      "max_output_tokens": 64000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching",
+        "vision",
+        "file-input"
+      ]
+    },
+    {
+      "provider": "alibaba",
+      "model": "qwen3-coder",
+      "vendor_model_id": "alibaba/qwen3-coder",
+      "vendor_display_name": "Qwen3 Coder 480B A35B Instruct",
+      "input_per_token_usd": "0.0000015",
+      "output_per_token_usd": "0.0000075",
+      "cache_read_per_token_usd": "0.0000003",
+      "cache_write_per_token_usd": null,
+      "tiers_json": {
+        "input_tiers": [
+          {
+            "cost": "0.0000015",
+            "min": 0,
+            "max": 32001
+          },
+          {
+            "cost": "0.0000027",
+            "min": 32001,
+            "max": 128001
+          },
+          {
+            "cost": "0.0000045",
+            "min": 128001
+          }
+        ],
+        "output_tiers": [
+          {
+            "cost": "0.0000075",
+            "min": 0,
+            "max": 32001
+          },
+          {
+            "cost": "0.0000135",
+            "min": 32001,
+            "max": 128001
+          },
+          {
+            "cost": "0.0000225",
+            "min": 128001
+          }
+        ],
+        "input_cache_read_tiers": [
+          {
+            "cost": "0.0000003",
+            "min": 0,
+            "max": 32001
+          },
+          {
+            "cost": "0.00000054",
+            "min": 32001,
+            "max": 128001
+          },
+          {
+            "cost": "0.0000009",
+            "min": 128001
+          }
+        ]
+      },
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1743465600,
+      "context_window": 262144,
+      "max_output_tokens": 65536,
+      "tags": [
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "alibaba",
+      "model": "qwen3-coder-30b-a3b",
+      "vendor_model_id": "alibaba/qwen3-coder-30b-a3b",
+      "vendor_display_name": "Qwen 3 Coder 30B A3B Instruct",
+      "input_per_token_usd": "0.00000015",
+      "output_per_token_usd": "0.0000006",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1743465600,
+      "context_window": 262144,
+      "max_output_tokens": 8192,
+      "tags": [
+        "reasoning",
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "alibaba",
+      "model": "qwen3-coder-next",
+      "vendor_model_id": "alibaba/qwen3-coder-next",
+      "vendor_display_name": "Qwen3 Coder Next",
+      "input_per_token_usd": "0.0000005",
+      "output_per_token_usd": "0.0000012",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1753142400,
+      "context_window": 256000,
+      "max_output_tokens": 256000,
+      "tags": [
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "alibaba",
+      "model": "qwen3-coder-plus",
+      "vendor_model_id": "alibaba/qwen3-coder-plus",
+      "vendor_display_name": "Qwen3 Coder Plus",
+      "input_per_token_usd": "0.000001",
+      "output_per_token_usd": "0.000005",
+      "cache_read_per_token_usd": "0.0000002",
+      "cache_write_per_token_usd": null,
+      "tiers_json": {
+        "input_tiers": [
+          {
+            "cost": "0.000001",
+            "min": 0,
+            "max": 32001
+          },
+          {
+            "cost": "0.0000018",
+            "min": 32001,
+            "max": 128001
+          },
+          {
+            "cost": "0.000003",
+            "min": 128001,
+            "max": 256001
+          },
+          {
+            "cost": "0.000006",
+            "min": 256001
+          }
+        ],
+        "output_tiers": [
+          {
+            "cost": "0.000005",
+            "min": 0,
+            "max": 32001
+          },
+          {
+            "cost": "0.000009",
+            "min": 32001,
+            "max": 128001
+          },
+          {
+            "cost": "0.000015",
+            "min": 128001,
+            "max": 256001
+          },
+          {
+            "cost": "0.00006",
+            "min": 256001
+          }
+        ],
+        "input_cache_read_tiers": [
+          {
+            "cost": "0.0000002",
+            "min": 0,
+            "max": 32001
+          },
+          {
+            "cost": "0.00000036",
+            "min": 32001,
+            "max": 128001
+          },
+          {
+            "cost": "0.0000006",
+            "min": 128001,
+            "max": 256001
+          },
+          {
+            "cost": "0.0000012",
+            "min": 256001
+          }
+        ]
+      },
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1753228800,
+      "context_window": 1000000,
+      "max_output_tokens": 65536,
+      "tags": [
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "alibaba",
+      "model": "qwen3-max",
+      "vendor_model_id": "alibaba/qwen3-max",
+      "vendor_display_name": "Qwen3 Max",
+      "input_per_token_usd": "0.0000012",
+      "output_per_token_usd": "0.000006",
+      "cache_read_per_token_usd": "0.00000024",
+      "cache_write_per_token_usd": null,
+      "tiers_json": {
+        "input_tiers": [
+          {
+            "cost": "0.0000012",
+            "min": 0,
+            "max": 32001
+          },
+          {
+            "cost": "0.0000024",
+            "min": 32001,
+            "max": 128001
+          },
+          {
+            "cost": "0.000003",
+            "min": 128001
+          }
+        ],
+        "output_tiers": [
+          {
+            "cost": "0.000006",
+            "min": 0,
+            "max": 32001
+          },
+          {
+            "cost": "0.000012",
+            "min": 32001,
+            "max": 128001
+          },
+          {
+            "cost": "0.000015",
+            "min": 128001
+          }
+        ],
+        "input_cache_read_tiers": [
+          {
+            "cost": "0.00000024",
+            "min": 0,
+            "max": 32001
+          },
+          {
+            "cost": "0.00000048",
+            "min": 32001,
+            "max": 128001
+          },
+          {
+            "cost": "0.0000006",
+            "min": 128001
+          }
+        ]
+      },
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1758585600,
+      "context_window": 262144,
+      "max_output_tokens": 32768,
+      "tags": [
+        "tool-use",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "alibaba",
+      "model": "qwen3-max-preview",
+      "vendor_model_id": "alibaba/qwen3-max-preview",
+      "vendor_display_name": "Qwen3 Max Preview",
+      "input_per_token_usd": "0.0000012",
+      "output_per_token_usd": "0.000006",
+      "cache_read_per_token_usd": "0.00000024",
+      "cache_write_per_token_usd": null,
+      "tiers_json": {
+        "input_tiers": [
+          {
+            "cost": "0.0000012",
+            "min": 0,
+            "max": 32001
+          },
+          {
+            "cost": "0.0000024",
+            "min": 32001,
+            "max": 128001
+          },
+          {
+            "cost": "0.000003",
+            "min": 128001
+          }
+        ],
+        "output_tiers": [
+          {
+            "cost": "0.000006",
+            "min": 0,
+            "max": 32001
+          },
+          {
+            "cost": "0.000012",
+            "min": 32001,
+            "max": 128001
+          },
+          {
+            "cost": "0.000015",
+            "min": 128001
+          }
+        ],
+        "input_cache_read_tiers": [
+          {
+            "cost": "0.00000024",
+            "min": 0,
+            "max": 32001
+          },
+          {
+            "cost": "0.00000048",
+            "min": 32001,
+            "max": 128001
+          },
+          {
+            "cost": "0.0000006",
+            "min": 128001
+          }
+        ]
+      },
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1758585600,
+      "context_window": 262144,
+      "max_output_tokens": 32768,
+      "tags": [
+        "tool-use",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "alibaba",
+      "model": "qwen3-max-thinking",
+      "vendor_model_id": "alibaba/qwen3-max-thinking",
+      "vendor_display_name": "Qwen 3 Max Thinking",
+      "input_per_token_usd": "0.0000012",
+      "output_per_token_usd": "0.000006",
+      "cache_read_per_token_usd": "0.00000024",
+      "cache_write_per_token_usd": null,
+      "tiers_json": {
+        "input_tiers": [
+          {
+            "cost": "0.0000012",
+            "min": 0,
+            "max": 32001
+          },
+          {
+            "cost": "0.0000024",
+            "min": 32001,
+            "max": 128001
+          },
+          {
+            "cost": "0.000003",
+            "min": 128001
+          }
+        ],
+        "output_tiers": [
+          {
+            "cost": "0.000006",
+            "min": 0,
+            "max": 32001
+          },
+          {
+            "cost": "0.000012",
+            "min": 32001,
+            "max": 128001
+          },
+          {
+            "cost": "0.000015",
+            "min": 128001
+          }
+        ],
+        "input_cache_read_tiers": [
+          {
+            "cost": "0.00000024",
+            "min": 0,
+            "max": 32001
+          },
+          {
+            "cost": "0.00000048",
+            "min": 32001,
+            "max": 128001
+          },
+          {
+            "cost": "0.0000006",
+            "min": 128001
+          }
+        ]
+      },
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": null,
+      "context_window": 256000,
+      "max_output_tokens": 65536,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "alibaba",
+      "model": "qwen3-next-80b-a3b-instruct",
+      "vendor_model_id": "alibaba/qwen3-next-80b-a3b-instruct",
+      "vendor_display_name": "Qwen3 Next 80B A3B Instruct",
+      "input_per_token_usd": "0.00000015",
+      "output_per_token_usd": "0.0000012",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1757635200,
+      "context_window": 131072,
+      "max_output_tokens": 32768,
+      "tags": []
+    },
+    {
+      "provider": "alibaba",
+      "model": "qwen3-next-80b-a3b-thinking",
+      "vendor_model_id": "alibaba/qwen3-next-80b-a3b-thinking",
+      "vendor_display_name": "Qwen3 Next 80B A3B Thinking",
+      "input_per_token_usd": "0.00000015",
+      "output_per_token_usd": "0.0000012",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1757635200,
+      "context_window": 131072,
+      "max_output_tokens": 32768,
+      "tags": []
+    },
+    {
+      "provider": "alibaba",
+      "model": "qwen3-vl-235b-a22b-instruct",
+      "vendor_model_id": "alibaba/qwen3-vl-235b-a22b-instruct",
+      "vendor_display_name": "Qwen3 VL 235B A22B Instruct",
+      "input_per_token_usd": "0.0000004",
+      "output_per_token_usd": "0.0000016",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1758672000,
+      "context_window": 131072,
+      "max_output_tokens": 129024,
+      "tags": [
+        "vision"
+      ]
+    },
+    {
+      "provider": "alibaba",
+      "model": "qwen3-vl-instruct",
+      "vendor_model_id": "alibaba/qwen3-vl-instruct",
+      "vendor_display_name": "Qwen3 VL 235B A22B Instruct",
+      "input_per_token_usd": "0.0000004",
+      "output_per_token_usd": "0.0000016",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1758672000,
+      "context_window": 131072,
+      "max_output_tokens": 129024,
+      "tags": [
+        "vision"
+      ]
+    },
+    {
+      "provider": "alibaba",
+      "model": "qwen3-vl-thinking",
+      "vendor_model_id": "alibaba/qwen3-vl-thinking",
+      "vendor_display_name": "Qwen3 VL 235B A22B Thinking",
+      "input_per_token_usd": "0.0000004",
+      "output_per_token_usd": "0.000004",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1758672000,
+      "context_window": 131072,
+      "max_output_tokens": 32768,
+      "tags": [
+        "vision",
+        "reasoning",
+        "tool-use",
+        "file-input"
+      ]
+    },
+    {
+      "provider": "amazon",
+      "model": "nova-2-lite",
+      "vendor_model_id": "amazon/nova-2-lite",
+      "vendor_display_name": "Nova 2 Lite",
+      "input_per_token_usd": "0.0000003",
+      "output_per_token_usd": "0.0000025",
+      "cache_read_per_token_usd": "0.000000075",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1733011200,
+      "context_window": 1000000,
+      "max_output_tokens": 1000000,
+      "tags": [
+        "reasoning",
+        "vision"
+      ]
+    },
+    {
+      "provider": "amazon",
+      "model": "nova-lite",
+      "vendor_model_id": "amazon/nova-lite",
+      "vendor_display_name": "Nova Lite",
+      "input_per_token_usd": "0.00000006",
+      "output_per_token_usd": "0.00000024",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1733184000,
+      "context_window": 300000,
+      "max_output_tokens": 8192,
+      "tags": []
+    },
+    {
+      "provider": "amazon",
+      "model": "nova-micro",
+      "vendor_model_id": "amazon/nova-micro",
+      "vendor_display_name": "Nova Micro",
+      "input_per_token_usd": "0.000000035",
+      "output_per_token_usd": "0.00000014",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": null,
+      "context_window": 128000,
+      "max_output_tokens": 8192,
+      "tags": []
+    },
+    {
+      "provider": "amazon",
+      "model": "nova-pro",
+      "vendor_model_id": "amazon/nova-pro",
+      "vendor_display_name": "Nova Pro",
+      "input_per_token_usd": "0.0000008",
+      "output_per_token_usd": "0.0000032",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1733184000,
+      "context_window": 300000,
+      "max_output_tokens": 8192,
+      "tags": []
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-3-5-haiku",
+      "vendor_model_id": "anthropic/claude-3.5-haiku",
+      "vendor_display_name": "Claude 3.5 Haiku",
+      "input_per_token_usd": "0.0000008",
+      "output_per_token_usd": "0.000004",
+      "cache_read_per_token_usd": "0.00000008",
+      "cache_write_per_token_usd": "0.000001",
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1699228800,
+      "context_window": 200000,
+      "max_output_tokens": 8192,
+      "tags": [
+        "file-input",
+        "tool-use",
+        "vision",
+        "explicit-caching"
+      ]
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-3-haiku",
+      "vendor_model_id": "anthropic/claude-3-haiku",
+      "vendor_display_name": "Claude 3 Haiku",
+      "input_per_token_usd": "0.00000025",
+      "output_per_token_usd": "0.00000125",
+      "cache_read_per_token_usd": "0.00000003",
+      "cache_write_per_token_usd": "0.0000003",
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1677628800,
+      "context_window": 200000,
+      "max_output_tokens": 4096,
+      "tags": [
+        "tool-use",
+        "vision",
+        "explicit-caching"
+      ]
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-haiku-4-5",
+      "vendor_model_id": "anthropic/claude-haiku-4.5",
+      "vendor_display_name": "Claude Haiku 4.5",
+      "input_per_token_usd": "0.000001",
+      "output_per_token_usd": "0.000005",
+      "cache_read_per_token_usd": "0.0000001",
+      "cache_write_per_token_usd": "0.00000125",
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1760486400,
+      "context_window": 200000,
+      "max_output_tokens": 64000,
+      "tags": [
+        "file-input",
+        "reasoning",
+        "tool-use",
+        "vision",
+        "explicit-caching"
+      ]
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-4",
+      "vendor_model_id": "anthropic/claude-opus-4",
+      "vendor_display_name": "Claude Opus 4",
+      "input_per_token_usd": "0.000015",
+      "output_per_token_usd": "0.000075",
+      "cache_read_per_token_usd": "0.0000015",
+      "cache_write_per_token_usd": "0.00001875",
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1754352000,
+      "context_window": 200000,
+      "max_output_tokens": 32000,
+      "tags": [
+        "file-input",
+        "reasoning",
+        "tool-use",
+        "vision",
+        "explicit-caching"
+      ]
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-4-1",
+      "vendor_model_id": "anthropic/claude-opus-4.1",
+      "vendor_display_name": "Claude Opus 4.1",
+      "input_per_token_usd": "0.000015",
+      "output_per_token_usd": "0.000075",
+      "cache_read_per_token_usd": "0.0000015",
+      "cache_write_per_token_usd": "0.00001875",
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1747872000,
+      "context_window": 200000,
+      "max_output_tokens": 32000,
+      "tags": [
+        "file-input",
+        "reasoning",
+        "tool-use",
+        "vision",
+        "explicit-caching"
+      ]
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-4-5",
+      "vendor_model_id": "anthropic/claude-opus-4.5",
+      "vendor_display_name": "Claude Opus 4.5",
+      "input_per_token_usd": "0.000005",
+      "output_per_token_usd": "0.000025",
+      "cache_read_per_token_usd": "0.0000005",
+      "cache_write_per_token_usd": "0.00000625",
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1732406400,
+      "context_window": 200000,
+      "max_output_tokens": 64000,
+      "tags": [
+        "tool-use",
+        "reasoning",
+        "vision",
+        "file-input",
+        "explicit-caching"
+      ]
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-4-6",
+      "vendor_model_id": "anthropic/claude-opus-4.6",
+      "vendor_display_name": "Claude Opus 4.6",
+      "input_per_token_usd": "0.000005",
+      "output_per_token_usd": "0.000025",
+      "cache_read_per_token_usd": "0.0000005",
+      "cache_write_per_token_usd": "0.00000625",
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1770249600,
+      "context_window": 1000000,
+      "max_output_tokens": 128000,
+      "tags": [
+        "tool-use",
+        "reasoning",
+        "vision",
+        "file-input",
+        "explicit-caching",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-4-7",
+      "vendor_model_id": "anthropic/claude-opus-4.7",
+      "vendor_display_name": "Claude Opus 4.7",
+      "input_per_token_usd": "0.000005",
+      "output_per_token_usd": "0.000025",
+      "cache_read_per_token_usd": "0.0000005",
+      "cache_write_per_token_usd": "0.00000625",
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1776297600,
+      "context_window": 1000000,
+      "max_output_tokens": 128000,
+      "tags": [
+        "tool-use",
+        "reasoning",
+        "vision",
+        "file-input",
+        "explicit-caching",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4",
+      "vendor_model_id": "anthropic/claude-sonnet-4",
+      "vendor_display_name": "Claude Sonnet 4",
+      "input_per_token_usd": "0.000003",
+      "output_per_token_usd": "0.000015",
+      "cache_read_per_token_usd": "0.0000003",
+      "cache_write_per_token_usd": "0.00000375",
+      "tiers_json": {
+        "input_tiers": [
+          {
+            "cost": "0.000003",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.000006",
+            "min": 200001
+          }
+        ],
+        "output_tiers": [
+          {
+            "cost": "0.000015",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.0000225",
+            "min": 200001
+          }
+        ],
+        "input_cache_read_tiers": [
+          {
+            "cost": "0.0000003",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.0000006",
+            "min": 200001
+          }
+        ],
+        "input_cache_write_tiers": [
+          {
+            "cost": "0.00000375",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.0000075",
+            "min": 200001
+          }
+        ]
+      },
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1747872000,
+      "context_window": 1000000,
+      "max_output_tokens": 64000,
+      "tags": [
+        "file-input",
+        "reasoning",
+        "tool-use",
+        "vision",
+        "explicit-caching"
+      ]
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-5",
+      "vendor_model_id": "anthropic/claude-sonnet-4.5",
+      "vendor_display_name": "Claude Sonnet 4.5",
+      "input_per_token_usd": "0.000003",
+      "output_per_token_usd": "0.000015",
+      "cache_read_per_token_usd": "0.0000003",
+      "cache_write_per_token_usd": "0.00000375",
+      "tiers_json": {
+        "input_tiers": [
+          {
+            "cost": "0.000003",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.000006",
+            "min": 200001
+          }
+        ],
+        "output_tiers": [
+          {
+            "cost": "0.000015",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.0000225",
+            "min": 200001
+          }
+        ],
+        "input_cache_read_tiers": [
+          {
+            "cost": "0.0000003",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.0000006",
+            "min": 200001
+          }
+        ],
+        "input_cache_write_tiers": [
+          {
+            "cost": "0.00000375",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.0000075",
+            "min": 200001
+          }
+        ]
+      },
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1759104000,
+      "context_window": 1000000,
+      "max_output_tokens": 64000,
+      "tags": [
+        "file-input",
+        "reasoning",
+        "tool-use",
+        "vision",
+        "explicit-caching"
+      ]
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "vendor_model_id": "anthropic/claude-sonnet-4.6",
+      "vendor_display_name": "Claude Sonnet 4.6",
+      "input_per_token_usd": "0.000003",
+      "output_per_token_usd": "0.000015",
+      "cache_read_per_token_usd": "0.0000003",
+      "cache_write_per_token_usd": "0.00000375",
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1771286400,
+      "context_window": 1000000,
+      "max_output_tokens": 128000,
+      "tags": [
+        "file-input",
+        "reasoning",
+        "tool-use",
+        "vision",
+        "explicit-caching",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "arcee-ai",
+      "model": "trinity-large-preview",
+      "vendor_model_id": "arcee-ai/trinity-large-preview",
+      "vendor_display_name": "Trinity Large Preview",
+      "input_per_token_usd": "0.00000025",
+      "output_per_token_usd": "0.000001",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1735689600,
+      "context_window": 131000,
+      "max_output_tokens": 131000,
+      "tags": [
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "arcee-ai",
+      "model": "trinity-large-thinking",
+      "vendor_model_id": "arcee-ai/trinity-large-thinking",
+      "vendor_display_name": "Trinity Large Thinking",
+      "input_per_token_usd": "0.00000025",
+      "output_per_token_usd": "0.0000009",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1775001600,
+      "context_window": 262100,
+      "max_output_tokens": 80000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "arcee-ai",
+      "model": "trinity-mini",
+      "vendor_model_id": "arcee-ai/trinity-mini",
+      "vendor_display_name": "Trinity Mini",
+      "input_per_token_usd": "0.000000045",
+      "output_per_token_usd": "0.00000015",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1764547200,
+      "context_window": 131072,
+      "max_output_tokens": 131072,
+      "tags": []
+    },
+    {
+      "provider": "bytedance",
+      "model": "seed-1-6",
+      "vendor_model_id": "bytedance/seed-1.6",
+      "vendor_display_name": "Seed 1.6",
+      "input_per_token_usd": "0.00000025",
+      "output_per_token_usd": "0.000002",
+      "cache_read_per_token_usd": "0.00000005",
+      "cache_write_per_token_usd": null,
+      "tiers_json": {
+        "input_tiers": [
+          {
+            "cost": "0.00000025",
+            "min": 0,
+            "max": 128001
+          },
+          {
+            "cost": "0.0000005",
+            "min": 128001
+          }
+        ],
+        "output_tiers": [
+          {
+            "cost": "0.000002",
+            "min": 0,
+            "max": 128001
+          },
+          {
+            "cost": "0.000004",
+            "min": 128001
+          }
+        ]
+      },
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1756684800,
+      "context_window": 256000,
+      "max_output_tokens": 32000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "bytedance",
+      "model": "seed-1-8",
+      "vendor_model_id": "bytedance/seed-1.8",
+      "vendor_display_name": "Bytedance Seed 1.8",
+      "input_per_token_usd": "0.00000025",
+      "output_per_token_usd": "0.000002",
+      "cache_read_per_token_usd": "0.00000005",
+      "cache_write_per_token_usd": null,
+      "tiers_json": {
+        "input_tiers": [
+          {
+            "cost": "0.00000025",
+            "min": 0,
+            "max": 128001
+          },
+          {
+            "cost": "0.0000005",
+            "min": 128001
+          }
+        ],
+        "output_tiers": [
+          {
+            "cost": "0.000002",
+            "min": 0,
+            "max": 128001
+          },
+          {
+            "cost": "0.000004",
+            "min": 128001
+          }
+        ]
+      },
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1756684800,
+      "context_window": 256000,
+      "max_output_tokens": 64000,
+      "tags": [
+        "reasoning",
+        "vision",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "cohere",
+      "model": "command-a",
+      "vendor_model_id": "cohere/command-a",
+      "vendor_display_name": "Command A",
+      "input_per_token_usd": "0.0000025",
+      "output_per_token_usd": "0.00001",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1741824000,
+      "context_window": 256000,
+      "max_output_tokens": 8000,
+      "tags": [
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "deepseek",
+      "model": "deepseek-r1",
+      "vendor_model_id": "deepseek/deepseek-r1",
+      "vendor_display_name": "DeepSeek-R1",
+      "input_per_token_usd": "0.00000135",
+      "output_per_token_usd": "0.0000054",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1737331200,
+      "context_window": 128000,
+      "max_output_tokens": 8192,
+      "tags": [
+        "reasoning",
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "deepseek",
+      "model": "deepseek-v3",
+      "vendor_model_id": "deepseek/deepseek-v3",
+      "vendor_display_name": "DeepSeek V3 0324",
+      "input_per_token_usd": "0.00000077",
+      "output_per_token_usd": "0.00000077",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1735171200,
+      "context_window": 163840,
+      "max_output_tokens": 16384,
+      "tags": [
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "deepseek",
+      "model": "deepseek-v3-1",
+      "vendor_model_id": "deepseek/deepseek-v3.1",
+      "vendor_display_name": "DeepSeek-V3.1",
+      "input_per_token_usd": "0.00000056",
+      "output_per_token_usd": "0.00000168",
+      "cache_read_per_token_usd": "0.00000028",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1755734400,
+      "context_window": 163840,
+      "max_output_tokens": 8192,
+      "tags": [
+        "reasoning",
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "deepseek",
+      "model": "deepseek-v3-1-terminus",
+      "vendor_model_id": "deepseek/deepseek-v3.1-terminus",
+      "vendor_display_name": "DeepSeek V3.1 Terminus",
+      "input_per_token_usd": "0.00000027",
+      "output_per_token_usd": "0.000001",
+      "cache_read_per_token_usd": "0.000000135",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1758499200,
+      "context_window": 131072,
+      "max_output_tokens": 65536,
+      "tags": [
+        "reasoning",
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "deepseek",
+      "model": "deepseek-v3-2",
+      "vendor_model_id": "deepseek/deepseek-v3.2",
+      "vendor_display_name": "DeepSeek V3.2",
+      "input_per_token_usd": "0.00000028",
+      "output_per_token_usd": "0.00000042",
+      "cache_read_per_token_usd": "0.000000028",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1764547200,
+      "context_window": 128000,
+      "max_output_tokens": 8000,
+      "tags": [
+        "tool-use",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "deepseek",
+      "model": "deepseek-v3-2-thinking",
+      "vendor_model_id": "deepseek/deepseek-v3.2-thinking",
+      "vendor_display_name": "DeepSeek V3.2 Thinking",
+      "input_per_token_usd": "0.00000062",
+      "output_per_token_usd": "0.00000185",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1764547200,
+      "context_window": 128000,
+      "max_output_tokens": 8000,
+      "tags": [
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "vendor_model_id": "deepseek/deepseek-v4-flash",
+      "vendor_display_name": "DeepSeek V4 Flash",
+      "input_per_token_usd": "0.00000014",
+      "output_per_token_usd": "0.00000028",
+      "cache_read_per_token_usd": "0.0000000028",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1776902400,
+      "context_window": 1000000,
+      "max_output_tokens": 384000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "deepseek",
+      "model": "deepseek-v4-pro",
+      "vendor_model_id": "deepseek/deepseek-v4-pro",
+      "vendor_display_name": "DeepSeek V4 Pro",
+      "input_per_token_usd": "0.000000435",
+      "output_per_token_usd": "0.00000087",
+      "cache_read_per_token_usd": "0.0000000036",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1776902400,
+      "context_window": 1000000,
+      "max_output_tokens": 384000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "google",
+      "model": "gemini-2-0-flash",
+      "vendor_model_id": "google/gemini-2.0-flash",
+      "vendor_display_name": "Gemini 2.0 Flash",
+      "input_per_token_usd": "0.00000015",
+      "output_per_token_usd": "0.0000006",
+      "cache_read_per_token_usd": "0.000000025",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1733875200,
+      "context_window": 1048576,
+      "max_output_tokens": 8192,
+      "tags": [
+        "file-input",
+        "tool-use",
+        "vision",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "google",
+      "model": "gemini-2-0-flash-lite",
+      "vendor_model_id": "google/gemini-2.0-flash-lite",
+      "vendor_display_name": "Gemini 2.0 Flash Lite",
+      "input_per_token_usd": "0.000000075",
+      "output_per_token_usd": "0.0000003",
+      "cache_read_per_token_usd": "0.00000002",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1733875200,
+      "context_window": 1048576,
+      "max_output_tokens": 8192,
+      "tags": [
+        "file-input",
+        "tool-use",
+        "vision",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "google",
+      "model": "gemini-2-5-flash",
+      "vendor_model_id": "google/gemini-2.5-flash",
+      "vendor_display_name": "Gemini 2.5 Flash",
+      "input_per_token_usd": "0.0000003",
+      "output_per_token_usd": "0.0000025",
+      "cache_read_per_token_usd": "0.00000003",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1742428800,
+      "context_window": 1000000,
+      "max_output_tokens": 65536,
+      "tags": [
+        "file-input",
+        "reasoning",
+        "tool-use",
+        "vision",
+        "web-search",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "google",
+      "model": "gemini-2-5-flash-image",
+      "vendor_model_id": "google/gemini-2.5-flash-image",
+      "vendor_display_name": "Nano Banana (Gemini 2.5 Flash Image)",
+      "input_per_token_usd": "0.0000003",
+      "output_per_token_usd": "0.0000025",
+      "cache_read_per_token_usd": "0.00000003",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1742428800,
+      "context_window": 32768,
+      "max_output_tokens": 65536,
+      "tags": [
+        "image-generation",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "google",
+      "model": "gemini-2-5-flash-lite",
+      "vendor_model_id": "google/gemini-2.5-flash-lite",
+      "vendor_display_name": "Gemini 2.5 Flash Lite",
+      "input_per_token_usd": "0.0000001",
+      "output_per_token_usd": "0.0000004",
+      "cache_read_per_token_usd": "0.00000001",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1750118400,
+      "context_window": 1048576,
+      "max_output_tokens": 65536,
+      "tags": [
+        "file-input",
+        "reasoning",
+        "tool-use",
+        "vision",
+        "web-search",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "google",
+      "model": "gemini-2-5-pro",
+      "vendor_model_id": "google/gemini-2.5-pro",
+      "vendor_display_name": "Gemini 2.5 Pro",
+      "input_per_token_usd": "0.00000125",
+      "output_per_token_usd": "0.00001",
+      "cache_read_per_token_usd": "0.000000125",
+      "cache_write_per_token_usd": null,
+      "tiers_json": {
+        "input_tiers": [
+          {
+            "cost": "0.00000125",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.0000025",
+            "min": 200001
+          }
+        ],
+        "output_tiers": [
+          {
+            "cost": "0.00001",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.000015",
+            "min": 200001
+          }
+        ],
+        "input_cache_read_tiers": [
+          {
+            "cost": "0.000000125",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.00000025",
+            "min": 200001
+          }
+        ]
+      },
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1742428800,
+      "context_window": 1048576,
+      "max_output_tokens": 65536,
+      "tags": [
+        "file-input",
+        "reasoning",
+        "tool-use",
+        "vision",
+        "web-search",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "google",
+      "model": "gemini-3-1-flash-image-preview",
+      "vendor_model_id": "google/gemini-3.1-flash-image-preview",
+      "vendor_display_name": "Gemini 3.1 Flash Image Preview (Nano Banana 2)",
+      "input_per_token_usd": "0.0000005",
+      "output_per_token_usd": "0.000003",
+      "cache_read_per_token_usd": "0.00000005",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1772064000,
+      "context_window": 131072,
+      "max_output_tokens": 32768,
+      "tags": [
+        "image-generation",
+        "web-search",
+        "vision",
+        "reasoning"
+      ]
+    },
+    {
+      "provider": "google",
+      "model": "gemini-3-1-flash-lite",
+      "vendor_model_id": "google/gemini-3.1-flash-lite",
+      "vendor_display_name": "Gemini 3.1 Flash Lite",
+      "input_per_token_usd": "0.00000025",
+      "output_per_token_usd": "0.0000015",
+      "cache_read_per_token_usd": "0.00000003",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1778112000,
+      "context_window": 1000000,
+      "max_output_tokens": 65000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching",
+        "file-input",
+        "vision",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "google",
+      "model": "gemini-3-1-flash-lite-preview",
+      "vendor_model_id": "google/gemini-3.1-flash-lite-preview",
+      "vendor_display_name": "Gemini 3.1 Flash Lite Preview",
+      "input_per_token_usd": "0.00000025",
+      "output_per_token_usd": "0.0000015",
+      "cache_read_per_token_usd": "0.00000003",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1772496000,
+      "context_window": 1000000,
+      "max_output_tokens": 65000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching",
+        "vision",
+        "file-input",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "google",
+      "model": "gemini-3-1-pro-preview",
+      "vendor_model_id": "google/gemini-3.1-pro-preview",
+      "vendor_display_name": "Gemini 3.1 Pro Preview",
+      "input_per_token_usd": "0.000002",
+      "output_per_token_usd": "0.000012",
+      "cache_read_per_token_usd": "0.0000002",
+      "cache_write_per_token_usd": null,
+      "tiers_json": {
+        "input_tiers": [
+          {
+            "cost": "0.000002",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.000004",
+            "min": 200001
+          }
+        ],
+        "output_tiers": [
+          {
+            "cost": "0.000012",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.000018",
+            "min": 200001
+          }
+        ],
+        "input_cache_read_tiers": [
+          {
+            "cost": "0.0000002",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.0000004",
+            "min": 200001
+          }
+        ]
+      },
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1763424000,
+      "context_window": 1000000,
+      "max_output_tokens": 64000,
+      "tags": [
+        "file-input",
+        "tool-use",
+        "reasoning",
+        "vision",
+        "web-search",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "google",
+      "model": "gemini-3-flash",
+      "vendor_model_id": "google/gemini-3-flash",
+      "vendor_display_name": "Gemini 3 Flash",
+      "input_per_token_usd": "0.0000005",
+      "output_per_token_usd": "0.000003",
+      "cache_read_per_token_usd": "0.00000005",
+      "cache_write_per_token_usd": null,
+      "tiers_json": {
+        "input_tiers": [
+          {
+            "cost": "0.0000005",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.0000005",
+            "min": 200001
+          }
+        ],
+        "output_tiers": [
+          {
+            "cost": "0.000003",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.000003",
+            "min": 200001
+          }
+        ],
+        "input_cache_read_tiers": [
+          {
+            "cost": "0.00000005",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.00000005",
+            "min": 200001
+          }
+        ]
+      },
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1765929600,
+      "context_window": 1000000,
+      "max_output_tokens": 65000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "file-input",
+        "vision",
+        "web-search",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "google",
+      "model": "gemini-3-pro-image",
+      "vendor_model_id": "google/gemini-3-pro-image",
+      "vendor_display_name": "Nano Banana Pro (Gemini 3 Pro Image)",
+      "input_per_token_usd": "0.000002",
+      "output_per_token_usd": "0.000012",
+      "cache_read_per_token_usd": "0.0000002",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1756684800,
+      "context_window": 65536,
+      "max_output_tokens": 32768,
+      "tags": [
+        "image-generation",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "google",
+      "model": "gemini-3-pro-preview",
+      "vendor_model_id": "google/gemini-3-pro-preview",
+      "vendor_display_name": "Gemini 3 Pro Preview",
+      "input_per_token_usd": "0.000002",
+      "output_per_token_usd": "0.000012",
+      "cache_read_per_token_usd": "0.0000002",
+      "cache_write_per_token_usd": null,
+      "tiers_json": {
+        "input_tiers": [
+          {
+            "cost": "0.000002",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.000004",
+            "min": 200001
+          }
+        ],
+        "output_tiers": [
+          {
+            "cost": "0.000012",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.000018",
+            "min": 200001
+          }
+        ],
+        "input_cache_read_tiers": [
+          {
+            "cost": "0.0000002",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.0000004",
+            "min": 200001
+          }
+        ]
+      },
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1763424000,
+      "context_window": 1000000,
+      "max_output_tokens": 64000,
+      "tags": [
+        "file-input",
+        "tool-use",
+        "reasoning",
+        "vision",
+        "web-search",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "google",
+      "model": "gemma-4-26b-a4b-it",
+      "vendor_model_id": "google/gemma-4-26b-a4b-it",
+      "vendor_display_name": "Gemma 4 26B A4B IT",
+      "input_per_token_usd": "0.00000013",
+      "output_per_token_usd": "0.0000004",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1775088000,
+      "context_window": 262144,
+      "max_output_tokens": 131072,
+      "tags": [
+        "vision",
+        "tool-use",
+        "file-input"
+      ]
+    },
+    {
+      "provider": "google",
+      "model": "gemma-4-31b-it",
+      "vendor_model_id": "google/gemma-4-31b-it",
+      "vendor_display_name": "Gemma 4 31B IT",
+      "input_per_token_usd": "0.00000014",
+      "output_per_token_usd": "0.0000004",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1775088000,
+      "context_window": 262144,
+      "max_output_tokens": 131072,
+      "tags": [
+        "tool-use",
+        "vision",
+        "file-input"
+      ]
+    },
+    {
+      "provider": "inception",
+      "model": "mercury-2",
+      "vendor_model_id": "inception/mercury-2",
+      "vendor_display_name": "Mercury 2",
+      "input_per_token_usd": "0.00000025",
+      "output_per_token_usd": "0.00000075",
+      "cache_read_per_token_usd": "0.000000025",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1771891200,
+      "context_window": 128000,
+      "max_output_tokens": 128000,
+      "tags": [
+        "tool-use",
+        "reasoning"
+      ]
+    },
+    {
+      "provider": "inception",
+      "model": "mercury-coder-small",
+      "vendor_model_id": "inception/mercury-coder-small",
+      "vendor_display_name": "Mercury Coder Small Beta",
+      "input_per_token_usd": "0.00000025",
+      "output_per_token_usd": "0.000001",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1740528000,
+      "context_window": 32000,
+      "max_output_tokens": 16384,
+      "tags": [
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "interfaze",
+      "model": "interfaze-beta",
+      "vendor_model_id": "interfaze/interfaze-beta",
+      "vendor_display_name": "Interfaze Beta",
+      "input_per_token_usd": "0.0000015",
+      "output_per_token_usd": "0.0000035",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1759795200,
+      "context_window": 1000000,
+      "max_output_tokens": 32000,
+      "tags": [
+        "reasoning"
+      ]
+    },
+    {
+      "provider": "kwaipilot",
+      "model": "kat-coder-pro-v1",
+      "vendor_model_id": "kwaipilot/kat-coder-pro-v1",
+      "vendor_display_name": "KAT-Coder-Pro V1",
+      "input_per_token_usd": "0.00000003",
+      "output_per_token_usd": "0.0000012",
+      "cache_read_per_token_usd": "0.00000006",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1761264000,
+      "context_window": 256000,
+      "max_output_tokens": 32000,
+      "tags": [
+        "reasoning"
+      ]
+    },
+    {
+      "provider": "kwaipilot",
+      "model": "kat-coder-pro-v2",
+      "vendor_model_id": "kwaipilot/kat-coder-pro-v2",
+      "vendor_display_name": "Kat Coder Pro V2",
+      "input_per_token_usd": "0.0000003",
+      "output_per_token_usd": "0.0000012",
+      "cache_read_per_token_usd": "0.00000006",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1774569600,
+      "context_window": 256000,
+      "max_output_tokens": 256000,
+      "tags": [
+        "tool-use",
+        "reasoning",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "meta",
+      "model": "llama-3-1-70b",
+      "vendor_model_id": "meta/llama-3.1-70b",
+      "vendor_display_name": "Llama 3.1 70B Instruct",
+      "input_per_token_usd": "0.00000072",
+      "output_per_token_usd": "0.00000072",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1721692800,
+      "context_window": 128000,
+      "max_output_tokens": 8192,
+      "tags": [
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "meta",
+      "model": "llama-3-1-8b",
+      "vendor_model_id": "meta/llama-3.1-8b",
+      "vendor_display_name": "Llama 3.1 8B Instruct",
+      "input_per_token_usd": "0.00000022",
+      "output_per_token_usd": "0.00000022",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1721692800,
+      "context_window": 128000,
+      "max_output_tokens": 8192,
+      "tags": [
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "meta",
+      "model": "llama-3-2-11b",
+      "vendor_model_id": "meta/llama-3.2-11b",
+      "vendor_display_name": "Llama 3.2 11B Vision Instruct",
+      "input_per_token_usd": "0.00000016",
+      "output_per_token_usd": "0.00000016",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1727222400,
+      "context_window": 128000,
+      "max_output_tokens": 8192,
+      "tags": [
+        "tool-use",
+        "vision"
+      ]
+    },
+    {
+      "provider": "meta",
+      "model": "llama-3-2-1b",
+      "vendor_model_id": "meta/llama-3.2-1b",
+      "vendor_display_name": "Llama 3.2 1B Instruct",
+      "input_per_token_usd": "0.0000001",
+      "output_per_token_usd": "0.0000001",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1726617600,
+      "context_window": 128000,
+      "max_output_tokens": 8192,
+      "tags": []
+    },
+    {
+      "provider": "meta",
+      "model": "llama-3-2-3b",
+      "vendor_model_id": "meta/llama-3.2-3b",
+      "vendor_display_name": "Llama 3.2 3B Instruct",
+      "input_per_token_usd": "0.00000015",
+      "output_per_token_usd": "0.00000015",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1726617600,
+      "context_window": 128000,
+      "max_output_tokens": 8192,
+      "tags": []
+    },
+    {
+      "provider": "meta",
+      "model": "llama-3-2-90b",
+      "vendor_model_id": "meta/llama-3.2-90b",
+      "vendor_display_name": "Llama 3.2 90B Vision Instruct",
+      "input_per_token_usd": "0.00000072",
+      "output_per_token_usd": "0.00000072",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1727222400,
+      "context_window": 128000,
+      "max_output_tokens": 8192,
+      "tags": [
+        "tool-use",
+        "vision"
+      ]
+    },
+    {
+      "provider": "meta",
+      "model": "llama-3-3-70b",
+      "vendor_model_id": "meta/llama-3.3-70b",
+      "vendor_display_name": "Llama 3.3 70B Instruct",
+      "input_per_token_usd": "0.00000072",
+      "output_per_token_usd": "0.00000072",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1733443200,
+      "context_window": 128000,
+      "max_output_tokens": 8192,
+      "tags": [
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "meta",
+      "model": "llama-4-maverick",
+      "vendor_model_id": "meta/llama-4-maverick",
+      "vendor_display_name": "Llama 4 Maverick 17B Instruct",
+      "input_per_token_usd": "0.00000024",
+      "output_per_token_usd": "0.00000097",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1743811200,
+      "context_window": 128000,
+      "max_output_tokens": 8192,
+      "tags": [
+        "tool-use",
+        "vision"
+      ]
+    },
+    {
+      "provider": "meta",
+      "model": "llama-4-scout",
+      "vendor_model_id": "meta/llama-4-scout",
+      "vendor_display_name": "Llama 4 Scout 17B Instruct",
+      "input_per_token_usd": "0.00000017",
+      "output_per_token_usd": "0.00000066",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1743811200,
+      "context_window": 128000,
+      "max_output_tokens": 8192,
+      "tags": [
+        "tool-use",
+        "vision"
+      ]
+    },
+    {
+      "provider": "minimax",
+      "model": "minimax-m2",
+      "vendor_model_id": "minimax/minimax-m2",
+      "vendor_display_name": "MiniMax M2",
+      "input_per_token_usd": "0.0000003",
+      "output_per_token_usd": "0.0000012",
+      "cache_read_per_token_usd": "0.00000003",
+      "cache_write_per_token_usd": "0.000000375",
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1761523200,
+      "context_window": 205000,
+      "max_output_tokens": 205000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "minimax",
+      "model": "minimax-m2-1",
+      "vendor_model_id": "minimax/minimax-m2.1",
+      "vendor_display_name": "MiniMax M2.1",
+      "input_per_token_usd": "0.0000003",
+      "output_per_token_usd": "0.0000012",
+      "cache_read_per_token_usd": "0.00000003",
+      "cache_write_per_token_usd": "0.000000375",
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1761523200,
+      "context_window": 204800,
+      "max_output_tokens": 131072,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "minimax",
+      "model": "minimax-m2-1-lightning",
+      "vendor_model_id": "minimax/minimax-m2.1-lightning",
+      "vendor_display_name": "MiniMax M2.1 Lightning",
+      "input_per_token_usd": "0.0000003",
+      "output_per_token_usd": "0.0000024",
+      "cache_read_per_token_usd": "0.00000003",
+      "cache_write_per_token_usd": "0.000000375",
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1761523200,
+      "context_window": 204800,
+      "max_output_tokens": 131072,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "minimax",
+      "model": "minimax-m2-5",
+      "vendor_model_id": "minimax/minimax-m2.5",
+      "vendor_display_name": "MiniMax M2.5",
+      "input_per_token_usd": "0.0000003",
+      "output_per_token_usd": "0.0000012",
+      "cache_read_per_token_usd": "0.00000003",
+      "cache_write_per_token_usd": "0.000000375",
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1770854400,
+      "context_window": 204800,
+      "max_output_tokens": 131000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "minimax",
+      "model": "minimax-m2-5-highspeed",
+      "vendor_model_id": "minimax/minimax-m2.5-highspeed",
+      "vendor_display_name": "MiniMax M2.5 High Speed",
+      "input_per_token_usd": "0.0000006",
+      "output_per_token_usd": "0.0000024",
+      "cache_read_per_token_usd": "0.00000003",
+      "cache_write_per_token_usd": "0.000000375",
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1770854400,
+      "context_window": 204800,
+      "max_output_tokens": 131000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "minimax",
+      "model": "minimax-m2-7",
+      "vendor_model_id": "minimax/minimax-m2.7",
+      "vendor_display_name": "Minimax M2.7",
+      "input_per_token_usd": "0.0000003",
+      "output_per_token_usd": "0.0000012",
+      "cache_read_per_token_usd": "0.00000006",
+      "cache_write_per_token_usd": "0.000000375",
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1773792000,
+      "context_window": 204800,
+      "max_output_tokens": 131000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching",
+        "file-input",
+        "vision"
+      ]
+    },
+    {
+      "provider": "minimax",
+      "model": "minimax-m2-7-highspeed",
+      "vendor_model_id": "minimax/minimax-m2.7-highspeed",
+      "vendor_display_name": "MiniMax M2.7 High Speed",
+      "input_per_token_usd": "0.0000006",
+      "output_per_token_usd": "0.0000024",
+      "cache_read_per_token_usd": "0.00000006",
+      "cache_write_per_token_usd": "0.000000375",
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1773792000,
+      "context_window": 204800,
+      "max_output_tokens": 131100,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching",
+        "vision"
+      ]
+    },
+    {
+      "provider": "mistral",
+      "model": "codestral",
+      "vendor_model_id": "mistral/codestral",
+      "vendor_display_name": "Mistral Codestral",
+      "input_per_token_usd": "0.0000003",
+      "output_per_token_usd": "0.0000009",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1716940800,
+      "context_window": 128000,
+      "max_output_tokens": 4000,
+      "tags": [
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "mistral",
+      "model": "devstral-2",
+      "vendor_model_id": "mistral/devstral-2",
+      "vendor_display_name": "Devstral 2",
+      "input_per_token_usd": "0.0000004",
+      "output_per_token_usd": "0.000002",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1765238400,
+      "context_window": 256000,
+      "max_output_tokens": 256000,
+      "tags": [
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "mistral",
+      "model": "devstral-small",
+      "vendor_model_id": "mistral/devstral-small",
+      "vendor_display_name": "Devstral Small 1.1",
+      "input_per_token_usd": "0.0000001",
+      "output_per_token_usd": "0.0000003",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1746576000,
+      "context_window": 128000,
+      "max_output_tokens": 64000,
+      "tags": [
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "mistral",
+      "model": "devstral-small-2",
+      "vendor_model_id": "mistral/devstral-small-2",
+      "vendor_display_name": "Devstral Small 2",
+      "input_per_token_usd": "0.0000001",
+      "output_per_token_usd": "0.0000003",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1746576000,
+      "context_window": 256000,
+      "max_output_tokens": 256000,
+      "tags": [
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "mistral",
+      "model": "magistral-medium",
+      "vendor_model_id": "mistral/magistral-medium",
+      "vendor_display_name": "Magistral Medium 2509",
+      "input_per_token_usd": "0.000002",
+      "output_per_token_usd": "0.000005",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1742169600,
+      "context_window": 128000,
+      "max_output_tokens": 64000,
+      "tags": [
+        "reasoning",
+        "vision"
+      ]
+    },
+    {
+      "provider": "mistral",
+      "model": "magistral-small",
+      "vendor_model_id": "mistral/magistral-small",
+      "vendor_display_name": "Magistral Small 2509",
+      "input_per_token_usd": "0.0000005",
+      "output_per_token_usd": "0.0000015",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1742169600,
+      "context_window": 128000,
+      "max_output_tokens": 64000,
+      "tags": [
+        "reasoning",
+        "vision"
+      ]
+    },
+    {
+      "provider": "mistral",
+      "model": "ministral-14b",
+      "vendor_model_id": "mistral/ministral-14b",
+      "vendor_display_name": "Ministral 14B",
+      "input_per_token_usd": "0.0000002",
+      "output_per_token_usd": "0.0000002",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1764547200,
+      "context_window": 256000,
+      "max_output_tokens": 256000,
+      "tags": [
+        "vision",
+        "file-input"
+      ]
+    },
+    {
+      "provider": "mistral",
+      "model": "ministral-3b",
+      "vendor_model_id": "mistral/ministral-3b",
+      "vendor_display_name": "Ministral 3B",
+      "input_per_token_usd": "0.0000001",
+      "output_per_token_usd": "0.0000001",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1727740800,
+      "context_window": 128000,
+      "max_output_tokens": 4000,
+      "tags": [
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "mistral",
+      "model": "ministral-8b",
+      "vendor_model_id": "mistral/ministral-8b",
+      "vendor_display_name": "Ministral 8B",
+      "input_per_token_usd": "0.00000015",
+      "output_per_token_usd": "0.00000015",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1727740800,
+      "context_window": 128000,
+      "max_output_tokens": 4000,
+      "tags": [
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "mistral",
+      "model": "mistral-large-3",
+      "vendor_model_id": "mistral/mistral-large-3",
+      "vendor_display_name": "Mistral Large 3",
+      "input_per_token_usd": "0.0000005",
+      "output_per_token_usd": "0.0000015",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1764633600,
+      "context_window": 256000,
+      "max_output_tokens": 256000,
+      "tags": [
+        "vision"
+      ]
+    },
+    {
+      "provider": "mistral",
+      "model": "mistral-medium",
+      "vendor_model_id": "mistral/mistral-medium",
+      "vendor_display_name": "Mistral Medium 3.1",
+      "input_per_token_usd": "0.0000004",
+      "output_per_token_usd": "0.000002",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1746576000,
+      "context_window": 128000,
+      "max_output_tokens": 64000,
+      "tags": [
+        "tool-use",
+        "vision"
+      ]
+    },
+    {
+      "provider": "mistral",
+      "model": "mistral-nemo",
+      "vendor_model_id": "mistral/mistral-nemo",
+      "vendor_display_name": "Mistral Nemo 12B",
+      "input_per_token_usd": "0.00000002",
+      "output_per_token_usd": "0.00000004",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1719792000,
+      "context_window": 131072,
+      "max_output_tokens": 131072,
+      "tags": []
+    },
+    {
+      "provider": "mistral",
+      "model": "mistral-small",
+      "vendor_model_id": "mistral/mistral-small",
+      "vendor_display_name": "Mistral Small",
+      "input_per_token_usd": "0.0000001",
+      "output_per_token_usd": "0.0000003",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1725148800,
+      "context_window": 32000,
+      "max_output_tokens": 4000,
+      "tags": [
+        "tool-use",
+        "vision"
+      ]
+    },
+    {
+      "provider": "mistral",
+      "model": "pixtral-12b",
+      "vendor_model_id": "mistral/pixtral-12b",
+      "vendor_display_name": "Pixtral 12B 2409",
+      "input_per_token_usd": "0.00000015",
+      "output_per_token_usd": "0.00000015",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1725148800,
+      "context_window": 128000,
+      "max_output_tokens": 4000,
+      "tags": [
+        "tool-use",
+        "vision"
+      ]
+    },
+    {
+      "provider": "mistral",
+      "model": "pixtral-large",
+      "vendor_model_id": "mistral/pixtral-large",
+      "vendor_display_name": "Pixtral Large",
+      "input_per_token_usd": "0.000002",
+      "output_per_token_usd": "0.000006",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1730419200,
+      "context_window": 128000,
+      "max_output_tokens": 4000,
+      "tags": [
+        "tool-use",
+        "vision"
+      ]
+    },
+    {
+      "provider": "moonshotai",
+      "model": "kimi-k2",
+      "vendor_model_id": "moonshotai/kimi-k2",
+      "vendor_display_name": "Kimi K2 Instruct",
+      "input_per_token_usd": "0.00000057",
+      "output_per_token_usd": "0.0000023",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1757030400,
+      "context_window": 131072,
+      "max_output_tokens": 131072,
+      "tags": [
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "moonshotai",
+      "model": "kimi-k2-5",
+      "vendor_model_id": "moonshotai/kimi-k2.5",
+      "vendor_display_name": "Kimi K2.5",
+      "input_per_token_usd": "0.0000006",
+      "output_per_token_usd": "0.000003",
+      "cache_read_per_token_usd": "0.0000001",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1769385600,
+      "context_window": 262114,
+      "max_output_tokens": 262114,
+      "tags": [
+        "reasoning",
+        "vision",
+        "tool-use",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "moonshotai",
+      "model": "kimi-k2-6",
+      "vendor_model_id": "moonshotai/kimi-k2.6",
+      "vendor_display_name": "Kimi K2.6",
+      "input_per_token_usd": "0.00000095",
+      "output_per_token_usd": "0.000004",
+      "cache_read_per_token_usd": "0.00000016",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1776643200,
+      "context_window": 262000,
+      "max_output_tokens": 262000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "vision",
+        "file-input",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "moonshotai",
+      "model": "kimi-k2-thinking",
+      "vendor_model_id": "moonshotai/kimi-k2-thinking",
+      "vendor_display_name": "Kimi K2 Thinking",
+      "input_per_token_usd": "0.0000006",
+      "output_per_token_usd": "0.0000025",
+      "cache_read_per_token_usd": "0.00000015",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1762387200,
+      "context_window": 262114,
+      "max_output_tokens": 262114,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "moonshotai",
+      "model": "kimi-k2-thinking-turbo",
+      "vendor_model_id": "moonshotai/kimi-k2-thinking-turbo",
+      "vendor_display_name": "Kimi K2 Thinking Turbo",
+      "input_per_token_usd": "0.00000115",
+      "output_per_token_usd": "0.000008",
+      "cache_read_per_token_usd": "0.00000015",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1762387200,
+      "context_window": 262114,
+      "max_output_tokens": 262114,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "moonshotai",
+      "model": "kimi-k2-turbo",
+      "vendor_model_id": "moonshotai/kimi-k2-turbo",
+      "vendor_display_name": "Kimi K2 Turbo",
+      "input_per_token_usd": "0.00000115",
+      "output_per_token_usd": "0.000008",
+      "cache_read_per_token_usd": "0.00000015",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1757030400,
+      "context_window": 256000,
+      "max_output_tokens": 16384,
+      "tags": [
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "morph",
+      "model": "morph-v3-fast",
+      "vendor_model_id": "morph/morph-v3-fast",
+      "vendor_display_name": "Morph V3 Fast",
+      "input_per_token_usd": "0.0000008",
+      "output_per_token_usd": "0.0000012",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1723680000,
+      "context_window": 81920,
+      "max_output_tokens": 16384,
+      "tags": []
+    },
+    {
+      "provider": "morph",
+      "model": "morph-v3-large",
+      "vendor_model_id": "morph/morph-v3-large",
+      "vendor_display_name": "Morph V3 Large",
+      "input_per_token_usd": "0.0000009",
+      "output_per_token_usd": "0.0000019",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1723680000,
+      "context_window": 81920,
+      "max_output_tokens": 16384,
+      "tags": []
+    },
+    {
+      "provider": "nvidia",
+      "model": "nemotron-3-nano-30b-a3b",
+      "vendor_model_id": "nvidia/nemotron-3-nano-30b-a3b",
+      "vendor_display_name": "Nemotron 3 Nano 30B A3B",
+      "input_per_token_usd": "0.00000005",
+      "output_per_token_usd": "0.00000024",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1733011200,
+      "context_window": 262144,
+      "max_output_tokens": 262144,
+      "tags": [
+        "reasoning"
+      ]
+    },
+    {
+      "provider": "nvidia",
+      "model": "nemotron-3-super-120b-a12b",
+      "vendor_model_id": "nvidia/nemotron-3-super-120b-a12b",
+      "vendor_display_name": "NVIDIA Nemotron 3 Super 120B A12B",
+      "input_per_token_usd": "0.00000015",
+      "output_per_token_usd": "0.00000065",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1773792000,
+      "context_window": 256000,
+      "max_output_tokens": 32000,
+      "tags": []
+    },
+    {
+      "provider": "nvidia",
+      "model": "nemotron-nano-12b-v2-vl",
+      "vendor_model_id": "nvidia/nemotron-nano-12b-v2-vl",
+      "vendor_display_name": "Nvidia Nemotron Nano 12B V2 VL",
+      "input_per_token_usd": "0.0000002",
+      "output_per_token_usd": "0.0000006",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1733011200,
+      "context_window": 131072,
+      "max_output_tokens": 131072,
+      "tags": [
+        "vision",
+        "reasoning",
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "nvidia",
+      "model": "nemotron-nano-9b-v2",
+      "vendor_model_id": "nvidia/nemotron-nano-9b-v2",
+      "vendor_display_name": "Nvidia Nemotron Nano 9B V2",
+      "input_per_token_usd": "0.00000006",
+      "output_per_token_usd": "0.00000023",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1755475200,
+      "context_window": 131072,
+      "max_output_tokens": 131072,
+      "tags": [
+        "reasoning",
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-3-5-turbo",
+      "vendor_model_id": "openai/gpt-3.5-turbo",
+      "vendor_display_name": "GPT-3.5 Turbo",
+      "input_per_token_usd": "0.0000005",
+      "output_per_token_usd": "0.0000015",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1685232000,
+      "context_window": 16385,
+      "max_output_tokens": 4096,
+      "tags": []
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-3-5-turbo-instruct",
+      "vendor_model_id": "openai/gpt-3.5-turbo-instruct",
+      "vendor_display_name": "GPT-3.5 Turbo Instruct",
+      "input_per_token_usd": "0.0000015",
+      "output_per_token_usd": "0.000002",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1695859200,
+      "context_window": 8192,
+      "max_output_tokens": 4096,
+      "tags": []
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4-1",
+      "vendor_model_id": "openai/gpt-4.1",
+      "vendor_display_name": "GPT-4.1",
+      "input_per_token_usd": "0.000002",
+      "output_per_token_usd": "0.000008",
+      "cache_read_per_token_usd": "0.0000005",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1744588800,
+      "context_window": 1047576,
+      "max_output_tokens": 32768,
+      "tags": [
+        "file-input",
+        "tool-use",
+        "vision",
+        "implicit-caching",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4-1-mini",
+      "vendor_model_id": "openai/gpt-4.1-mini",
+      "vendor_display_name": "GPT-4.1 mini",
+      "input_per_token_usd": "0.0000004",
+      "output_per_token_usd": "0.0000016",
+      "cache_read_per_token_usd": "0.0000001",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1747180800,
+      "context_window": 1047576,
+      "max_output_tokens": 32768,
+      "tags": [
+        "file-input",
+        "tool-use",
+        "vision",
+        "implicit-caching",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4-1-nano",
+      "vendor_model_id": "openai/gpt-4.1-nano",
+      "vendor_display_name": "GPT-4.1 nano",
+      "input_per_token_usd": "0.0000001",
+      "output_per_token_usd": "0.0000004",
+      "cache_read_per_token_usd": "0.000000025",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1744588800,
+      "context_window": 1047576,
+      "max_output_tokens": 32768,
+      "tags": [
+        "file-input",
+        "tool-use",
+        "vision",
+        "implicit-caching",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4-turbo",
+      "vendor_model_id": "openai/gpt-4-turbo",
+      "vendor_display_name": "GPT-4 Turbo",
+      "input_per_token_usd": "0.00001",
+      "output_per_token_usd": "0.00003",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1699228800,
+      "context_window": 128000,
+      "max_output_tokens": 4096,
+      "tags": [
+        "tool-use",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4o",
+      "vendor_model_id": "openai/gpt-4o",
+      "vendor_display_name": "GPT-4o",
+      "input_per_token_usd": "0.0000025",
+      "output_per_token_usd": "0.00001",
+      "cache_read_per_token_usd": "0.00000125",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1715558400,
+      "context_window": 128000,
+      "max_output_tokens": 16384,
+      "tags": [
+        "file-input",
+        "tool-use",
+        "vision",
+        "implicit-caching",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "vendor_model_id": "openai/gpt-4o-mini",
+      "vendor_display_name": "GPT-4o mini",
+      "input_per_token_usd": "0.00000015",
+      "output_per_token_usd": "0.0000006",
+      "cache_read_per_token_usd": "0.000000075",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1721260800,
+      "context_window": 128000,
+      "max_output_tokens": 16384,
+      "tags": [
+        "file-input",
+        "tool-use",
+        "vision",
+        "implicit-caching",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4o-mini-search-preview",
+      "vendor_model_id": "openai/gpt-4o-mini-search-preview",
+      "vendor_display_name": "GPT 4o Mini Search Preview",
+      "input_per_token_usd": "0.00000015",
+      "output_per_token_usd": "0.0000006",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1741737600,
+      "context_window": 128000,
+      "max_output_tokens": 16384,
+      "tags": [
+        "web-search"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5",
+      "vendor_model_id": "openai/gpt-5",
+      "vendor_display_name": "GPT-5",
+      "input_per_token_usd": "0.00000125",
+      "output_per_token_usd": "0.00001",
+      "cache_read_per_token_usd": "0.000000125",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1754006400,
+      "context_window": 400000,
+      "max_output_tokens": 128000,
+      "tags": [
+        "file-input",
+        "implicit-caching",
+        "reasoning",
+        "tool-use",
+        "vision",
+        "image-generation",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5-1-codex",
+      "vendor_model_id": "openai/gpt-5.1-codex",
+      "vendor_display_name": "GPT-5.1-Codex",
+      "input_per_token_usd": "0.00000125",
+      "output_per_token_usd": "0.00001",
+      "cache_read_per_token_usd": "0.000000125",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1762905600,
+      "context_window": 400000,
+      "max_output_tokens": 128000,
+      "tags": [
+        "file-input",
+        "tool-use",
+        "reasoning",
+        "vision",
+        "web-search",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5-1-codex-max",
+      "vendor_model_id": "openai/gpt-5.1-codex-max",
+      "vendor_display_name": "GPT 5.1 Codex Max",
+      "input_per_token_usd": "0.00000125",
+      "output_per_token_usd": "0.00001",
+      "cache_read_per_token_usd": "0.000000125",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1763510400,
+      "context_window": 400000,
+      "max_output_tokens": 128000,
+      "tags": [
+        "reasoning",
+        "file-input",
+        "tool-use",
+        "vision",
+        "web-search",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5-1-codex-mini",
+      "vendor_model_id": "openai/gpt-5.1-codex-mini",
+      "vendor_display_name": "GPT 5.1 Codex Mini",
+      "input_per_token_usd": "0.00000025",
+      "output_per_token_usd": "0.000002",
+      "cache_read_per_token_usd": "0.000000025",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1762905600,
+      "context_window": 400000,
+      "max_output_tokens": 128000,
+      "tags": [
+        "reasoning",
+        "file-input",
+        "vision",
+        "tool-use",
+        "web-search",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5-1-instant",
+      "vendor_model_id": "openai/gpt-5.1-instant",
+      "vendor_display_name": "GPT-5.1 Instant",
+      "input_per_token_usd": "0.00000125",
+      "output_per_token_usd": "0.00001",
+      "cache_read_per_token_usd": "0.000000125",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1762905600,
+      "context_window": 128000,
+      "max_output_tokens": 16384,
+      "tags": [
+        "tool-use",
+        "vision",
+        "file-input",
+        "reasoning",
+        "implicit-caching",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5-1-thinking",
+      "vendor_model_id": "openai/gpt-5.1-thinking",
+      "vendor_display_name": "GPT 5.1 Thinking",
+      "input_per_token_usd": "0.00000125",
+      "output_per_token_usd": "0.00001",
+      "cache_read_per_token_usd": "0.000000125",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1762905600,
+      "context_window": 400000,
+      "max_output_tokens": 128000,
+      "tags": [
+        "tool-use",
+        "implicit-caching",
+        "file-input",
+        "reasoning",
+        "vision",
+        "web-search",
+        "image-generation"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5-2",
+      "vendor_model_id": "openai/gpt-5.2",
+      "vendor_display_name": "GPT 5.2",
+      "input_per_token_usd": "0.00000175",
+      "output_per_token_usd": "0.000014",
+      "cache_read_per_token_usd": "0.000000175",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1765411200,
+      "context_window": 400000,
+      "max_output_tokens": 128000,
+      "tags": [
+        "tool-use",
+        "vision",
+        "file-input",
+        "reasoning",
+        "implicit-caching",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5-2-chat",
+      "vendor_model_id": "openai/gpt-5.2-chat",
+      "vendor_display_name": "GPT 5.2 Chat",
+      "input_per_token_usd": "0.00000175",
+      "output_per_token_usd": "0.000014",
+      "cache_read_per_token_usd": "0.000000175",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1765411200,
+      "context_window": 128000,
+      "max_output_tokens": 16384,
+      "tags": [
+        "vision",
+        "file-input",
+        "tool-use",
+        "reasoning",
+        "implicit-caching",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5-2-codex",
+      "vendor_model_id": "openai/gpt-5.2-codex",
+      "vendor_display_name": "GPT 5.2 Codex",
+      "input_per_token_usd": "0.00000175",
+      "output_per_token_usd": "0.000014",
+      "cache_read_per_token_usd": "0.000000175",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1766016000,
+      "context_window": 400000,
+      "max_output_tokens": 128000,
+      "tags": [
+        "file-input",
+        "tool-use",
+        "reasoning",
+        "vision",
+        "web-search",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5-2-pro",
+      "vendor_model_id": "openai/gpt-5.2-pro",
+      "vendor_display_name": "GPT 5.2 ",
+      "input_per_token_usd": "0.000021",
+      "output_per_token_usd": "0.000168",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1765411200,
+      "context_window": 400000,
+      "max_output_tokens": 128000,
+      "tags": [
+        "tool-use",
+        "vision",
+        "implicit-caching",
+        "reasoning",
+        "file-input",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5-3-chat",
+      "vendor_model_id": "openai/gpt-5.3-chat",
+      "vendor_display_name": "GPT-5.3 Chat",
+      "input_per_token_usd": "0.00000175",
+      "output_per_token_usd": "0.000014",
+      "cache_read_per_token_usd": "0.000000175",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1772496000,
+      "context_window": 128000,
+      "max_output_tokens": 16384,
+      "tags": [
+        "vision",
+        "file-input",
+        "tool-use",
+        "reasoning",
+        "implicit-caching",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5-3-codex",
+      "vendor_model_id": "openai/gpt-5.3-codex",
+      "vendor_display_name": "GPT 5.3 Codex",
+      "input_per_token_usd": "0.00000175",
+      "output_per_token_usd": "0.000014",
+      "cache_read_per_token_usd": "0.000000175",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1771891200,
+      "context_window": 400000,
+      "max_output_tokens": 128000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "file-input",
+        "vision",
+        "web-search",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5-4",
+      "vendor_model_id": "openai/gpt-5.4",
+      "vendor_display_name": "GPT 5.4",
+      "input_per_token_usd": "0.0000025",
+      "output_per_token_usd": "0.000015",
+      "cache_read_per_token_usd": "0.00000025",
+      "cache_write_per_token_usd": null,
+      "tiers_json": {
+        "input_tiers": [
+          {
+            "cost": "0.0000025",
+            "min": 0,
+            "max": 272000
+          },
+          {
+            "cost": "0.000005",
+            "min": 272000
+          }
+        ],
+        "output_tiers": [
+          {
+            "cost": "0.000015",
+            "min": 0,
+            "max": 272000
+          },
+          {
+            "cost": "0.0000225",
+            "min": 272000
+          }
+        ],
+        "input_cache_read_tiers": [
+          {
+            "cost": "0.00000025",
+            "min": 0,
+            "max": 272000
+          },
+          {
+            "cost": "0.0000005",
+            "min": 272000
+          }
+        ]
+      },
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1772668800,
+      "context_window": 1050000,
+      "max_output_tokens": 128000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "vision",
+        "file-input",
+        "implicit-caching",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5-4-mini",
+      "vendor_model_id": "openai/gpt-5.4-mini",
+      "vendor_display_name": "GPT 5.4 Mini",
+      "input_per_token_usd": "0.00000075",
+      "output_per_token_usd": "0.0000045",
+      "cache_read_per_token_usd": "0.000000075",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1773705600,
+      "context_window": 400000,
+      "max_output_tokens": 128000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "vision",
+        "file-input",
+        "implicit-caching",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5-4-nano",
+      "vendor_model_id": "openai/gpt-5.4-nano",
+      "vendor_display_name": "GPT 5.4 Nano",
+      "input_per_token_usd": "0.0000002",
+      "output_per_token_usd": "0.00000125",
+      "cache_read_per_token_usd": "0.00000002",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1773705600,
+      "context_window": 400000,
+      "max_output_tokens": 128000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching",
+        "web-search",
+        "vision",
+        "file-input"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5-4-pro",
+      "vendor_model_id": "openai/gpt-5.4-pro",
+      "vendor_display_name": "GPT 5.4 Pro",
+      "input_per_token_usd": "0.00003",
+      "output_per_token_usd": "0.00018",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": {
+        "input_tiers": [
+          {
+            "cost": "0.00003",
+            "min": 0,
+            "max": 272000
+          },
+          {
+            "cost": "0.00006",
+            "min": 272000
+          }
+        ],
+        "output_tiers": [
+          {
+            "cost": "0.00018",
+            "min": 0,
+            "max": 272000
+          },
+          {
+            "cost": "0.00027",
+            "min": 272000
+          }
+        ]
+      },
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1772668800,
+      "context_window": 1050000,
+      "max_output_tokens": 128000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "vision",
+        "file-input",
+        "implicit-caching",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5-5",
+      "vendor_model_id": "openai/gpt-5.5",
+      "vendor_display_name": "GPT 5.5",
+      "input_per_token_usd": "0.000005",
+      "output_per_token_usd": "0.00003",
+      "cache_read_per_token_usd": "0.0000005",
+      "cache_write_per_token_usd": null,
+      "tiers_json": {
+        "input_tiers": [
+          {
+            "cost": "0.000005",
+            "min": 0,
+            "max": 272000
+          },
+          {
+            "cost": "0.00001",
+            "min": 272000
+          }
+        ],
+        "output_tiers": [
+          {
+            "cost": "0.00003",
+            "min": 0,
+            "max": 272000
+          },
+          {
+            "cost": "0.000045",
+            "min": 272000
+          }
+        ],
+        "input_cache_read_tiers": [
+          {
+            "cost": "0.0000005",
+            "min": 0,
+            "max": 272000
+          },
+          {
+            "cost": "0.000001",
+            "min": 272000
+          }
+        ]
+      },
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1776988800,
+      "context_window": 1000000,
+      "max_output_tokens": 128000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "web-search",
+        "implicit-caching",
+        "file-input",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5-5-pro",
+      "vendor_model_id": "openai/gpt-5.5-pro",
+      "vendor_display_name": "GPT 5.5 Pro",
+      "input_per_token_usd": "0.00003",
+      "output_per_token_usd": "0.00018",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": {
+        "input_tiers": [
+          {
+            "cost": "0.00003",
+            "min": 0,
+            "max": 272000
+          },
+          {
+            "cost": "0.00006",
+            "min": 272000
+          }
+        ],
+        "output_tiers": [
+          {
+            "cost": "0.00018",
+            "min": 0,
+            "max": 272000
+          },
+          {
+            "cost": "0.00027",
+            "min": 272000
+          }
+        ]
+      },
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1776988800,
+      "context_window": 1000000,
+      "max_output_tokens": 128000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching",
+        "file-input",
+        "web-search",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5-chat",
+      "vendor_model_id": "openai/gpt-5-chat",
+      "vendor_display_name": "GPT 5 Chat",
+      "input_per_token_usd": "0.00000125",
+      "output_per_token_usd": "0.00001",
+      "cache_read_per_token_usd": "0.000000125",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1754524800,
+      "context_window": 128000,
+      "max_output_tokens": 16384,
+      "tags": [
+        "tool-use",
+        "implicit-caching",
+        "file-input",
+        "image-generation",
+        "vision",
+        "reasoning",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5-codex",
+      "vendor_model_id": "openai/gpt-5-codex",
+      "vendor_display_name": "GPT-5-Codex",
+      "input_per_token_usd": "0.00000125",
+      "output_per_token_usd": "0.00001",
+      "cache_read_per_token_usd": "0.000000125",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1757894400,
+      "context_window": 400000,
+      "max_output_tokens": 128000,
+      "tags": [
+        "file-input",
+        "implicit-caching",
+        "reasoning",
+        "tool-use",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5-mini",
+      "vendor_model_id": "openai/gpt-5-mini",
+      "vendor_display_name": "GPT-5 mini",
+      "input_per_token_usd": "0.00000025",
+      "output_per_token_usd": "0.000002",
+      "cache_read_per_token_usd": "0.000000025",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1754524800,
+      "context_window": 400000,
+      "max_output_tokens": 128000,
+      "tags": [
+        "file-input",
+        "implicit-caching",
+        "reasoning",
+        "tool-use",
+        "vision",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5-nano",
+      "vendor_model_id": "openai/gpt-5-nano",
+      "vendor_display_name": "GPT-5 nano",
+      "input_per_token_usd": "0.00000005",
+      "output_per_token_usd": "0.0000004",
+      "cache_read_per_token_usd": "0.000000005",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1754524800,
+      "context_window": 400000,
+      "max_output_tokens": 128000,
+      "tags": [
+        "file-input",
+        "implicit-caching",
+        "reasoning",
+        "tool-use",
+        "vision",
+        "image-generation",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5-pro",
+      "vendor_model_id": "openai/gpt-5-pro",
+      "vendor_display_name": "GPT-5 pro",
+      "input_per_token_usd": "0.000015",
+      "output_per_token_usd": "0.00012",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": null,
+      "context_window": 400000,
+      "max_output_tokens": 272000,
+      "tags": [
+        "file-input",
+        "implicit-caching",
+        "reasoning",
+        "tool-use",
+        "vision",
+        "image-generation",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-oss-120b",
+      "vendor_model_id": "openai/gpt-oss-120b",
+      "vendor_display_name": "GPT OSS 120B",
+      "input_per_token_usd": "0.00000035",
+      "output_per_token_usd": "0.00000075",
+      "cache_read_per_token_usd": "0.00000025",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1754352000,
+      "context_window": 131072,
+      "max_output_tokens": 131000,
+      "tags": [
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-oss-20b",
+      "vendor_model_id": "openai/gpt-oss-20b",
+      "vendor_display_name": "GPT OSS 20B",
+      "input_per_token_usd": "0.00000005",
+      "output_per_token_usd": "0.0000002",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1754352000,
+      "context_window": 131072,
+      "max_output_tokens": 8192,
+      "tags": [
+        "reasoning",
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-oss-safeguard-20b",
+      "vendor_model_id": "openai/gpt-oss-safeguard-20b",
+      "vendor_display_name": "GPT OSS Safeguard 20B",
+      "input_per_token_usd": "0.000000075",
+      "output_per_token_usd": "0.0000003",
+      "cache_read_per_token_usd": "0.000000037",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1733011200,
+      "context_window": 131072,
+      "max_output_tokens": 65536,
+      "tags": [
+        "reasoning",
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "o1",
+      "vendor_model_id": "openai/o1",
+      "vendor_display_name": "o1",
+      "input_per_token_usd": "0.000015",
+      "output_per_token_usd": "0.00006",
+      "cache_read_per_token_usd": "0.0000075",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1733356800,
+      "context_window": 200000,
+      "max_output_tokens": 100000,
+      "tags": [
+        "file-input",
+        "reasoning",
+        "tool-use",
+        "vision",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "o3",
+      "vendor_model_id": "openai/o3",
+      "vendor_display_name": "o3",
+      "input_per_token_usd": "0.000002",
+      "output_per_token_usd": "0.000008",
+      "cache_read_per_token_usd": "0.0000005",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1744761600,
+      "context_window": 200000,
+      "max_output_tokens": 100000,
+      "tags": [
+        "file-input",
+        "reasoning",
+        "tool-use",
+        "vision",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "o3-deep-research",
+      "vendor_model_id": "openai/o3-deep-research",
+      "vendor_display_name": "o3-deep-research",
+      "input_per_token_usd": "0.00001",
+      "output_per_token_usd": "0.00004",
+      "cache_read_per_token_usd": "0.0000025",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1719360000,
+      "context_window": 200000,
+      "max_output_tokens": 100000,
+      "tags": [
+        "reasoning",
+        "file-input",
+        "tool-use",
+        "vision",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "o3-mini",
+      "vendor_model_id": "openai/o3-mini",
+      "vendor_display_name": "o3-mini",
+      "input_per_token_usd": "0.0000011",
+      "output_per_token_usd": "0.0000044",
+      "cache_read_per_token_usd": "0.00000055",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1734652800,
+      "context_window": 200000,
+      "max_output_tokens": 100000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "o3-pro",
+      "vendor_model_id": "openai/o3-pro",
+      "vendor_display_name": "o3 Pro",
+      "input_per_token_usd": "0.00002",
+      "output_per_token_usd": "0.00008",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1744761600,
+      "context_window": 200000,
+      "max_output_tokens": 100000,
+      "tags": [
+        "reasoning",
+        "vision",
+        "file-input",
+        "tool-use",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "o4-mini",
+      "vendor_model_id": "openai/o4-mini",
+      "vendor_display_name": "o4-mini",
+      "input_per_token_usd": "0.0000011",
+      "output_per_token_usd": "0.0000044",
+      "cache_read_per_token_usd": "0.000000275",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1744761600,
+      "context_window": 200000,
+      "max_output_tokens": 100000,
+      "tags": [
+        "file-input",
+        "reasoning",
+        "tool-use",
+        "vision",
+        "implicit-caching",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "xai",
+      "model": "grok-4-1-fast-non-reasoning",
+      "vendor_model_id": "xai/grok-4.1-fast-non-reasoning",
+      "vendor_display_name": "Grok 4.1 Fast Non-Reasoning",
+      "input_per_token_usd": "0.0000002",
+      "output_per_token_usd": "0.0000005",
+      "cache_read_per_token_usd": "0.00000005",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1752019200,
+      "context_window": 1000000,
+      "max_output_tokens": 1000000,
+      "tags": [
+        "tool-use",
+        "file-input",
+        "vision",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "xai",
+      "model": "grok-4-1-fast-reasoning",
+      "vendor_model_id": "xai/grok-4.1-fast-reasoning",
+      "vendor_display_name": "Grok 4.1 Fast Reasoning",
+      "input_per_token_usd": "0.0000002",
+      "output_per_token_usd": "0.0000005",
+      "cache_read_per_token_usd": "0.00000005",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1752019200,
+      "context_window": 1000000,
+      "max_output_tokens": 1000000,
+      "tags": [
+        "reasoning",
+        "file-input",
+        "vision",
+        "tool-use",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "xai",
+      "model": "grok-4-20-multi-agent",
+      "vendor_model_id": "xai/grok-4.20-multi-agent",
+      "vendor_display_name": "Grok 4.20 Multi-Agent",
+      "input_per_token_usd": "0.00000125",
+      "output_per_token_usd": "0.0000025",
+      "cache_read_per_token_usd": "0.0000002",
+      "cache_write_per_token_usd": null,
+      "tiers_json": {
+        "input_tiers": [
+          {
+            "cost": "0.00000125",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.0000025",
+            "min": 200001
+          }
+        ],
+        "output_tiers": [
+          {
+            "cost": "0.0000025",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.000005",
+            "min": 200001
+          }
+        ],
+        "input_cache_read_tiers": [
+          {
+            "cost": "0.0000002",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.0000004",
+            "min": 200001
+          }
+        ]
+      },
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1773014400,
+      "context_window": 2000000,
+      "max_output_tokens": 2000000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching",
+        "vision",
+        "file-input",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "xai",
+      "model": "grok-4-20-multi-agent-beta",
+      "vendor_model_id": "xai/grok-4.20-multi-agent-beta",
+      "vendor_display_name": "Grok 4.20 Multi Agent Beta",
+      "input_per_token_usd": "0.00000125",
+      "output_per_token_usd": "0.0000025",
+      "cache_read_per_token_usd": "0.0000002",
+      "cache_write_per_token_usd": null,
+      "tiers_json": {
+        "input_tiers": [
+          {
+            "cost": "0.00000125",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.0000025",
+            "min": 200001
+          }
+        ],
+        "output_tiers": [
+          {
+            "cost": "0.0000025",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.000005",
+            "min": 200001
+          }
+        ],
+        "input_cache_read_tiers": [
+          {
+            "cost": "0.0000002",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.0000004",
+            "min": 200001
+          }
+        ]
+      },
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1773187200,
+      "context_window": 2000000,
+      "max_output_tokens": 2000000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching",
+        "vision",
+        "file-input",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "xai",
+      "model": "grok-4-20-non-reasoning",
+      "vendor_model_id": "xai/grok-4.20-non-reasoning",
+      "vendor_display_name": "Grok 4.20 Non-Reasoning",
+      "input_per_token_usd": "0.00000125",
+      "output_per_token_usd": "0.0000025",
+      "cache_read_per_token_usd": "0.0000002",
+      "cache_write_per_token_usd": null,
+      "tiers_json": {
+        "input_tiers": [
+          {
+            "cost": "0.00000125",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.0000025",
+            "min": 200001
+          }
+        ],
+        "output_tiers": [
+          {
+            "cost": "0.0000025",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.000005",
+            "min": 200001
+          }
+        ],
+        "input_cache_read_tiers": [
+          {
+            "cost": "0.0000002",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.0000004",
+            "min": 200001
+          }
+        ]
+      },
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1773014400,
+      "context_window": 2000000,
+      "max_output_tokens": 2000000,
+      "tags": [
+        "tool-use",
+        "implicit-caching",
+        "vision",
+        "file-input",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "xai",
+      "model": "grok-4-20-non-reasoning-beta",
+      "vendor_model_id": "xai/grok-4.20-non-reasoning-beta",
+      "vendor_display_name": "Grok 4.20 Beta Non-Reasoning",
+      "input_per_token_usd": "0.00000125",
+      "output_per_token_usd": "0.0000025",
+      "cache_read_per_token_usd": "0.0000002",
+      "cache_write_per_token_usd": null,
+      "tiers_json": {
+        "input_tiers": [
+          {
+            "cost": "0.00000125",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.0000025",
+            "min": 200001
+          }
+        ],
+        "output_tiers": [
+          {
+            "cost": "0.0000025",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.000005",
+            "min": 200001
+          }
+        ],
+        "input_cache_read_tiers": [
+          {
+            "cost": "0.0000004",
+            "min": 200001
+          }
+        ]
+      },
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1773187200,
+      "context_window": 2000000,
+      "max_output_tokens": 2000000,
+      "tags": [
+        "tool-use",
+        "implicit-caching",
+        "vision",
+        "file-input",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "xai",
+      "model": "grok-4-20-reasoning",
+      "vendor_model_id": "xai/grok-4.20-reasoning",
+      "vendor_display_name": "Grok 4.20 Reasoning",
+      "input_per_token_usd": "0.00000125",
+      "output_per_token_usd": "0.0000025",
+      "cache_read_per_token_usd": "0.0000002",
+      "cache_write_per_token_usd": null,
+      "tiers_json": {
+        "input_tiers": [
+          {
+            "cost": "0.00000125",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.0000025",
+            "min": 200001
+          }
+        ],
+        "output_tiers": [
+          {
+            "cost": "0.0000025",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.000005",
+            "min": 200001
+          }
+        ],
+        "input_cache_read_tiers": [
+          {
+            "cost": "0.0000002",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.0000004",
+            "min": 200001
+          }
+        ]
+      },
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1773014400,
+      "context_window": 2000000,
+      "max_output_tokens": 2000000,
+      "tags": [
+        "reasoning",
+        "vision",
+        "tool-use",
+        "file-input",
+        "implicit-caching",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "xai",
+      "model": "grok-4-20-reasoning-beta",
+      "vendor_model_id": "xai/grok-4.20-reasoning-beta",
+      "vendor_display_name": "Grok 4.20 Beta Reasoning",
+      "input_per_token_usd": "0.00000125",
+      "output_per_token_usd": "0.0000025",
+      "cache_read_per_token_usd": "0.0000002",
+      "cache_write_per_token_usd": null,
+      "tiers_json": {
+        "input_tiers": [
+          {
+            "cost": "0.00000125",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.0000025",
+            "min": 200001
+          }
+        ],
+        "output_tiers": [
+          {
+            "cost": "0.0000025",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.000005",
+            "min": 200001
+          }
+        ],
+        "input_cache_read_tiers": [
+          {
+            "cost": "0.0000002",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.0000004",
+            "min": 200001
+          }
+        ]
+      },
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1773187200,
+      "context_window": 2000000,
+      "max_output_tokens": 2000000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "vision",
+        "file-input",
+        "implicit-caching",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "xai",
+      "model": "grok-4-3",
+      "vendor_model_id": "xai/grok-4.3",
+      "vendor_display_name": "Grok 4.3",
+      "input_per_token_usd": "0.00000125",
+      "output_per_token_usd": "0.0000025",
+      "cache_read_per_token_usd": "0.0000002",
+      "cache_write_per_token_usd": null,
+      "tiers_json": {
+        "input_tiers": [
+          {
+            "cost": "0.00000125",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.0000025",
+            "min": 200001
+          }
+        ],
+        "output_tiers": [
+          {
+            "cost": "0.0000025",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.000005",
+            "min": 200001
+          }
+        ],
+        "input_cache_read_tiers": [
+          {
+            "cost": "0.0000002",
+            "min": 0,
+            "max": 200001
+          },
+          {
+            "cost": "0.0000004",
+            "min": 200001
+          }
+        ]
+      },
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1777507200,
+      "context_window": 1000000,
+      "max_output_tokens": 1000000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching",
+        "file-input",
+        "vision",
+        "web-search"
+      ]
+    },
+    {
+      "provider": "xiaomi",
+      "model": "mimo-v2-5",
+      "vendor_model_id": "xiaomi/mimo-v2.5",
+      "vendor_display_name": "MiMo M2.5",
+      "input_per_token_usd": "0.0000004",
+      "output_per_token_usd": "0.000002",
+      "cache_read_per_token_usd": "0.00000008",
+      "cache_write_per_token_usd": null,
+      "tiers_json": {
+        "input_tiers": [
+          {
+            "cost": "0.0000004",
+            "min": 0,
+            "max": 256001
+          },
+          {
+            "cost": "0.0000008",
+            "min": 256001
+          }
+        ],
+        "output_tiers": [
+          {
+            "cost": "0.000002",
+            "min": 0,
+            "max": 256001
+          },
+          {
+            "cost": "0.000004",
+            "min": 256001
+          }
+        ],
+        "input_cache_read_tiers": [
+          {
+            "cost": "0.00000008",
+            "min": 0,
+            "max": 256001
+          },
+          {
+            "cost": "0.00000016",
+            "min": 256001
+          }
+        ]
+      },
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1776816000,
+      "context_window": 1050000,
+      "max_output_tokens": 131100,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching",
+        "file-input",
+        "vision"
+      ]
+    },
+    {
+      "provider": "xiaomi",
+      "model": "mimo-v2-5-pro",
+      "vendor_model_id": "xiaomi/mimo-v2.5-pro",
+      "vendor_display_name": "MiMo V2.5 Pro",
+      "input_per_token_usd": "0.000001",
+      "output_per_token_usd": "0.000003",
+      "cache_read_per_token_usd": "0.0000002",
+      "cache_write_per_token_usd": null,
+      "tiers_json": {
+        "input_tiers": [
+          {
+            "cost": "0.000001",
+            "min": 0,
+            "max": 256001
+          },
+          {
+            "cost": "0.000002",
+            "min": 256001
+          }
+        ],
+        "output_tiers": [
+          {
+            "cost": "0.000003",
+            "min": 0,
+            "max": 256001
+          },
+          {
+            "cost": "0.000006",
+            "min": 256001
+          }
+        ],
+        "input_cache_read_tiers": [
+          {
+            "cost": "0.0000002",
+            "min": 0,
+            "max": 256001
+          },
+          {
+            "cost": "0.0000004",
+            "min": 256001
+          }
+        ]
+      },
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1776816000,
+      "context_window": 1050000,
+      "max_output_tokens": 131000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "vision",
+        "file-input",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "xiaomi",
+      "model": "mimo-v2-flash",
+      "vendor_model_id": "xiaomi/mimo-v2-flash",
+      "vendor_display_name": "MiMo V2 Flash",
+      "input_per_token_usd": "0.0000001",
+      "output_per_token_usd": "0.0000003",
+      "cache_read_per_token_usd": "0.00000001",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1765929600,
+      "context_window": 262144,
+      "max_output_tokens": 32000,
+      "tags": [
+        "reasoning",
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "xiaomi",
+      "model": "mimo-v2-pro",
+      "vendor_model_id": "xiaomi/mimo-v2-pro",
+      "vendor_display_name": "MiMo V2 Pro",
+      "input_per_token_usd": "0.000001",
+      "output_per_token_usd": "0.000003",
+      "cache_read_per_token_usd": "0.0000002",
+      "cache_write_per_token_usd": null,
+      "tiers_json": {
+        "input_tiers": [
+          {
+            "cost": "0.000001",
+            "min": 0,
+            "max": 256001
+          },
+          {
+            "cost": "0.000002",
+            "min": 256001
+          }
+        ],
+        "output_tiers": [
+          {
+            "cost": "0.000003",
+            "min": 0,
+            "max": 256001
+          },
+          {
+            "cost": "0.000006",
+            "min": 256001
+          }
+        ],
+        "input_cache_read_tiers": [
+          {
+            "cost": "0.0000002",
+            "min": 0,
+            "max": 256001
+          },
+          {
+            "cost": "0.0000004",
+            "min": 256001
+          }
+        ]
+      },
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1773792000,
+      "context_window": 1000000,
+      "max_output_tokens": 128000,
+      "tags": [
+        "reasoning",
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "zai",
+      "model": "glm-4-5",
+      "vendor_model_id": "zai/glm-4.5",
+      "vendor_display_name": "GLM-4.5",
+      "input_per_token_usd": "0.0000006",
+      "output_per_token_usd": "0.0000022",
+      "cache_read_per_token_usd": "0.00000011",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1753660800,
+      "context_window": 128000,
+      "max_output_tokens": 96000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "zai",
+      "model": "glm-4-5-air",
+      "vendor_model_id": "zai/glm-4.5-air",
+      "vendor_display_name": "GLM 4.5 Air",
+      "input_per_token_usd": "0.0000002",
+      "output_per_token_usd": "0.0000011",
+      "cache_read_per_token_usd": "0.00000003",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1753660800,
+      "context_window": 128000,
+      "max_output_tokens": 96000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "zai",
+      "model": "glm-4-5v",
+      "vendor_model_id": "zai/glm-4.5v",
+      "vendor_display_name": "GLM 4.5V",
+      "input_per_token_usd": "0.0000006",
+      "output_per_token_usd": "0.0000018",
+      "cache_read_per_token_usd": "0.00000011",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1754870400,
+      "context_window": 66000,
+      "max_output_tokens": 16000,
+      "tags": [
+        "tool-use",
+        "vision",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "zai",
+      "model": "glm-4-6",
+      "vendor_model_id": "zai/glm-4.6",
+      "vendor_display_name": "GLM 4.6",
+      "input_per_token_usd": "0.0000006",
+      "output_per_token_usd": "0.0000022",
+      "cache_read_per_token_usd": "0.00000011",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1759190400,
+      "context_window": 200000,
+      "max_output_tokens": 96000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "zai",
+      "model": "glm-4-6v",
+      "vendor_model_id": "zai/glm-4.6v",
+      "vendor_display_name": "GLM-4.6V",
+      "input_per_token_usd": "0.0000003",
+      "output_per_token_usd": "0.0000009",
+      "cache_read_per_token_usd": "0.00000005",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1759190400,
+      "context_window": 128000,
+      "max_output_tokens": 24000,
+      "tags": [
+        "vision",
+        "file-input",
+        "reasoning",
+        "tool-use",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "zai",
+      "model": "glm-4-7",
+      "vendor_model_id": "zai/glm-4.7",
+      "vendor_display_name": "GLM 4.7",
+      "input_per_token_usd": "0.00000225",
+      "output_per_token_usd": "0.00000275",
+      "cache_read_per_token_usd": "0.00000225",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1766361600,
+      "context_window": 131000,
+      "max_output_tokens": 40000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "zai",
+      "model": "glm-4-7-flash",
+      "vendor_model_id": "zai/glm-4.7-flash",
+      "vendor_display_name": "GLM 4.7 Flash",
+      "input_per_token_usd": "0.00000007",
+      "output_per_token_usd": "0.0000004",
+      "cache_read_per_token_usd": null,
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": null,
+      "context_window": 200000,
+      "max_output_tokens": 131000,
+      "tags": [
+        "reasoning",
+        "tool-use"
+      ]
+    },
+    {
+      "provider": "zai",
+      "model": "glm-4-7-flashx",
+      "vendor_model_id": "zai/glm-4.7-flashx",
+      "vendor_display_name": "GLM 4.7 FlashX",
+      "input_per_token_usd": "0.00000006",
+      "output_per_token_usd": "0.0000004",
+      "cache_read_per_token_usd": "0.00000001",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1735689600,
+      "context_window": 200000,
+      "max_output_tokens": 128000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "zai",
+      "model": "glm-5",
+      "vendor_model_id": "zai/glm-5",
+      "vendor_display_name": "GLM 5",
+      "input_per_token_usd": "0.000001",
+      "output_per_token_usd": "0.0000032",
+      "cache_read_per_token_usd": "0.0000002",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1770854400,
+      "context_window": 202800,
+      "max_output_tokens": 131100,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "zai",
+      "model": "glm-5-1",
+      "vendor_model_id": "zai/glm-5.1",
+      "vendor_display_name": "GLM 5.1",
+      "input_per_token_usd": "0.0000014",
+      "output_per_token_usd": "0.0000044",
+      "cache_read_per_token_usd": "0.00000026",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1775520000,
+      "context_window": 202800,
+      "max_output_tokens": 64000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "zai",
+      "model": "glm-5-turbo",
+      "vendor_model_id": "zai/glm-5-turbo",
+      "vendor_display_name": "GLM 5 Turbo",
+      "input_per_token_usd": "0.0000012",
+      "output_per_token_usd": "0.000004",
+      "cache_read_per_token_usd": "0.00000024",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1773532800,
+      "context_window": 202800,
+      "max_output_tokens": 131100,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching"
+      ]
+    },
+    {
+      "provider": "zai",
+      "model": "glm-5v-turbo",
+      "vendor_model_id": "zai/glm-5v-turbo",
+      "vendor_display_name": "GLM 5V Turbo",
+      "input_per_token_usd": "0.0000012",
+      "output_per_token_usd": "0.000004",
+      "cache_read_per_token_usd": "0.00000024",
+      "cache_write_per_token_usd": null,
+      "tiers_json": null,
+      "currency": "USD",
+      "source": "vercel-ai-gateway",
+      "source_snapshot_sha256": "e118412bdcf1e3824ea292f69e0748b07107f5d8173156eef105fcd5b5f44fde",
+      "vercel_released_unix": 1775001600,
+      "context_window": 200000,
+      "max_output_tokens": 128000,
+      "tags": [
+        "reasoning",
+        "tool-use",
+        "implicit-caching",
+        "vision",
+        "file-input"
+      ]
+    }
+  ]
+}

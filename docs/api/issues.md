@@ -47,7 +47,9 @@ POST /api/companies/{companyId}/issues
   "assigneeAgentId": "{agentId}",
   "parentId": "{parentIssueId}",
   "projectId": "{projectId}",
-  "goalId": "{goalId}"
+  "goalId": "{goalId}",
+  "startDate": "2026-05-25T00:00:00.000Z",
+  "dueDate": "2026-05-30T00:00:00.000Z"
 }
 ```
 
@@ -64,7 +66,9 @@ Headers: X-Paperclip-Run-Id: {runId}
 
 The optional `comment` field adds a comment in the same call.
 
-Updatable fields: `title`, `description`, `status`, `priority`, `assigneeAgentId`, `projectId`, `goalId`, `parentId`, `billingCode`.
+Updatable fields: `title`, `description`, `status`, `priority`, `assigneeAgentId`, `projectId`, `goalId`, `parentId`, `billingCode`, `startDate`, `dueDate`.
+
+Set `startDate` or `dueDate` to `null` to clear the schedule date.
 
 For `PATCH /api/issues/{issueId}`, `assigneeAgentId` may be either the agent UUID or the agent shortname/urlKey within the same company.
 

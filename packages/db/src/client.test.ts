@@ -541,4 +541,109 @@ describeEmbeddedPostgres("applyPendingMigrations", () => {
     },
     20_000,
   );
+
+  it(
+    "migrations 0084 + 0087 add pricing infra and a partial unique index on (company_id, idempotency_key)",
+    async () => {
+      const connectionString = await createTempDatabase();
+      await applyPendingMigrations(connectionString);
+
+      const sql = postgres(connectionString, { max: 1, onnotice: () => {} });
+      try {
+        // 1. model_pricing table shape
+        const columns = await sql.unsafe<{ column_name: string; data_type: string; is_nullable: string }[]>(
+          `
+            SELECT column_name, data_type, is_nullable
+            FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'model_pricing'
+            ORDER BY column_name
+          `,
+        );
+        const columnNames = columns.map((row) => row.column_name);
+        expect(columnNames).toEqual([
+          "cache_write_cpm_micros",
+          "cached_input_cpm_micros",
+          "created_at",
+          "effective_at",
+          "input_cpm_micros",
+          "model",
+          "output_cpm_micros",
+          "provider",
+          "source",
+        ]);
+        // composite PK
+        const pk = await sql.unsafe<{ column_name: string }[]>(
+          `
+            SELECT a.attname AS column_name
+            FROM   pg_index i
+            JOIN   pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+            WHERE  i.indrelid = '"public"."model_pricing"'::regclass AND i.indisprimary
+            ORDER BY array_position(i.indkey, a.attnum)
+          `,
+        );
+        expect(pk.map((row) => row.column_name)).toEqual(["provider", "model", "effective_at"]);
+
+        // 2. cost_events gained cache_creation_input_tokens
+        const cacheWriteCol = await sql.unsafe<{ column_name: string; data_type: string; column_default: string | null }[]>(
+          `
+            SELECT column_name, data_type, column_default
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'cost_events'
+              AND column_name = 'cache_creation_input_tokens'
+          `,
+        );
+        expect(cacheWriteCol).toHaveLength(1);
+        expect(cacheWriteCol[0].data_type).toBe("integer");
+        expect(cacheWriteCol[0].column_default).toBe("0");
+
+        // 3. idempotency_key column exists on cost_events (added by 0087)
+        const idemCol = await sql.unsafe<{ column_name: string; data_type: string; is_nullable: string }[]>(
+          `
+            SELECT column_name, data_type, is_nullable
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'cost_events'
+              AND column_name = 'idempotency_key'
+          `,
+        );
+        expect(idemCol).toHaveLength(1);
+        expect(idemCol[0].data_type).toBe("text");
+        expect(idemCol[0].is_nullable).toBe("YES");
+
+        // 4. partial unique index on (company_id, idempotency_key) WHERE idempotency_key IS NOT NULL
+        //    (created by 0087). billing_code is now a free-text grouping label with no unique index.
+        const indexes = await sql.unsafe<{ indexname: string; indexdef: string }[]>(
+          `
+            SELECT indexname, indexdef
+            FROM pg_indexes
+            WHERE schemaname = 'public'
+              AND tablename = 'cost_events'
+              AND indexname = 'cost_events_company_idempotency_key_uq'
+          `,
+        );
+        expect(indexes).toHaveLength(1);
+        expect(indexes[0].indexdef).toMatch(/UNIQUE INDEX/);
+        expect(indexes[0].indexdef).toMatch(/\(company_id, idempotency_key\)/);
+        expect(indexes[0].indexdef).toMatch(/WHERE \(idempotency_key IS NOT NULL\)/);
+
+        // 5. ensure NO unique index on billing_code remains (the original design error
+        //    that broke pre-existing plugin-orchestration-apis.test.ts where billing_code
+        //    is used as a shared grouping label across multiple events).
+        const billingCodeIdx = await sql.unsafe<{ indexname: string }[]>(
+          `
+            SELECT indexname
+            FROM pg_indexes
+            WHERE schemaname = 'public'
+              AND tablename = 'cost_events'
+              AND indexname = 'cost_events_company_billing_code_uq'
+          `,
+        );
+        expect(billingCodeIdx).toHaveLength(0);
+      } finally {
+        await sql.end();
+      }
+    },
+    20_000,
+  );
 });

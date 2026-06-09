@@ -13,6 +13,18 @@ Use repo script in development:
 pnpm paperclipai --help
 ```
 
+The built/global binary is `paperclipai`. In Docker images, `/usr/local/bin/paperclipai`
+wraps the checked-out app source directly:
+
+```sh
+exec node --import /app/server/node_modules/tsx/dist/loader.mjs /app/cli/src/index.ts "$@"
+```
+
+Do not replace that wrapper with an npm-installed `dist/index.js` shim unless the
+image smoke proves `paperclipai --help` and a safe `paperclipai issue ...` command
+both work. A broken shim can recursively execute itself and fail with
+`SyntaxError: Unexpected identifier 'node'`.
+
 First-time local bootstrap + run:
 
 ```sh
@@ -120,7 +132,19 @@ pnpm paperclipai issue update <issue-id> [--status in_progress] [--comment "..."
 pnpm paperclipai issue comment <issue-id> --body "..." [--reopen]
 pnpm paperclipai issue checkout <issue-id> --agent-id <agent-id> [--expected-statuses todo,backlog,blocked]
 pnpm paperclipai issue release <issue-id>
+pnpm paperclipai issue delete <issue-id> [--yes]
+pnpm paperclipai issue heartbeat-context <issue-id>
+pnpm paperclipai issue comments-list <issue-id>
+pnpm paperclipai issue comment-get <issue-id> <comment-id>
+pnpm paperclipai issue create-child <parent-issue-id> --payload '{...}'
+pnpm paperclipai issue document ...
+pnpm paperclipai issue work-product ...
+pnpm paperclipai issue interaction ...
+pnpm paperclipai issue feedback ...
 ```
+
+`issue --help` is the source of truth for niche subcommands. There is no
+`issue attachment-upload` command in this CLI build.
 
 ## Agent Commands
 
@@ -142,6 +166,32 @@ Example for shortname-based local setup:
 pnpm paperclipai agent local-cli codexcoder --company-id <company-id>
 pnpm paperclipai agent local-cli claudecoder --company-id <company-id>
 ```
+
+## Secrets Commands
+
+```sh
+pnpm paperclipai secrets list --company-id <company-id>
+pnpm paperclipai secrets declarations --company-id <company-id> [--include agents,projects] [--kind secret]
+pnpm paperclipai secrets create --company-id <company-id> --name anthropic-api-key --value-env ANTHROPIC_API_KEY
+pnpm paperclipai secrets link --company-id <company-id> --name prod-stripe-key --provider aws_secrets_manager --external-ref <provider-ref>
+pnpm paperclipai secrets doctor --company-id <company-id>
+pnpm paperclipai secrets migrate-inline-env --company-id <company-id> [--apply]
+```
+
+Secret listing and declarations never print secret values. `create` accepts
+`--value-env` so shell history does not capture the value. `link` records
+provider-owned references without copying the secret value into Paperclip.
+For AWS-backed secrets, `secrets doctor` reports missing non-secret provider
+env and the expected AWS SDK runtime credential source; do not store AWS
+bootstrap credentials in Paperclip secrets.
+
+Per-company provider vaults (multiple vault instances per provider, default
+vault selection, coming-soon GCP/Vault) are configured from the board UI under
+`Company Settings → Secrets → Provider vaults` or through
+`/api/companies/{companyId}/secret-provider-configs`. There is no CLI surface
+for vault management today. See the
+[secrets deploy guide](../docs/deploy/secrets.md#provider-vaults) and
+[API reference](../docs/api/secrets.md#provider-vaults) for the contract.
 
 ## Approval Commands
 
@@ -178,7 +228,28 @@ pnpm paperclipai heartbeat run --agent-id <agent-id> [--api-base http://localhos
 
 ## Local Storage Defaults
 
-Default local instance root is `~/.paperclip/instances/default`:
+Local Paperclip data lives under the selected instance root. `PAPERCLIP_HOME` chooses the home directory and `PAPERCLIP_INSTANCE_ID` chooses the instance.
+
+```text
+~/.paperclip/                                     # PAPERCLIP_HOME
+└── instances/
+    └── default/                                  # instance root (PAPERCLIP_INSTANCE_ID)
+        ├── config.json                           # runtime config
+        ├── .env                                  # instance env file
+        ├── db/                                   # embedded PostgreSQL data
+        ├── data/
+        │   ├── storage/                          # local_disk uploads
+        │   └── backups/                          # automatic DB backups
+        ├── logs/
+        ├── secrets/
+        │   └── master.key                        # local_encrypted master key
+        ├── workspaces/                           # default agent workspaces
+        ├── projects/                             # project execution workspaces
+        ├── companies/                            # per-company adapter homes (e.g. codex-home)
+        └── codex-home/                           # per-instance codex home (when not company-scoped)
+```
+
+Default paths for the canonical install:
 
 - config: `~/.paperclip/instances/default/config.json`
 - embedded db: `~/.paperclip/instances/default/db`

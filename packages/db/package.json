@@ -36,16 +36,19 @@
   ],
   "scripts": {
     "check:migrations": "tsx src/check-migration-numbering.ts",
-    "build": "pnpm run check:migrations && tsc && cp -r src/migrations dist/migrations",
+    "build": "pnpm run check:migrations && tsc && cp -r src/migrations dist/migrations && cp -r src/seed-data dist/seed-data",
     "clean": "rm -rf dist",
     "typecheck": "pnpm run check:migrations && tsc --noEmit",
     "generate": "pnpm run check:migrations && tsc -p tsconfig.json && drizzle-kit generate",
     "migrate": "pnpm run check:migrations && tsx src/migrate.ts",
-    "seed": "tsx src/seed.ts"
+    "seed": "tsx src/seed.ts",
+    "seed:pricing": "tsx src/seed-model-pricing.ts",
+    "backfill:cost-cents": "tsx src/backfill-cost-cents.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "@paperclipai/shared": "workspace:*",
-    "drizzle-orm": "^0.38.4",
+    "drizzle-orm": "^0.45.2",
     "embedded-postgres": "^18.1.0-beta.16",
     "postgres": "^3.4.5"
   },

@@ -28,7 +28,28 @@ pnpm paperclipai issue checkout <issue-id> --agent-id <agent-id>
 
 # Release task
 pnpm paperclipai issue release <issue-id>
+
+# Delete issue
+pnpm paperclipai issue delete <issue-id> [--yes]
+
+# Inspect compact heartbeat context
+pnpm paperclipai issue heartbeat-context <issue-id>
+
+# Comments
+pnpm paperclipai issue comments-list <issue-id>
+pnpm paperclipai issue comment-get <issue-id> <comment-id>
+
+# Extended issue resources
+pnpm paperclipai issue create-child <parent-issue-id> --payload '{...}'
+pnpm paperclipai issue document --help
+pnpm paperclipai issue work-product --help
+pnpm paperclipai issue interaction --help
+pnpm paperclipai issue feedback --help
 ```
+
+There is no `issue attachment-upload` command in the current CLI build. Run
+`pnpm paperclipai issue --help` before documenting or scripting a niche issue
+subcommand.
 
 ## Company Commands
 
@@ -61,7 +82,12 @@ pnpm paperclipai company import \
 ```sh
 pnpm paperclipai agent list
 pnpm paperclipai agent get <agent-id>
+pnpm paperclipai agent local-cli <agent-id-or-shortname> --company-id <company-id>
 ```
+
+`agent local-cli` creates a long-lived agent key, installs local Paperclip skills
+for Claude/Codex, and prints `PAPERCLIP_*` shell exports for manual local agent
+runs.
 
 ## Approval Commands
 

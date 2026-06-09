@@ -17,6 +17,7 @@ import {
   projectService,
 } from "../services/index.js";
 import {
+  collectEnvironmentSecretRefs,
   normalizeEnvironmentConfigForPersistence,
   normalizeEnvironmentConfigForProbe,
   parseEnvironmentDriverConfig,
@@ -26,6 +27,7 @@ import {
 import { probeEnvironment } from "../services/environment-probe.js";
 import { secretService } from "../services/secrets.js";
 import { listReadyPluginEnvironmentDrivers } from "../services/plugin-environment-driver.js";
+import { getConfiguredSecretProvider } from "../secrets/configured-provider.js";
 import { assertCompanyAccess, getActorInfo } from "./authz.js";
 import type { PluginWorkerManager } from "../services/plugin-worker-manager.js";
 import { environmentService } from "../services/environments.js";
@@ -184,6 +186,7 @@ export function environmentRoutes(
             source: "plugin" as const,
             pluginKey: driver.pluginKey,
             pluginId: driver.pluginId,
+            configSchema: driver.configSchema,
           },
         ])),
       },
@@ -201,6 +204,7 @@ export function environmentRoutes(
         companyId,
         environmentName: req.body.name,
         driver: req.body.driver,
+        secretProvider: getConfiguredSecretProvider(),
         config: req.body.config,
         actor: {
           agentId: actor.agentId,
@@ -210,6 +214,11 @@ export function environmentRoutes(
       }),
     };
     const environment = await svc.create(companyId, input);
+    await secrets.syncSecretRefsForTarget(
+      companyId,
+      { targetType: "environment", targetId: environment.id },
+      await collectEnvironmentSecretRefs({ db, environment }),
+    );
     await logActivity(db, {
       companyId,
       actorType: actor.actorType,
@@ -304,6 +313,7 @@ export function environmentRoutes(
               companyId: existing.companyId,
               environmentName: nextName,
               driver: nextDriver,
+              secretProvider: getConfiguredSecretProvider(),
               config: configSource,
               actor: {
                 agentId: actor.agentId,
@@ -318,6 +328,13 @@ export function environmentRoutes(
     if (!environment) {
       res.status(404).json({ error: "Environment not found" });
       return;
+    }
+    if (patch.config !== undefined || patch.driver !== undefined) {
+      await secrets.syncSecretRefsForTarget(
+        environment.companyId,
+        { targetType: "environment", targetId: environment.id },
+        await collectEnvironmentSecretRefs({ db, environment }),
+      );
     }
     await logActivity(db, {
       companyId: environment.companyId,
@@ -409,9 +426,11 @@ export function environmentRoutes(
       const companyId = req.params.companyId as string;
       await assertCanMutateEnvironments(req, companyId);
       const actor = getActorInfo(req);
-      const normalizedConfig = normalizeEnvironmentConfigForProbe({
+      const normalizedConfig = await normalizeEnvironmentConfigForProbe({
+        db,
         driver: req.body.driver,
         config: req.body.config,
+        pluginWorkerManager: options.pluginWorkerManager,
       });
       const environment = {
         id: "unsaved",

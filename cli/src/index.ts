@@ -18,11 +18,14 @@ import { registerActivityCommands } from "./commands/client/activity.js";
 import { registerDashboardCommands } from "./commands/client/dashboard.js";
 import { registerRoutineCommands } from "./commands/routines.js";
 import { registerFeedbackCommands } from "./commands/client/feedback.js";
+import { registerSecretCommands } from "./commands/client/secrets.js";
+import { registerCloudCommands } from "./commands/client/cloud.js";
 import { applyDataDirOverride, type DataDirOptionLike } from "./config/data-dir.js";
 import { loadPaperclipEnvFile } from "./config/env.js";
 import { initTelemetryFromConfigFile, flushTelemetry } from "./telemetry.js";
 import { registerWorktreeCommands } from "./commands/worktree.js";
 import { registerPluginCommands } from "./commands/client/plugin.js";
+import { registerIssueExtensionCommands } from "./commands/client/issue-extras.js";
 import { registerClientAuthCommands } from "./commands/client/auth.js";
 import { cliVersion } from "./version.js";
 
@@ -147,9 +150,12 @@ registerActivityCommands(program);
 registerDashboardCommands(program);
 registerRoutineCommands(program);
 registerFeedbackCommands(program);
+registerSecretCommands(program);
+registerCloudCommands(program);
 registerWorktreeCommands(program);
 registerEnvLabCommands(program);
 registerPluginCommands(program);
+registerIssueExtensionCommands(program);
 
 const auth = program.command("auth").description("Authentication and bootstrap utilities");
 

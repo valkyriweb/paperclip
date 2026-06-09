@@ -41,6 +41,8 @@ interface IssueCreateOptions extends BaseClientOptions {
   parentId?: string;
   requestDepth?: string;
   billingCode?: string;
+  startDate?: string;
+  dueDate?: string;
 }
 
 interface IssueUpdateOptions extends BaseClientOptions {
@@ -54,6 +56,8 @@ interface IssueUpdateOptions extends BaseClientOptions {
   parentId?: string;
   requestDepth?: string;
   billingCode?: string;
+  startDate?: string;
+  dueDate?: string;
   comment?: string;
   hiddenAt?: string;
 }
@@ -167,6 +171,8 @@ export function registerIssueCommands(program: Command): void {
       .option("--parent-id <id>", "Parent issue ID")
       .option("--request-depth <n>", "Request depth integer")
       .option("--billing-code <code>", "Billing code")
+      .option("--start-date <iso8601>", "Planned start date")
+      .option("--due-date <iso8601>", "Due date")
       .action(async (opts: IssueCreateOptions) => {
         try {
           const ctx = resolveCommandContext(opts, { requireCompany: true });
@@ -181,6 +187,8 @@ export function registerIssueCommands(program: Command): void {
             parentId: opts.parentId,
             requestDepth: parseOptionalInt(opts.requestDepth),
             billingCode: opts.billingCode,
+            startDate: opts.startDate,
+            dueDate: opts.dueDate,
           });
 
           const created = await ctx.api.post<Issue>(`/api/companies/${ctx.companyId}/issues`, payload);
@@ -207,6 +215,8 @@ export function registerIssueCommands(program: Command): void {
       .option("--parent-id <id>", "Parent issue ID")
       .option("--request-depth <n>", "Request depth integer")
       .option("--billing-code <code>", "Billing code")
+      .option("--start-date <iso8601|null>", "Set planned start date or literal 'null'")
+      .option("--due-date <iso8601|null>", "Set due date or literal 'null'")
       .option("--comment <text>", "Optional comment to add with update")
       .option("--hidden-at <iso8601|null>", "Set hiddenAt timestamp or literal 'null'")
       .action(async (issueId: string, opts: IssueUpdateOptions) => {
@@ -223,6 +233,8 @@ export function registerIssueCommands(program: Command): void {
             parentId: opts.parentId,
             requestDepth: parseOptionalInt(opts.requestDepth),
             billingCode: opts.billingCode,
+            startDate: parseNullableIso(opts.startDate),
+            dueDate: parseNullableIso(opts.dueDate),
             comment: opts.comment,
             hiddenAt: parseHiddenAt(opts.hiddenAt),
           });
@@ -396,6 +408,10 @@ function parseOptionalInt(value: string | undefined): number | undefined {
 }
 
 function parseHiddenAt(value: string | undefined): string | null | undefined {
+  return parseNullableIso(value);
+}
+
+function parseNullableIso(value: string | undefined): string | null | undefined {
   if (value === undefined) return undefined;
   if (value.trim().toLowerCase() === "null") return null;
   return value;
