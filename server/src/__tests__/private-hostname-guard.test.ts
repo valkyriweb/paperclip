@@ -42,9 +42,19 @@ describe("privateHostnameGuard", () => {
     expect(res.status).toBe(200);
   });
 
-  it("blocks unknown hostnames with remediation command", async () => {
+  it("allows health probes from unknown hostnames", async () => {
     const app = createApp({ enabled: true, allowedHostnames: ["some-other-host"] });
-    const res = await request(app).get("/api/health").set("Host", `${unknownHostname}:3100`);
+    const healthRes = await request(app).get("/api/health").set("Host", `${unknownHostname}:3100`);
+    expect(healthRes.status).toBe(200);
+  });
+
+  it("still blocks unknown hostnames on non-health API routes", async () => {
+    const app = createApp({ enabled: true, allowedHostnames: ["some-other-host"] });
+    app.get("/api/companies", (_req, res) => {
+      res.status(200).json([]);
+    });
+
+    const res = await request(app).get("/api/companies").set("Host", `${unknownHostname}:3100`);
     expect(res.status).toBe(403);
     expect(res.body?.error).toContain(`please run pnpm paperclipai allowed-hostname ${unknownHostname}`);
   });
