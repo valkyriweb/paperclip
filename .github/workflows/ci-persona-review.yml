@@ -1,0 +1,71 @@
+# Persona review — advisory, non-blocking.
+#
+# Fans a PR diff out through 6 AI reviewer personas (reliability, security,
+# scope-creep, docs-coverage, codebase-shape, build-hygiene) via the
+# reviewer-orchestrator Claude Code agent, then posts a single aggregated
+# comment on the PR.
+#
+# Non-blocking: this job never fails a PR. It is purely advisory.
+#
+# Requires: CLAUDE_CODE_OAUTH_TOKEN set as a repository secret.
+# Provision: Settings → Secrets and variables → Actions → New repository secret.
+# Token source: https://code.claude.ai → Account → API tokens.
+#
+# Self-hosted runner variant: if a runner with `pi` + `claude-bridge` is
+# available, replace the `runs-on` and the claude-code-action step with the
+# pi-pr-review script from agent-scripts/skills/rusty-review/scripts/.
+# See docs/ci-review-personas.md for the full runbook.
+
+name: AI Persona Review (advisory)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches:
+      - master
+      - bermont
+
+concurrency:
+  group: persona-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  persona-review:
+    name: Persona Review (advisory)
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run reviewer-orchestrator via Claude Code
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            You are running as the reviewer-orchestrator agent in the Paperclip CI pipeline.
+
+            Fetch the diff for PR #${{ github.event.pull_request.number }} using:
+              gh pr diff ${{ github.event.pull_request.number }}
+
+            The PR title is: "${{ github.event.pull_request.title }}"
+            The PR description (scope): "${{ github.event.pull_request.body }}"
+
+            Use this as the scope context for the scope-creep persona.
+
+            Run the reviewer-orchestrator agent with this diff and scope, fan out the 6 personas
+            (reliability, security, scope-creep, docs-coverage, codebase-shape, build-hygiene),
+            then post the aggregated REVIEW SUMMARY as a PR comment using:
+              gh pr comment ${{ github.event.pull_request.number }} --body "<review output>"
+
+            This is an advisory review — do not block the PR regardless of findings.
+            The comment should start with: "## 🔍 AI Persona Review (advisory)"
+          allowed_tools: "Bash,Read,Grep,Glob,Agent"
