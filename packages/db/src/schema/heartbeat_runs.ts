@@ -78,5 +78,13 @@ export const heartbeatRuns = pgTable(
       table.status,
       table.processStartedAt,
     ),
+    companyCreatedIdx: index("heartbeat_runs_company_created_idx").on(
+      table.companyId,
+      table.createdAt,
+    ),
+    statusCreatedIdx: index("heartbeat_runs_status_created_idx").on(
+      table.status,
+      table.createdAt,
+    ),
   }),
 );

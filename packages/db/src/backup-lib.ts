@@ -71,6 +71,14 @@ const BACKUP_DATA_CURSOR_ROWS = 100;
 const BACKUP_CLI_STDERR_BYTES = 64 * 1024;
 const BACKUP_BREAKPOINT_DETECT_BYTES = 64 * 1024;
 
+const DEFAULT_BACKUP_NULLIFY_COLUMNS: Record<string, string[]> = {
+  // Heartbeat run payloads can contain full prompt/session snapshots and large
+  // adapter results. They are useful for live debugging, but they are not
+  // required for disaster-recovery restores and made production backups stream
+  // hundreds of MiB from a few thousand rows.
+  "public.heartbeat_runs": ["context_snapshot", "result_json"],
+};
+
 const STATEMENT_BREAKPOINT = "-- paperclip statement breakpoint 69f6f3f1-42fd-46a6-bf17-d1d85f8f3900";
 
 function sanitizeRestoreErrorMessage(error: unknown): string {
@@ -224,6 +232,30 @@ function normalizeNullifyColumnMap(values: Record<string, string[]> | undefined)
     }
   }
   return out;
+}
+
+function mergeNullifyColumnOptions(
+  defaults: Record<string, string[]>,
+  overrides: Record<string, string[]> | undefined,
+): Record<string, string[]> {
+  const merged = new Map<string, Set<string>>();
+  for (const [tableName, columns] of Object.entries(defaults)) {
+    const normalizedTable = normalizeTableSelector(tableName);
+    if (!normalizedTable) continue;
+    merged.set(normalizedTable, new Set(columns.map((column) => column.trim()).filter(Boolean)));
+  }
+  for (const [tableName, columns] of Object.entries(overrides ?? {})) {
+    const normalizedTable = normalizeTableSelector(tableName);
+    if (!normalizedTable) continue;
+    const existing = merged.get(normalizedTable) ?? new Set<string>();
+    for (const column of columns) {
+      const normalizedColumn = column.trim();
+      if (normalizedColumn) existing.add(normalizedColumn);
+    }
+    if (existing.size > 0) merged.set(normalizedTable, existing);
+  }
+
+  return Object.fromEntries([...merged.entries()].map(([tableName, columns]) => [tableName, [...columns]]));
 }
 
 function quoteIdentifier(value: string): string {
@@ -523,9 +555,10 @@ export async function runDatabaseBackup(opts: RunDatabaseBackupOptions): Promise
   const retention = opts.retention;
   const connectTimeout = Math.max(1, Math.trunc(opts.connectTimeoutSeconds ?? 5));
   const backupEngine = opts.backupEngine ?? "auto";
-  const canUsePgDump = !hasBackupTransforms(opts);
+  const nullifyColumns = mergeNullifyColumnOptions(DEFAULT_BACKUP_NULLIFY_COLUMNS, opts.nullifyColumns);
+  const canUsePgDump = !hasBackupTransforms({ ...opts, nullifyColumns });
   const excludedTableNames = normalizeTableNameSet(opts.excludeTables);
-  const nullifiedColumnsByTable = normalizeNullifyColumnMap(opts.nullifyColumns);
+  const nullifiedColumnsByTable = normalizeNullifyColumnMap(nullifyColumns);
   let sql = postgres(opts.connectionString, { max: 1, connect_timeout: connectTimeout });
   let sqlClosed = false;
   const closeSql = async () => {

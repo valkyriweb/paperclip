@@ -182,6 +182,81 @@ describeEmbeddedPostgres("runDatabaseBackup", () => {
   );
 
   it(
+    "nullifies heavyweight heartbeat run payloads by default",
+    async () => {
+      const sourceConnectionString = await createTempDatabase();
+      const restoreConnectionString = await createSiblingDatabase(
+        sourceConnectionString,
+        "paperclip_heartbeat_payload_restore_target",
+      );
+      const backupDir = createTempDir("paperclip-db-heartbeat-payload-backup-");
+      const sourceSql = postgres(sourceConnectionString, { max: 1, onnotice: () => {} });
+      const restoreSql = postgres(restoreConnectionString, { max: 1, onnotice: () => {} });
+
+      try {
+        await sourceSql.unsafe(`
+          INSERT INTO "public"."companies" ("id", "name", "issue_prefix")
+          VALUES ('22222222-2222-4222-8222-222222222222', 'Backup Co', 'BKP');
+          INSERT INTO "public"."agents" ("id", "company_id", "name")
+          VALUES (
+            '33333333-3333-4333-8333-333333333333',
+            '22222222-2222-4222-8222-222222222222',
+            'Backup Agent'
+          );
+          INSERT INTO "public"."heartbeat_runs" (
+            "id",
+            "company_id",
+            "agent_id",
+            "status",
+            "context_snapshot",
+            "result_json"
+          ) VALUES (
+            '11111111-1111-4111-8111-111111111111',
+            '22222222-2222-4222-8222-222222222222',
+            '33333333-3333-4333-8333-333333333333',
+            'done',
+            jsonb_build_object('prompt', repeat('x', 1024), 'issueId', 'SMI-544'),
+            jsonb_build_object('result', repeat('y', 1024), 'summary', 'large')
+          );
+        `);
+
+        const result = await runDatabaseBackup({
+          connectionString: sourceConnectionString,
+          backupDir,
+          retention: { dailyDays: 7, weeklyWeeks: 4, monthlyMonths: 1 },
+          filenamePrefix: "paperclip-heartbeat-payload-test",
+          backupEngine: "javascript",
+        });
+
+        await runDatabaseRestore({
+          connectionString: restoreConnectionString,
+          backupFile: result.backupFile,
+        });
+
+        const rows = await restoreSql.unsafe<{
+          status: string;
+          context_snapshot: unknown;
+          result_json: unknown;
+        }[]>(`
+          SELECT "status", "context_snapshot", "result_json"
+          FROM "public"."heartbeat_runs"
+        `);
+        expect(rows).toEqual([
+          {
+            status: "done",
+            context_snapshot: null,
+            result_json: null,
+          },
+        ]);
+      } finally {
+        await sourceSql.end();
+        await restoreSql.end();
+      }
+    },
+    60_000,
+  );
+
+  it(
     "backs up and restores non-public database schemas and migration history",
     async () => {
       const sourceConnectionString = await createTempDatabase();
