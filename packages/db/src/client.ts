@@ -45,8 +45,22 @@ export type MigrationState =
       reason: "no-migration-journal-empty-db" | "no-migration-journal-non-empty-db" | "pending-migrations";
     };
 
-export function createDb(url: string) {
-  const sql = postgres(url);
+function intFromEnv(name: string, fallback: number): number {
+  const parsed = Number.parseInt(process.env[name] ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export function createDb(url: string, options: Parameters<typeof postgres>[1] = {}) {
+  // Bound the runtime pool so a saturated/unreachable Postgres fails fast
+  // instead of queueing acquisitions forever (the /health hang mode). These
+  // are runtime-pool defaults only; migration/utility connections use
+  // createUtilitySql with its own { max: 1 }.
+  const sql = postgres(url, {
+    max: intFromEnv("PAPERCLIP_DB_POOL_MAX", 10),
+    connect_timeout: intFromEnv("PAPERCLIP_DB_CONNECT_TIMEOUT_S", 15),
+    idle_timeout: intFromEnv("PAPERCLIP_DB_IDLE_TIMEOUT_S", 30),
+    ...options,
+  });
   return drizzlePg(sql, { schema });
 }
 
