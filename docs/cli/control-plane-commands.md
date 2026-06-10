@@ -28,34 +28,14 @@ pnpm paperclipai issue checkout <issue-id> --agent-id <agent-id>
 
 # Release task
 pnpm paperclipai issue release <issue-id>
-
-# Delete issue
-pnpm paperclipai issue delete <issue-id> [--yes]
-
-# Inspect compact heartbeat context
-pnpm paperclipai issue heartbeat-context <issue-id>
-
-# Comments
-pnpm paperclipai issue comments-list <issue-id>
-pnpm paperclipai issue comment-get <issue-id> <comment-id>
-
-# Extended issue resources
-pnpm paperclipai issue create-child <parent-issue-id> --payload '{...}'
-pnpm paperclipai issue document --help
-pnpm paperclipai issue work-product --help
-pnpm paperclipai issue interaction --help
-pnpm paperclipai issue feedback --help
 ```
-
-There is no `issue attachment-upload` command in the current CLI build. Run
-`pnpm paperclipai issue --help` before documenting or scripting a niche issue
-subcommand.
 
 ## Company Commands
 
 ```sh
 pnpm paperclipai company list
 pnpm paperclipai company get <company-id>
+pnpm paperclipai company current [--company-id <company-id>]
 
 # Export to portable folder package (writes manifest + markdown files)
 pnpm paperclipai company export <company-id> --out ./exports/acme --include company,agents
@@ -77,17 +57,42 @@ pnpm paperclipai company import \
   --include company,agents
 ```
 
+With agent authentication, use `company list` or `company current` to resolve
+the scoped company. `company list` first tries the board-wide list; if that is
+forbidden, it falls back to `--company-id`, `PAPERCLIP_COMPANY_ID`, context, or
+`/api/agents/me` and returns only that scoped company. `company create` requires
+board/instance-admin authentication because it is an instance-wide setup
+command.
+
 ## Agent Commands
 
 ```sh
 pnpm paperclipai agent list
 pnpm paperclipai agent get <agent-id>
-pnpm paperclipai agent local-cli <agent-id-or-shortname> --company-id <company-id>
 ```
 
-`agent local-cli` creates a long-lived agent key, installs local Paperclip skills
-for Claude/Codex, and prints `PAPERCLIP_*` shell exports for manual local agent
-runs.
+## Skills Commands
+
+```sh
+# Browse app-shipped catalog skills without changing company state
+pnpm paperclipai skills browse [--kind bundled|optional] [--category software-development] [--query github]
+pnpm paperclipai skills search "pull request" [--json]
+
+# Inspect catalog metadata and file inventory before install
+pnpm paperclipai skills inspect github-pr-workflow
+
+# Install a catalog skill into the company skill library
+# This does not attach the skill to any agent.
+pnpm paperclipai skills install github-pr-workflow --company-id <company-id>
+pnpm paperclipai skills install github-pr-workflow --as pr-flow --force --company-id <company-id>
+
+# External sources still use import instead of catalog install
+pnpm paperclipai skills import ./skills/my-skill --company-id <company-id>
+pnpm paperclipai skills import owner/repo/path/to/skill --company-id <company-id>
+
+# Attach desired company skills to an agent after install/import
+pnpm paperclipai skills agent sync <agent-id> --skill github-pr-workflow --company-id <company-id>
+```
 
 ## Approval Commands
 
