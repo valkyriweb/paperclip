@@ -1,6 +1,6 @@
 ---
 name: terminal-bench-loop
-description: Terminal-Bench + Paperclip loop: run smoke, diagnose stop/loop, request board approval, retry until pass/reject/budget/blocker.
+description: "Terminal-Bench + Paperclip loop: run smoke, diagnose stop/loop, request board approval, retry until pass/reject/budget/blocker."
 ---
 
 # Terminal-Bench Loop

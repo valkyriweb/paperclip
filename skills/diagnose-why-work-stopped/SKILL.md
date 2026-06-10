@@ -1,6 +1,6 @@
 ---
 name: diagnose-why-work-stopped
-description: Diagnose stalled/looping work trees: forensics, exact stop point, general product rule, no code, board/CTO-gated child issues.
+description: "Diagnose stalled/looping work trees: forensics, exact stop point, general product rule, no code, board/CTO-gated child issues."
 ---
 
 # Diagnose Why Work Stopped
