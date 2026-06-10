@@ -283,7 +283,7 @@ export function costService(db: Db, budgetHooks: BudgetServiceHooks = {}) {
       // it through RETURNING as a synthetic `inserted` boolean.
       const returning = {
         ...getTableColumns(costEvents),
-        inserted: sql<boolean>`(xmax = 0)`.as("inserted"),
+        inserted: sql<boolean>`(xmax::text = '0')`.as("inserted"),
       };
       const insertBuilder = db.insert(costEvents).values(insertValues);
       const event = await (data.idempotencyKey

@@ -1225,7 +1225,11 @@ describeEmbeddedPostgres("costService.createEvent server-side pricing", () => {
       outputTokens: 0,
       cachedInputTokens: 0,
       cacheCreationInputTokens: 0,
-      occurredAt: new Date("2026-05-15T00:00:00.000Z"),
+      // Must fall inside the policy's calendar_month_utc window, which the
+      // evaluator (computeObservedAmount) derives from the real clock. A
+      // hardcoded past month makes observedAmount 0 once the wall clock rolls
+      // past it, silently skipping incident creation — keep this "now".
+      occurredAt: new Date(),
       idempotencyKey,
     } as any;
 

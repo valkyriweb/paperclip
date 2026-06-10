@@ -65,6 +65,7 @@ vi.mock("../services/index.js", () => ({
   issueRecoveryActionService: () => ({
     getActiveForIssue: vi.fn(async () => null),
     listActiveForIssues: vi.fn(async () => new Map()),
+    resolveActiveMissingDispositionForIssue: vi.fn(async () => null),
   }),
   issueThreadInteractionService: () => ({
     listForIssue: vi.fn(async () => []),
