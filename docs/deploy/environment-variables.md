@@ -46,6 +46,16 @@ These are set automatically by the server when invoking agents:
 | `PAPERCLIP_APPROVAL_STATUS` | Approval decision |
 | `PAPERCLIP_LINKED_ISSUE_IDS` | Comma-separated linked issue IDs |
 
+## OpenTelemetry / Observability
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | (unset) | OTLP collector endpoint (e.g. `http://otel-collector:4318`). When set, the server starts the OTel SDK and exports traces and metrics. |
+| `OTEL_LOG_LEVEL` | (unset) | Set to `debug` to enable OTel SDK diagnostic logging to stdout. |
+| `PAPERCLIP_DEPLOYMENT_ENV` | `lue-kube` | Value stamped as the `deployment.environment` resource attribute on every OTLP signal. Override per cluster (e.g. `bermont-kube`, `staging`). |
+| `PAPERCLIP_AGENT_SURFACE` | `k8s` | Value stamped as the `agent.surface` resource attribute. Use `local` for non-Kubernetes deployments. |
+| `PAPERCLIP_AGENT_ROLE` | `executive` | Value stamped as the `agent.role` resource attribute. Identifies the Paperclip agent tier in the telemetry schema. |
+
 ## LLM Provider Keys (for adapters)
 
 | Variable | Description |
