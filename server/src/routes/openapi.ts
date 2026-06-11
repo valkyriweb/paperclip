@@ -6,6 +6,7 @@ import {
   createAgentHireSchema,
   updateAgentSchema,
   updateAgentPermissionsSchema,
+  setAgentGrantsSchema,
   updateAgentInstructionsPathSchema,
   updateAgentInstructionsBundleSchema,
   upsertAgentInstructionsFileSchema,
@@ -508,6 +509,7 @@ const AUTHENTICATED_SECURITY: Array<Record<string, string[]>> = [
 
 const PUBLIC_OPERATIONS = new Set([
   "GET /api/health",
+  "GET /api/health/live",
   "GET /api/openapi.json",
   "GET /api/board-claim/{token}",
   "POST /api/cli-auth/challenges",
@@ -757,6 +759,16 @@ registry.registerPath({
       bootstrapInviteActive: z.boolean().optional(),
     })),
     503: { description: "Service unavailable", content: { "application/json": { schema: ErrorSchema } } },
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/health/live",
+  tags: ["health"],
+  summary: "Liveness check",
+  responses: {
+    200: r.ok(z.object({ status: z.literal("ok") })),
   },
 });
 
@@ -1048,6 +1060,18 @@ registry.registerPath({
     body: jsonBody(updateAgentPermissionsSchema),
   },
   responses: { 200: r.ok(), 400: r.badRequest, 401: r.unauthorized },
+});
+
+registry.registerPath({
+  method: "patch",
+  path: "/api/agents/{id}/grants",
+  tags: ["agents"],
+  summary: "Update agent grants",
+  request: {
+    params: z.object({ id: z.string() }),
+    body: jsonBody(setAgentGrantsSchema),
+  },
+  responses: { 200: r.ok(), 400: r.badRequest, 401: r.unauthorized, 404: r.notFound },
 });
 
 registry.registerPath({
