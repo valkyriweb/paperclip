@@ -399,6 +399,9 @@ jobs:
           }
           CONF
 
+      - name: Install Chrome for Playwright
+        run: npx playwright install chrome
+
       - name: Run e2e tests
         env:
           PAPERCLIP_E2E_SKIP_LLM: "true"
