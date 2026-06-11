@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, gte, inArray, isNull, notInArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNull, notInArray, or, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import {
   DEFAULT_ISSUE_GRAPH_LIVENESS_AUTO_RECOVERY_LOOKBACK_HOURS,
@@ -22,6 +22,7 @@ import {
   issueRelations,
   issueThreadInteractions,
   issues,
+  routineRuns,
 } from "@paperclipai/db";
 import { parseObject, asBoolean, asNumber } from "../../adapters/utils.js";
 import { runningProcesses } from "../../adapters/index.js";
@@ -63,6 +64,17 @@ import {
 import { isAutomaticRecoverySuppressedByPauseHold } from "./pause-hold-guard.js";
 
 const EXECUTION_PATH_HEARTBEAT_RUN_STATUSES = ["queued", "running", "scheduled_retry"] as const;
+const ROUTINE_SUPERSESSION_RECOVERY_WAKE_REASONS = [
+  "source_scoped_recovery_action",
+  "issue_assignment_recovery",
+  "issue_continuation_needed",
+] as const;
+const ROUTINE_SUPERSESSION_RECOVERY_RUN_SOURCES = [
+  "source_scoped_recovery_action",
+  "issue_assignment_recovery",
+  "issue_continuation_needed",
+  "stranded_assigned_issue",
+] as const;
 const UNSUCCESSFUL_HEARTBEAT_RUN_TERMINAL_STATUSES = ["failed", "cancelled", "timed_out"] as const;
 export const ACTIVE_RUN_OUTPUT_SUSPICION_THRESHOLD_MS = 60 * 60 * 1000;
 export const ACTIVE_RUN_OUTPUT_CRITICAL_THRESHOLD_MS = 4 * 60 * 60 * 1000;
@@ -539,21 +551,46 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
   }
 
   async function hasActiveExecutionPath(companyId: string, issueId: string) {
-    const [run, deferredWake] = await Promise.all([
+    const activePath = await getActiveExecutionPath(companyId, issueId);
+    return Boolean(activePath);
+  }
+
+  async function getActiveExecutionPath(companyId: string, issueId: string) {
+    const [runningRun, queuedRuns, deferredWakes] = await Promise.all([
       db
-        .select({ id: heartbeatRuns.id })
+        .select({ id: heartbeatRuns.id, status: heartbeatRuns.status })
         .from(heartbeatRuns)
         .where(
           and(
             eq(heartbeatRuns.companyId, companyId),
-            inArray(heartbeatRuns.status, [...EXECUTION_PATH_HEARTBEAT_RUN_STATUSES]),
+            eq(heartbeatRuns.status, "running"),
             sql`${heartbeatRuns.contextSnapshot} ->> 'issueId' = ${issueId}`,
           ),
         )
         .limit(1)
         .then((rows) => rows[0] ?? null),
       db
-        .select({ id: agentWakeupRequests.id })
+        .select({
+          id: heartbeatRuns.id,
+          status: heartbeatRuns.status,
+          source: sql<string | null>`${heartbeatRuns.contextSnapshot} ->> 'source'`,
+          wakeReason: sql<string | null>`${heartbeatRuns.contextSnapshot} ->> 'wakeReason'`,
+        })
+        .from(heartbeatRuns)
+        .where(
+          and(
+            eq(heartbeatRuns.companyId, companyId),
+            inArray(heartbeatRuns.status, ["queued", "scheduled_retry"]),
+            sql`${heartbeatRuns.contextSnapshot} ->> 'issueId' = ${issueId}`,
+          ),
+        )
+        .then((rows) => rows),
+      db
+        .select({
+          id: agentWakeupRequests.id,
+          reason: agentWakeupRequests.reason,
+          payload: agentWakeupRequests.payload,
+        })
         .from(agentWakeupRequests)
         .where(
           and(
@@ -562,11 +599,54 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
             sql`${agentWakeupRequests.payload} ->> 'issueId' = ${issueId}`,
           ),
         )
-        .limit(1)
-        .then((rows) => rows[0] ?? null),
+        .then((rows) => rows),
     ]);
 
-    return Boolean(run || deferredWake);
+    if (runningRun) return { kind: "heartbeat_run" as const, id: runningRun.id, status: runningRun.status };
+    const nonRecoveryDeferredWake = deferredWakes.find((wake) => !isRoutineSupersessionRecoveryWake(wake));
+    if (nonRecoveryDeferredWake) return {
+      kind: "deferred_wake" as const,
+      id: nonRecoveryDeferredWake.id,
+      status: "deferred_issue_execution",
+      recoveryGenerated: false,
+    };
+    const nonRecoveryQueuedRun = queuedRuns.find((run) => !isRoutineSupersessionRecoveryRun(run));
+    if (nonRecoveryQueuedRun) return {
+      kind: "heartbeat_run" as const,
+      id: nonRecoveryQueuedRun.id,
+      status: nonRecoveryQueuedRun.status,
+      recoveryGenerated: false,
+    };
+    const recoveryDeferredWake = deferredWakes.find((wake) => isRoutineSupersessionRecoveryWake(wake));
+    if (recoveryDeferredWake) return {
+      kind: "deferred_wake" as const,
+      id: recoveryDeferredWake.id,
+      status: "deferred_issue_execution",
+      recoveryGenerated: true,
+    };
+    const recoveryQueuedRun = queuedRuns.find((run) => isRoutineSupersessionRecoveryRun(run));
+    if (recoveryQueuedRun) return {
+      kind: "heartbeat_run" as const,
+      id: recoveryQueuedRun.id,
+      status: recoveryQueuedRun.status,
+      recoveryGenerated: true,
+    };
+    return null;
+  }
+
+  function isRoutineSupersessionRecoveryRun(input: { source?: string | null; wakeReason?: string | null }) {
+    return ROUTINE_SUPERSESSION_RECOVERY_RUN_SOURCES.includes(input.source as typeof ROUTINE_SUPERSESSION_RECOVERY_RUN_SOURCES[number])
+      || ROUTINE_SUPERSESSION_RECOVERY_WAKE_REASONS.includes(input.wakeReason as typeof ROUTINE_SUPERSESSION_RECOVERY_WAKE_REASONS[number]);
+  }
+
+  function isRoutineSupersessionRecoveryWake(input: { reason?: string | null; source?: string | null; wakeReason?: string | null; payload?: unknown }) {
+    const payload = parseObject(input.payload);
+    const nestedContext = parseObject(payload[DEFERRED_WAKE_CONTEXT_KEY]);
+    const source = input.source ?? readNonEmptyString(payload.source) ?? readNonEmptyString(nestedContext.source);
+    const wakeReason = input.wakeReason ?? readNonEmptyString(payload.wakeReason) ?? readNonEmptyString(nestedContext.wakeReason);
+    return ROUTINE_SUPERSESSION_RECOVERY_WAKE_REASONS.includes(input.reason as typeof ROUTINE_SUPERSESSION_RECOVERY_WAKE_REASONS[number])
+      || ROUTINE_SUPERSESSION_RECOVERY_WAKE_REASONS.includes(wakeReason as typeof ROUTINE_SUPERSESSION_RECOVERY_WAKE_REASONS[number])
+      || ROUTINE_SUPERSESSION_RECOVERY_RUN_SOURCES.includes(source as typeof ROUTINE_SUPERSESSION_RECOVERY_RUN_SOURCES[number]);
   }
 
   async function hasQueuedIssueWake(companyId: string, issueId: string) {
@@ -613,7 +693,7 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
     });
 
     if (queued && input.retryOfRunId) {
-      return db
+      const retryRun = await db
         .update(heartbeatRuns)
         .set({
           retryOfRunId: input.retryOfRunId,
@@ -622,6 +702,16 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
         .where(eq(heartbeatRuns.id, queued.id))
         .returning()
         .then((rows) => rows[0] ?? queued);
+
+      await db
+        .update(issues)
+        .set({
+          checkoutRunId: null,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(issues.id, input.issueId), eq(issues.checkoutRunId, input.retryOfRunId)));
+
+      return retryRun;
     }
 
     return queued;
@@ -2463,6 +2553,161 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
     return updated;
   }
 
+  async function suppressSupersededRoutineExecutionRecovery(issue: typeof issues.$inferSelect) {
+    if (issue.originKind !== "routine_execution" || !issue.originRunId) return null;
+
+    const oldRun = await db
+      .select()
+      .from(routineRuns)
+      .where(and(eq(routineRuns.companyId, issue.companyId), eq(routineRuns.id, issue.originRunId)))
+      .limit(1)
+      .then((rows) => rows[0] ?? null);
+    if (!oldRun?.dispatchFingerprint) return null;
+
+    const newerSuccessfulRun = await db
+      .select({
+        id: routineRuns.id,
+        linkedIssueId: routineRuns.linkedIssueId,
+        triggeredAt: routineRuns.triggeredAt,
+      })
+      .from(routineRuns)
+      .where(and(
+        eq(routineRuns.companyId, oldRun.companyId),
+        eq(routineRuns.routineId, oldRun.routineId),
+        eq(routineRuns.dispatchFingerprint, oldRun.dispatchFingerprint),
+        gt(routineRuns.triggeredAt, oldRun.triggeredAt),
+        eq(routineRuns.status, "completed"),
+      ))
+      .orderBy(desc(routineRuns.triggeredAt), desc(routineRuns.id))
+      .limit(1)
+      .then((rows) => rows[0] ?? null);
+    if (!newerSuccessfulRun) return null;
+
+    const now = new Date();
+    await db
+      .update(routineRuns)
+      .set({
+        status: "failed",
+        failureReason: `Superseded by newer successful routine run ${newerSuccessfulRun.id}`,
+        completedAt: oldRun.completedAt ?? now,
+        updatedAt: now,
+      })
+      .where(eq(routineRuns.id, oldRun.id));
+
+    const cancelledRuns = await db
+      .update(heartbeatRuns)
+      .set({
+        status: "cancelled",
+        error: `Cancelled because routine execution was superseded by ${newerSuccessfulRun.id}`,
+        finishedAt: now,
+        updatedAt: now,
+      })
+      .where(and(
+        eq(heartbeatRuns.companyId, issue.companyId),
+        inArray(heartbeatRuns.status, ["queued", "scheduled_retry"]),
+        sql`${heartbeatRuns.contextSnapshot}->>'issueId' = ${issue.id}`,
+        or(
+          inArray(sql`${heartbeatRuns.contextSnapshot}->>'source'`, [...ROUTINE_SUPERSESSION_RECOVERY_RUN_SOURCES]),
+          inArray(sql`${heartbeatRuns.contextSnapshot}->>'wakeReason'`, [...ROUTINE_SUPERSESSION_RECOVERY_WAKE_REASONS]),
+        ),
+      ))
+      .returning({ id: heartbeatRuns.id, wakeupRequestId: heartbeatRuns.wakeupRequestId });
+
+    const wakeupIds = cancelledRuns
+      .map((run) => run.wakeupRequestId)
+      .filter((id): id is string => typeof id === "string" && id.length > 0);
+    await db
+      .update(agentWakeupRequests)
+      .set({
+        status: "cancelled",
+        error: `Cancelled because routine execution was superseded by ${newerSuccessfulRun.id}`,
+        finishedAt: now,
+        updatedAt: now,
+      })
+      .where(and(
+        eq(agentWakeupRequests.companyId, issue.companyId),
+        inArray(agentWakeupRequests.status, ["queued", "claimed", "deferred_issue_execution"]),
+        or(
+          wakeupIds.length > 0 ? inArray(agentWakeupRequests.id, wakeupIds) : sql`false`,
+          and(
+            or(
+              sql`${agentWakeupRequests.payload}->>'issueId' = ${issue.id}`,
+              sql`${agentWakeupRequests.payload}->'_paperclipWakeContext'->>'issueId' = ${issue.id}`,
+              sql`${agentWakeupRequests.payload}->'_paperclipWakeContext'->>'taskId' = ${issue.id}`,
+            ),
+            or(
+              inArray(agentWakeupRequests.reason, [...ROUTINE_SUPERSESSION_RECOVERY_WAKE_REASONS]),
+              inArray(sql`${agentWakeupRequests.payload}->>'source'`, [...ROUTINE_SUPERSESSION_RECOVERY_RUN_SOURCES]),
+              inArray(sql`${agentWakeupRequests.payload}->>'wakeReason'`, [...ROUTINE_SUPERSESSION_RECOVERY_WAKE_REASONS]),
+              inArray(sql`${agentWakeupRequests.payload}->'_paperclipWakeContext'->>'source'`, [...ROUTINE_SUPERSESSION_RECOVERY_RUN_SOURCES]),
+              inArray(sql`${agentWakeupRequests.payload}->'_paperclipWakeContext'->>'wakeReason'`, [...ROUTINE_SUPERSESSION_RECOVERY_WAKE_REASONS]),
+            ),
+          ),
+        ),
+      ));
+
+    const updated = await db
+      .update(issues)
+      .set({
+        status: "cancelled",
+        cancelledAt: now,
+        completedAt: null,
+        checkoutRunId: null,
+        executionRunId: null,
+        executionAgentNameKey: null,
+        executionLockedAt: null,
+        updatedAt: now,
+      })
+      .where(and(
+        eq(issues.id, issue.id),
+        eq(issues.companyId, issue.companyId),
+        sql`not exists (
+          select 1 from ${heartbeatRuns}
+          where ${heartbeatRuns.companyId} = ${issue.companyId}
+            and ${heartbeatRuns.status} = 'running'
+            and ${heartbeatRuns.contextSnapshot}->>'issueId' = ${issue.id}
+        )`,
+      ))
+      .returning()
+      .then((rows) => rows[0] ?? null);
+    if (!updated) return null;
+
+    const prefix = await getCompanyIssuePrefix(issue.companyId);
+    await issuesSvc.addComment(issue.id, [
+      "Paperclip suppressed recovery for this historical routine execution because a newer equivalent attempt already succeeded.",
+      "",
+      `- Superseded run: \`${oldRun.id}\``,
+      `- Newer successful run: \`${newerSuccessfulRun.id}\``,
+      newerSuccessfulRun.linkedIssueId ? `- Newer successful issue: ${issueUiLink({ id: newerSuccessfulRun.linkedIssueId, identifier: null }, prefix)}` : null,
+      `- Dispatch fingerprint: \`${oldRun.dispatchFingerprint}\``,
+      "- Guard: historical routine attempts must not trigger recovery wakes or external side effects after a newer equivalent attempt has completed.",
+    ].filter((line): line is string => line !== null).join("\n"), {}, { authorType: "system" });
+
+    await logActivity(db, {
+      companyId: issue.companyId,
+      actorType: "system",
+      actorId: "system",
+      agentId: null,
+      runId: null,
+      action: "issue.routine_execution_recovery_suppressed",
+      entityType: "issue",
+      entityId: issue.id,
+      details: {
+        identifier: issue.identifier,
+        status: "cancelled",
+        previousStatus: issue.status,
+        source: "recovery.suppress_superseded_routine_execution",
+        originRunId: oldRun.id,
+        routineId: oldRun.routineId,
+        dispatchFingerprint: oldRun.dispatchFingerprint,
+        newerRunId: newerSuccessfulRun.id,
+        newerLinkedIssueId: newerSuccessfulRun.linkedIssueId,
+      },
+    });
+
+    return updated;
+  }
+
   async function reconcileStrandedAssignedIssues() {
     const candidates = await db
       .select()
@@ -2501,12 +2746,35 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
         continue;
       }
 
-      if (await hasActiveExecutionPath(issue.companyId, issue.id)) {
+      if (await isAutomaticRecoverySuppressedByPauseHold(db, issue.companyId, issue.id, treeControlSvc)) {
         result.skipped += 1;
         continue;
       }
 
-      if (await isAutomaticRecoverySuppressedByPauseHold(db, issue.companyId, issue.id, treeControlSvc)) {
+      const activeExecutionPath = await getActiveExecutionPath(issue.companyId, issue.id);
+      if (activeExecutionPath?.kind === "heartbeat_run" && activeExecutionPath.status === "running") {
+        result.skipped += 1;
+        continue;
+      }
+
+      if (activeExecutionPath?.kind === "deferred_wake" && !activeExecutionPath.recoveryGenerated) {
+        result.skipped += 1;
+        continue;
+      }
+
+      if (activeExecutionPath?.kind === "heartbeat_run" && !activeExecutionPath.recoveryGenerated) {
+        result.skipped += 1;
+        continue;
+      }
+
+      const supersededRoutineExecution = await suppressSupersededRoutineExecutionRecovery(issue);
+      if (supersededRoutineExecution) {
+        result.escalated += 1;
+        result.issueIds.push(issue.id);
+        continue;
+      }
+
+      if (activeExecutionPath) {
         result.skipped += 1;
         continue;
       }
