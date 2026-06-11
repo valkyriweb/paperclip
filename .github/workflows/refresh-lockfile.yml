@@ -4,10 +4,11 @@ on:
   push:
     branches:
       - master
+      - bermont
   workflow_dispatch:
 
 concurrency:
-  group: refresh-lockfile-master
+  group: refresh-lockfile-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -62,13 +63,14 @@ jobs:
             exit 0
           fi
 
-          BRANCH="chore/refresh-lockfile"
+          BASE="${{ github.ref_name }}"
+          BRANCH="chore/refresh-lockfile-${BASE}"
           git config user.name "lockfile-bot"
           git config user.email "lockfile-bot@users.noreply.github.com"
 
           git checkout -B "$BRANCH"
           git add pnpm-lock.yaml
-          git commit -m "chore(lockfile): refresh pnpm-lock.yaml"
+          git commit -m "chore(lockfile): refresh pnpm-lock.yaml for ${BASE}"
           git push --force origin "$BRANCH"
 
           # Only reuse an open PR from this repository owner, not a fork with the same branch name.
@@ -79,9 +81,10 @@ jobs:
           )"
           if [ -z "$pr_url" ]; then
             pr_url="$(gh pr create \
+              --base "$BASE" \
               --head "$BRANCH" \
-              --title "chore(lockfile): refresh pnpm-lock.yaml" \
-              --body "Auto-generated lockfile refresh after dependencies changed on master. This PR only updates pnpm-lock.yaml.")"
+              --title "chore(lockfile): refresh pnpm-lock.yaml for ${BASE}" \
+              --body "Auto-generated lockfile refresh after dependencies changed on ${BASE}. This PR only updates pnpm-lock.yaml.")"
             echo "Created new PR: $pr_url"
           else
             echo "PR already exists: $pr_url"
