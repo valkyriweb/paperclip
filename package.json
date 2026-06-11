@@ -70,7 +70,10 @@
       "embedded-postgres@18.1.0-beta.16": "patches/embedded-postgres@18.1.0-beta.16.patch"
     },
     "overrides": {
-      "rollup": ">=4.59.0"
+      "rollup": ">=4.59.0",
+      "@assistant-ui/core": "0.2.10",
+      "@assistant-ui/store": "0.2.13",
+      "postgres": "3.4.9"
     }
   }
 }
