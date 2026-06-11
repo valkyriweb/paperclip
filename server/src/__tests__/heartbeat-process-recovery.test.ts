@@ -34,6 +34,8 @@ import {
   issues,
   projects,
   projectWorkspaces,
+  routineRuns,
+  routines,
   workspaceOperations,
 } from "@paperclipai/db";
 import {
@@ -363,6 +365,8 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
     await db.delete(issueRecoveryActions);
     await db.delete(issueTreeHoldMembers);
     await db.delete(issueTreeHolds);
+    await db.delete(routineRuns);
+    await db.delete(routines);
     for (let attempt = 0; attempt < 5; attempt += 1) {
       await db.delete(issueComments);
       await db.delete(issueDocuments);
@@ -696,6 +700,138 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
     }
 
     return { companyId, agentId, runId, wakeupRequestId, issueId, rootIssueId };
+  }
+
+  async function seedSupersededRoutineExecutionFixture() {
+    const companyId = randomUUID();
+    const agentId = randomUUID();
+    const routineId = randomUUID();
+    const oldRoutineRunId = randomUUID();
+    const newerRoutineRunId = randomUUID();
+    const oldHeartbeatRunId = randomUUID();
+    const oldWakeupRequestId = randomUUID();
+    const oldIssueId = randomUUID();
+    const newerIssueId = randomUUID();
+    const issuePrefix = `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`;
+    const fingerprint = "routine:fingerprint:daily-balance";
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix,
+      requireBoardApprovalForNewAgents: false,
+    });
+
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "RoutineRunner",
+      role: "engineer",
+      status: "idle",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    });
+
+    await db.insert(routines).values({
+      id: routineId,
+      companyId,
+      title: "Daily balance check",
+      assigneeAgentId: agentId,
+      concurrencyPolicy: "coalesce_if_active",
+      catchUpPolicy: "skip_missed",
+    });
+
+    await db.insert(agentWakeupRequests).values({
+      id: oldWakeupRequestId,
+      companyId,
+      agentId,
+      source: "assignment",
+      triggerDetail: "system",
+      reason: "issue_assigned",
+      payload: { issueId: oldIssueId },
+      status: "failed",
+      runId: oldHeartbeatRunId,
+      claimedAt: new Date("2026-06-10T08:00:00.000Z"),
+      finishedAt: new Date("2026-06-10T08:05:00.000Z"),
+      error: "routine attempt failed",
+    });
+
+    await db.insert(heartbeatRuns).values({
+      id: oldHeartbeatRunId,
+      companyId,
+      agentId,
+      invocationSource: "assignment",
+      triggerDetail: "system",
+      status: "failed",
+      wakeupRequestId: oldWakeupRequestId,
+      contextSnapshot: { issueId: oldIssueId, taskId: oldIssueId, source: "routine_execution" },
+      startedAt: new Date("2026-06-10T08:00:00.000Z"),
+      finishedAt: new Date("2026-06-10T08:05:00.000Z"),
+      updatedAt: new Date("2026-06-10T08:05:00.000Z"),
+      errorCode: "adapter_failed",
+      error: "routine attempt failed",
+    });
+
+    await db.insert(issues).values([
+      {
+        id: oldIssueId,
+        companyId,
+        title: "Daily balance check — Jun 10",
+        status: "in_progress",
+        priority: "medium",
+        assigneeAgentId: agentId,
+        checkoutRunId: oldHeartbeatRunId,
+        executionRunId: oldHeartbeatRunId,
+        originKind: "routine_execution",
+        originRunId: oldRoutineRunId,
+        issueNumber: 1,
+        identifier: `${issuePrefix}-1`,
+        startedAt: new Date("2026-06-10T08:00:00.000Z"),
+      },
+      {
+        id: newerIssueId,
+        companyId,
+        title: "Daily balance check — Jun 11",
+        status: "done",
+        priority: "medium",
+        assigneeAgentId: agentId,
+        originKind: "routine_execution",
+        originRunId: newerRoutineRunId,
+        issueNumber: 2,
+        identifier: `${issuePrefix}-2`,
+        completedAt: new Date("2026-06-11T08:05:00.000Z"),
+      },
+    ]);
+
+    await db.insert(routineRuns).values([
+      {
+        id: oldRoutineRunId,
+        companyId,
+        routineId,
+        source: "schedule",
+        status: "failed",
+        triggeredAt: new Date("2026-06-10T08:00:00.000Z"),
+        dispatchFingerprint: fingerprint,
+        linkedIssueId: oldIssueId,
+        failureReason: "routine attempt failed",
+        completedAt: new Date("2026-06-10T08:05:00.000Z"),
+      },
+      {
+        id: newerRoutineRunId,
+        companyId,
+        routineId,
+        source: "schedule",
+        status: "completed",
+        triggeredAt: new Date("2026-06-11T08:00:00.000Z"),
+        dispatchFingerprint: fingerprint,
+        linkedIssueId: newerIssueId,
+        completedAt: new Date("2026-06-11T08:05:00.000Z"),
+      },
+    ]);
+
+    return { companyId, agentId, oldIssueId, newerIssueId, oldRoutineRunId, newerRoutineRunId };
   }
 
   async function seedAssignedTodoNoRunFixture(input?: {
@@ -1826,6 +1962,324 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
 
     const activity = await db.select().from(activityLog).where(eq(activityLog.entityId, issueId));
     expect(activity.some((event) => event.action === "issue.successful_run_handoff_escalated")).toBe(true);
+  });
+
+  it("suppresses recovery for a stale routine execution when a newer equivalent run completed", async () => {
+    const { companyId, agentId, oldIssueId, newerIssueId, oldRoutineRunId, newerRoutineRunId } =
+      await seedSupersededRoutineExecutionFixture();
+    const heartbeat = heartbeatService(db);
+
+    const result = await heartbeat.reconcileStrandedAssignedIssues();
+
+    expect(result.escalated).toBe(1);
+    expect(result.issueIds).toEqual([oldIssueId]);
+
+    const recoveryActions = await db
+      .select()
+      .from(issueRecoveryActions)
+      .where(and(eq(issueRecoveryActions.companyId, companyId), eq(issueRecoveryActions.sourceIssueId, oldIssueId)));
+    expect(recoveryActions).toHaveLength(0);
+
+    const recoveryWakeups = await db
+      .select()
+      .from(agentWakeupRequests)
+      .where(and(eq(agentWakeupRequests.companyId, companyId), eq(agentWakeupRequests.agentId, agentId)));
+    expect(recoveryWakeups.filter((wakeup) => wakeup.reason === "source_scoped_recovery_action")).toHaveLength(0);
+
+    const oldIssue = await db.select().from(issues).where(eq(issues.id, oldIssueId)).then((rows) => rows[0] ?? null);
+    expect(oldIssue?.status).toBe("cancelled");
+    expect(oldIssue?.assigneeAgentId).toBe(agentId);
+
+    const oldRun = await db
+      .select()
+      .from(routineRuns)
+      .where(eq(routineRuns.id, oldRoutineRunId))
+      .then((rows) => rows[0] ?? null);
+    expect(oldRun).toMatchObject({
+      status: "failed",
+      failureReason: `Superseded by newer successful routine run ${newerRoutineRunId}`,
+    });
+
+    const newerRun = await db
+      .select()
+      .from(routineRuns)
+      .where(eq(routineRuns.id, newerRoutineRunId))
+      .then((rows) => rows[0] ?? null);
+    expect(newerRun).toMatchObject({
+      status: "completed",
+      linkedIssueId: newerIssueId,
+    });
+
+    const comments = await db.select().from(issueComments).where(eq(issueComments.issueId, oldIssueId));
+    expect(comments).toHaveLength(1);
+    expect(comments[0]?.body).toContain("newer equivalent attempt already succeeded");
+    expect(comments[0]?.body).toContain(newerRoutineRunId);
+  });
+
+  it("suppresses queued stale routine recovery when a newer equivalent run completed", async () => {
+    const { companyId, agentId, oldIssueId, newerRoutineRunId } = await seedSupersededRoutineExecutionFixture();
+    const queuedWakeupId = randomUUID();
+    const queuedRunId = randomUUID();
+
+    await db.insert(agentWakeupRequests).values({
+      id: queuedWakeupId,
+      companyId,
+      agentId,
+      source: "assignment",
+      triggerDetail: "system",
+      reason: "source_scoped_recovery_action",
+      payload: { issueId: oldIssueId },
+      status: "queued",
+      runId: queuedRunId,
+    });
+    await db.insert(heartbeatRuns).values({
+      id: queuedRunId,
+      companyId,
+      agentId,
+      invocationSource: "assignment",
+      triggerDetail: "system",
+      status: "queued",
+      wakeupRequestId: queuedWakeupId,
+      contextSnapshot: { issueId: oldIssueId, taskId: oldIssueId, source: "source_scoped_recovery_action" },
+    });
+
+    const heartbeat = heartbeatService(db);
+
+    const result = await heartbeat.reconcileStrandedAssignedIssues();
+
+    expect(result.escalated).toBe(1);
+    expect(result.issueIds).toEqual([oldIssueId]);
+
+    const queuedRun = await db
+      .select()
+      .from(heartbeatRuns)
+      .where(eq(heartbeatRuns.id, queuedRunId))
+      .then((rows) => rows[0] ?? null);
+    expect(queuedRun).toMatchObject({
+      status: "cancelled",
+      error: `Cancelled because routine execution was superseded by ${newerRoutineRunId}`,
+    });
+
+    const queuedWakeup = await db
+      .select()
+      .from(agentWakeupRequests)
+      .where(eq(agentWakeupRequests.id, queuedWakeupId))
+      .then((rows) => rows[0] ?? null);
+    expect(queuedWakeup).toMatchObject({
+      status: "cancelled",
+      error: `Cancelled because routine execution was superseded by ${newerRoutineRunId}`,
+    });
+
+    const oldIssue = await db.select().from(issues).where(eq(issues.id, oldIssueId)).then((rows) => rows[0] ?? null);
+    expect(oldIssue?.status).toBe("cancelled");
+    expect(oldIssue?.cancelledAt).toBeTruthy();
+    expect(oldIssue?.checkoutRunId).toBeNull();
+    expect(oldIssue?.executionRunId).toBeNull();
+  });
+
+  it("does not suppress a stale routine execution with a queued non-recovery wake", async () => {
+    const { companyId, agentId, oldIssueId } = await seedSupersededRoutineExecutionFixture();
+    const queuedWakeupId = randomUUID();
+    const queuedRunId = randomUUID();
+    const recoveryWakeupId = randomUUID();
+    const recoveryRunId = randomUUID();
+
+    await db.insert(agentWakeupRequests).values({
+      id: queuedWakeupId,
+      companyId,
+      agentId,
+      source: "comment",
+      triggerDetail: "issue_comment",
+      reason: "issue_comment_added",
+      payload: { issueId: oldIssueId },
+      status: "queued",
+      runId: queuedRunId,
+    });
+    await db.insert(agentWakeupRequests).values({
+      id: recoveryWakeupId,
+      companyId,
+      agentId,
+      source: "automation",
+      triggerDetail: "system",
+      reason: "source_scoped_recovery_action",
+      payload: { issueId: oldIssueId },
+      status: "queued",
+      runId: recoveryRunId,
+    });
+    await db.insert(heartbeatRuns).values([
+      {
+        id: queuedRunId,
+        companyId,
+        agentId,
+        invocationSource: "comment",
+        triggerDetail: "issue_comment",
+        status: "queued",
+        wakeupRequestId: queuedWakeupId,
+        contextSnapshot: { issueId: oldIssueId, taskId: oldIssueId, source: "issue_comment_added" },
+      },
+      {
+        id: recoveryRunId,
+        companyId,
+        agentId,
+        invocationSource: "assignment",
+        triggerDetail: "system",
+        status: "queued",
+        wakeupRequestId: recoveryWakeupId,
+        contextSnapshot: { issueId: oldIssueId, taskId: oldIssueId, source: "source_scoped_recovery_action" },
+      },
+    ]);
+
+    const heartbeat = heartbeatService(db);
+
+    const result = await heartbeat.reconcileStrandedAssignedIssues();
+
+    expect(result.escalated).toBe(0);
+    expect(result.skipped).toBe(1);
+    expect(result.issueIds).toEqual([]);
+
+    const queuedRun = await db.select().from(heartbeatRuns).where(eq(heartbeatRuns.id, queuedRunId)).then((rows) => rows[0] ?? null);
+    expect(queuedRun?.status).toBe("queued");
+    const recoveryRun = await db.select().from(heartbeatRuns).where(eq(heartbeatRuns.id, recoveryRunId)).then((rows) => rows[0] ?? null);
+    expect(recoveryRun?.status).toBe("queued");
+
+    const oldIssue = await db.select().from(issues).where(eq(issues.id, oldIssueId)).then((rows) => rows[0] ?? null);
+    expect(oldIssue?.status).toBe("in_progress");
+  });
+
+  it("suppresses deferred stale routine recovery when a newer equivalent run completed", async () => {
+    const { companyId, agentId, oldIssueId, newerRoutineRunId } = await seedSupersededRoutineExecutionFixture();
+    const deferredWakeupId = randomUUID();
+
+    await db.insert(agentWakeupRequests).values({
+      id: deferredWakeupId,
+      companyId,
+      agentId,
+      source: "automation",
+      triggerDetail: "system",
+      reason: "issue_execution_deferred",
+      payload: {
+        _paperclipWakeContext: {
+          issueId: oldIssueId,
+          taskId: oldIssueId,
+          source: "source_scoped_recovery_action",
+          wakeReason: "source_scoped_recovery_action",
+        },
+      },
+      status: "deferred_issue_execution",
+    });
+
+    const heartbeat = heartbeatService(db);
+
+    const result = await heartbeat.reconcileStrandedAssignedIssues();
+
+    expect(result.escalated).toBe(1);
+    expect(result.issueIds).toEqual([oldIssueId]);
+
+    const deferredWakeup = await db
+      .select()
+      .from(agentWakeupRequests)
+      .where(eq(agentWakeupRequests.id, deferredWakeupId))
+      .then((rows) => rows[0] ?? null);
+    expect(deferredWakeup).toMatchObject({
+      status: "cancelled",
+      error: `Cancelled because routine execution was superseded by ${newerRoutineRunId}`,
+    });
+
+    const oldIssue = await db.select().from(issues).where(eq(issues.id, oldIssueId)).then((rows) => rows[0] ?? null);
+    expect(oldIssue?.status).toBe("cancelled");
+    expect(oldIssue?.cancelledAt).toBeTruthy();
+    expect(oldIssue?.checkoutRunId).toBeNull();
+    expect(oldIssue?.executionRunId).toBeNull();
+  });
+
+  it("does not suppress a stale routine execution while a live run is active", async () => {
+    const { companyId, agentId, oldIssueId } = await seedSupersededRoutineExecutionFixture();
+    const runningRunId = randomUUID();
+
+    await db.insert(heartbeatRuns).values({
+      id: runningRunId,
+      companyId,
+      agentId,
+      invocationSource: "assignment",
+      triggerDetail: "system",
+      status: "running",
+      contextSnapshot: { issueId: oldIssueId, taskId: oldIssueId, source: "routine_execution" },
+      startedAt: new Date("2026-06-11T08:01:00.000Z"),
+      updatedAt: new Date("2026-06-11T08:01:00.000Z"),
+    });
+
+    const heartbeat = heartbeatService(db);
+
+    const result = await heartbeat.reconcileStrandedAssignedIssues();
+
+    expect(result.escalated).toBe(0);
+    expect(result.skipped).toBe(1);
+    expect(result.issueIds).toEqual([]);
+
+    const runningRun = await db.select().from(heartbeatRuns).where(eq(heartbeatRuns.id, runningRunId)).then((rows) => rows[0] ?? null);
+    expect(runningRun?.status).toBe("running");
+
+    const oldIssue = await db.select().from(issues).where(eq(issues.id, oldIssueId)).then((rows) => rows[0] ?? null);
+    expect(oldIssue?.status).toBe("in_progress");
+  });
+
+  it("does not suppress a stale routine execution when a live run exists alongside a queued retry", async () => {
+    const { companyId, agentId, oldIssueId } = await seedSupersededRoutineExecutionFixture();
+    const runningRunId = randomUUID();
+    const queuedRunId = randomUUID();
+    const queuedWakeupId = randomUUID();
+
+    await db.insert(agentWakeupRequests).values({
+      id: queuedWakeupId,
+      companyId,
+      agentId,
+      source: "assignment",
+      triggerDetail: "system",
+      reason: "source_scoped_recovery_action",
+      payload: { issueId: oldIssueId },
+      status: "queued",
+      runId: queuedRunId,
+    });
+    await db.insert(heartbeatRuns).values([
+      {
+        id: queuedRunId,
+        companyId,
+        agentId,
+        invocationSource: "assignment",
+        triggerDetail: "system",
+        status: "queued",
+        wakeupRequestId: queuedWakeupId,
+        contextSnapshot: { issueId: oldIssueId, taskId: oldIssueId, source: "source_scoped_recovery_action" },
+      },
+      {
+        id: runningRunId,
+        companyId,
+        agentId,
+        invocationSource: "assignment",
+        triggerDetail: "system",
+        status: "running",
+        contextSnapshot: { issueId: oldIssueId, taskId: oldIssueId, source: "routine_execution" },
+        startedAt: new Date("2026-06-11T08:01:00.000Z"),
+        updatedAt: new Date("2026-06-11T08:01:00.000Z"),
+      },
+    ]);
+
+    const heartbeat = heartbeatService(db);
+
+    const result = await heartbeat.reconcileStrandedAssignedIssues();
+
+    expect(result.escalated).toBe(0);
+    expect(result.skipped).toBe(1);
+    expect(result.issueIds).toEqual([]);
+
+    const queuedRun = await db.select().from(heartbeatRuns).where(eq(heartbeatRuns.id, queuedRunId)).then((rows) => rows[0] ?? null);
+    expect(queuedRun?.status).toBe("queued");
+
+    const runningRun = await db.select().from(heartbeatRuns).where(eq(heartbeatRuns.id, runningRunId)).then((rows) => rows[0] ?? null);
+    expect(runningRun?.status).toBe("running");
+
+    const oldIssue = await db.select().from(issues).where(eq(issues.id, oldIssueId)).then((rows) => rows[0] ?? null);
+    expect(oldIssue?.status).toBe("in_progress");
   });
 
   it("escalates an exhausted successful handoff run that still leaves no disposition", async () => {
