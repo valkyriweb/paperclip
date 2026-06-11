@@ -1,6 +1,6 @@
 ---
 name: paperclip-converting-plans-to-tasks
-description: Paperclip plan-to-tasks: break plans into assigned issues with specialty, dependencies, parallelism; pair with paperclip mechanics.
+description: "Paperclip plan-to-tasks: break plans into assigned issues with specialty, dependencies, parallelism; pair with paperclip mechanics."
 ---
 
 # Paperclip — Converting Plans to Tasks

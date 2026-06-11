@@ -22,6 +22,8 @@ COPY packages/shared/package.json packages/shared/
 COPY packages/db/package.json packages/db/
 COPY packages/adapter-utils/package.json packages/adapter-utils/
 COPY packages/mcp-server/package.json packages/mcp-server/
+COPY packages/skills-catalog/package.json packages/skills-catalog/
+COPY packages/teams-catalog/package.json packages/teams-catalog/
 COPY packages/adapters/acpx-local/package.json packages/adapters/acpx-local/
 COPY packages/adapters/claude-local/package.json packages/adapters/claude-local/
 COPY packages/adapters/codex-local/package.json packages/adapters/codex-local/
@@ -55,9 +57,10 @@ RUN test -f cli/src/index.ts || (echo "ERROR: cli source missing" && exit 1)
 FROM base AS production
 ARG USER_UID=1000
 ARG USER_GID=1000
+ARG SURF_CLI_VERSION=2.7.2
 WORKDIR /app
 COPY --chown=node:node --from=build /app /app
-RUN npm install --global --omit=dev @anthropic-ai/claude-code@latest @openai/codex@latest opencode-ai \
+RUN npm install --global --omit=dev @anthropic-ai/claude-code@latest @openai/codex@latest opencode-ai @google/gemini-cli@latest surf-cli@${SURF_CLI_VERSION} \
   && apt-get update \
   && apt-get install -y --no-install-recommends openssh-client jq unzip ca-certificates python3-venv \
   && python3 -m venv /opt/google-ads-python \
@@ -128,6 +131,7 @@ ENV NODE_ENV=production \
   OTEL_TRACES_SAMPLER_ARG=1.0 \
   OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \
   OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental \
+  GEMINI_SANDBOX=false \
   PINCHTAB_BINARY_PATH=/usr/local/share/pinchtab/pinchtab-linux-amd64
 
 VOLUME ["/paperclip"]

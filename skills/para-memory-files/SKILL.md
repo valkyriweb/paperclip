@@ -1,6 +1,6 @@
 ---
 name: para-memory-files
-description: PARA memory files: save, recall, update, organize cross-session knowledge, daily notes, YAML facts, qmd recall, plans, synthesis.
+description: "PARA memory files: save, recall, update, organize cross-session knowledge, daily notes, YAML facts, qmd recall, plans, synthesis."
 ---
 
 # PARA Memory Files
