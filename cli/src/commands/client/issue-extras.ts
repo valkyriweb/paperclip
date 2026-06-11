@@ -147,69 +147,9 @@ export function registerIssueExtensionCommands(program: Command): void {
     { includeCompany: false },
   );
 
-  addCommonClientOptions(
-    issue
-      .command("delete")
-      .description("Delete an issue")
-      .argument("<issueId>", "Issue ID or identifier (e.g. ENG-12)")
-      .option("-y, --yes", "Skip confirmation prompt")
-      .action(async (issueId: string, opts: DeleteOptions) => {
-        try {
-          if (!opts.yes && process.stdin.isTTY) {
-            const ok = await confirmAction(`Delete issue ${issueId}?`);
-            if (!ok) {
-              console.error("Aborted.");
-              process.exit(1);
-            }
-          }
-          const ctx = resolveCommandContext(opts);
-          const row = await ctx.api.delete<unknown>(`/api/issues/${encodeURIComponent(issueId)}`);
-          printOutput(row, { json: ctx.json });
-        } catch (err) {
-          handleCommandError(err);
-        }
-      }),
-    { includeCompany: false },
-  );
-
-  addCommonClientOptions(
-    issue
-      .command("force-release")
-      .description("Force-release an issue checkout (admin override)")
-      .argument("<issueId>", "Issue ID or identifier")
-      .action(async (issueId: string, opts: BaseClientOptions) => {
-        try {
-          const ctx = resolveCommandContext(opts);
-          const row = await ctx.api.post<unknown>(
-            `/api/issues/${encodeURIComponent(issueId)}/admin/force-release`,
-            {},
-          );
-          printOutput(row, { json: ctx.json });
-        } catch (err) {
-          handleCommandError(err);
-        }
-      }),
-    { includeCompany: false },
-  );
-
-  addCommonClientOptions(
-    issue
-      .command("heartbeat-context")
-      .description("Inspect heartbeat context for an issue (debug)")
-      .argument("<issueId>", "Issue ID or identifier")
-      .action(async (issueId: string, opts: BaseClientOptions) => {
-        try {
-          const ctx = resolveCommandContext(opts);
-          const row = await ctx.api.get<unknown>(
-            `/api/issues/${encodeURIComponent(issueId)}/heartbeat-context`,
-          );
-          printOutput(row, { json: ctx.json });
-        } catch (err) {
-          handleCommandError(err);
-        }
-      }),
-    { includeCompany: false },
-  );
+  // issue delete / force-release / heartbeat-context are provided by the core
+  // issue command (issue.ts); the bermont duplicates were removed during the
+  // upstream merge (delete keeps its interactive confirm via confirmDangerousAction).
 
   addCommonClientOptions(
     issue
@@ -237,7 +177,8 @@ export function registerIssueExtensionCommands(program: Command): void {
   );
 
   // ── read / archive markers ───────────────────────────────────────────────
-  for (const verb of ["read", "inbox-archive"] as const) {
+  // `read` / `unread` are provided by the core issue command (issue.ts).
+  for (const verb of ["inbox-archive"] as const) {
     addCommonClientOptions(
       issue
         .command(verb)

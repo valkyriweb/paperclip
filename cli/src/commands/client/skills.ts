@@ -14,10 +14,9 @@ import type {
   CompanySkillUpdateStatus,
 } from "@paperclipai/shared";
 import { readFile } from "node:fs/promises";
-import { stdin as input, stdout as output } from "node:process";
-import { createInterface } from "node:readline/promises";
 import {
   addCommonClientOptions,
+  confirmDangerousAction,
   formatInlineRecord,
   handleCommandError,
   printOutput,
@@ -1000,18 +999,3 @@ async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-async function confirmDangerousAction(yes: boolean | undefined, message: string): Promise<void> {
-  if (yes) return;
-  if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    throw new Error("This command requires --yes when not running in an interactive terminal.");
-  }
-  const rl = createInterface({ input, output });
-  try {
-    const answer = (await rl.question(`${message} Type yes to continue: `)).trim().toLowerCase();
-    if (answer !== "yes") {
-      throw new Error("Aborted.");
-    }
-  } finally {
-    rl.close();
-  }
-}

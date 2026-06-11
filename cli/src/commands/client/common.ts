@@ -1,4 +1,6 @@
 import pc from "picocolors";
+import { createInterface } from "node:readline/promises";
+import { stdin as input, stdout as output } from "node:process";
 import type { Command } from "commander";
 import { getStoredBoardCredential, loginBoardCli } from "../../client/board-auth.js";
 import { buildCliCommandLabel } from "../../client/command-label.js";
@@ -119,6 +121,22 @@ export function resolveApiBase(options: Pick<BaseClientOptions, "apiBase" | "con
 
 export function normalizeApiBase(apiBase: string): string {
   return apiBase.trim().replace(/\/+$/, "");
+}
+
+export async function confirmDangerousAction(yes: boolean | undefined, message: string): Promise<void> {
+  if (yes) return;
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    throw new Error("This command requires --yes when not running in an interactive terminal.");
+  }
+  const rl = createInterface({ input, output });
+  try {
+    const answer = (await rl.question(`${message} Type yes to continue: `)).trim().toLowerCase();
+    if (answer !== "yes") {
+      throw new Error("Aborted.");
+    }
+  } finally {
+    rl.close();
+  }
 }
 
 export function apiPath(strings: TemplateStringsArray, ...values: Array<string | number | boolean | null | undefined>): string {

@@ -30,6 +30,7 @@ import {
 import {
   addCommonClientOptions,
   apiPath,
+  confirmDangerousAction,
   formatInlineRecord,
   handleCommandError,
   inferContentTypeFromPath,
@@ -109,6 +110,10 @@ interface IssueFeedbackOptions extends BaseClientOptions {
   includePayload?: boolean;
   out?: string;
   format?: string;
+}
+
+interface IssueDeleteOptions extends BaseClientOptions {
+  yes?: boolean;
 }
 
 interface JsonPayloadOptions extends BaseClientOptions {
@@ -232,6 +237,40 @@ export function registerIssueCommands(program: Command): void {
           const ctx = resolveCommandContext(opts);
           const row = await ctx.api.get<Issue>(apiPath`/api/issues/${idOrIdentifier}`);
           printOutput(row, { json: ctx.json });
+        } catch (err) {
+          handleCommandError(err);
+        }
+      }),
+  );
+
+  addCommonClientOptions(
+    issue
+      .command("delete")
+      .description("Delete an issue")
+      .argument("<issueId>", "Issue ID or identifier (e.g. ENG-12)")
+      .option("-y, --yes", "Skip confirmation prompt")
+      .action(async (issueId: string, opts: IssueDeleteOptions) => {
+        try {
+          await confirmDangerousAction(opts.yes, `Delete issue ${issueId}?`);
+          const ctx = resolveCommandContext(opts);
+          const deleted = await ctx.api.delete<Issue>(apiPath`/api/issues/${issueId}`);
+          printOutput(deleted, { json: ctx.json });
+        } catch (err) {
+          handleCommandError(err);
+        }
+      }),
+  );
+
+  addCommonClientOptions(
+    issue
+      .command("heartbeat-context")
+      .description("Get heartbeat context for an issue")
+      .argument("<issueId>", "Issue ID")
+      .action(async (issueId: string, opts: BaseClientOptions) => {
+        try {
+          const ctx = resolveCommandContext(opts);
+          const context = await ctx.api.get(apiPath`/api/issues/${issueId}/heartbeat-context`);
+          printOutput(context, { json: ctx.json });
         } catch (err) {
           handleCommandError(err);
         }
@@ -464,6 +503,7 @@ export function registerIssueCommands(program: Command): void {
       }),
   );
 
+  addIssuePostDeleteMarkerCommand(issue, "read", "Mark an issue as read", "post", "/read");
   addIssuePostDeleteMarkerCommand(issue, "unread", "Mark an issue as unread", "delete", "/read");
   addIssuePostDeleteMarkerCommand(issue, "archive", "Archive an issue from the inbox", "post", "/inbox-archive");
   addIssuePostDeleteMarkerCommand(issue, "unarchive", "Unarchive an issue from the inbox", "delete", "/inbox-archive");
@@ -522,6 +562,22 @@ export function registerIssueCommands(program: Command): void {
           const payload = createChildIssueSchema.parse(parseJson(opts.payloadJson));
           const child = await ctx.api.post<Issue>(apiPath`/api/issues/${issueId}/children`, payload);
           printOutput(child, { json: ctx.json });
+        } catch (err) {
+          handleCommandError(err);
+        }
+      }),
+  );
+
+  addCommonClientOptions(
+    issue
+      .command("force-release")
+      .description("Force-release an issue from an agent checkout")
+      .argument("<issueId>", "Issue ID")
+      .action(async (issueId: string, opts: BaseClientOptions) => {
+        try {
+          const ctx = resolveCommandContext(opts);
+          const result = await ctx.api.post(apiPath`/api/issues/${issueId}/admin/force-release`, {});
+          printOutput(result, { json: ctx.json });
         } catch (err) {
           handleCommandError(err);
         }
