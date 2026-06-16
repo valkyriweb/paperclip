@@ -172,7 +172,10 @@ export async function gateG2(
     WHERE company_id IN (${uuidIn(companyIds)})
       AND occurred_at >= now() - (${args.windowHours}::int || ' hours')::interval
       AND billing_type = 'unknown'
-      AND biller NOT IN ('claude-bridge', 'openai-codex', 'claude-code')  -- hybrids legitimately unknown w/o env signal
+      -- No biller exemption: every emitter sets a concrete billingType
+      -- (direct-API providers are server-classified; hybrid billers
+      -- claude-bridge/claude-code/openai-codex always set it at emit time), so
+      -- any 'unknown' row above threshold is a real emitter/config bug.
     GROUP BY biller
     HAVING COUNT(*) > ${args.unknownThreshold}
     ORDER BY n DESC
@@ -186,7 +189,7 @@ export async function gateG2(
     return ok(
       "G2",
       "no biller has more `unknown` rows than threshold",
-      `    ✓ all non-hybrid billers have billing_type classified (threshold ${args.unknownThreshold})`,
+      `    ✓ all billers have billing_type classified (threshold ${args.unknownThreshold})`,
     );
   }
   return fail(
@@ -223,10 +226,11 @@ export async function gateG2b(
         OR
         (biller = 'github-copilot' AND billing_type = 'metered_api')
       )
-      -- Hybrid billers (claude-code, openai-codex, claude-bridge) intentionally
-      -- NOT checked here: they can legitimately be either type depending on
-      -- emitter config (API key vs Pro/Plus subscription). G2 still catches
-      -- the case where a hybrid biller has 'unknown' rows above threshold.
+      -- Hybrid billers (claude-code, openai-codex, claude-bridge) are NOT checked
+      -- for metered-vs-subscription here: they can legitimately be either type
+      -- depending on emitter config (API key vs Pro/Plus subscription). Their
+      -- emitters always set a concrete billingType, so an 'unknown' row for them
+      -- is a bug that G2 (which has no biller exemption) catches.
     GROUP BY biller, billing_type
     ORDER BY biller
   `);

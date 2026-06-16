@@ -192,32 +192,34 @@ describe("verify-budget-rollout gates", () => {
       assert.ok(failing.detail.includes("anthropic"));
     });
 
-    it("excludes hybrid claude-bridge from the check", async () => {
-      // claude-bridge legitimately stays unknown without env signal
-      await db.insert(costEvents).values(makeCostEvent({ biller: "claude-bridge", billingType: "unknown" }));
-      const r = await gateG2(db, baseArgs, [companyId]);
-      assert.equal(r.passed, true);
-    });
-
-    // The G2 query has NOT IN ('claude-bridge','openai-codex','claude-code')
-    // \u2014 three hybrid billers \u2014 but only one was being tested. If a
-    // future query edit drops openai-codex or claude-code from the list,
-    // those emitters would start tripping the gate on legitimate unknown
-    // rows. Cover all three:
-    for (const hybrid of ["openai-codex", "claude-code"] as const) {
-      it(`excludes hybrid ${hybrid} from the check`, async () => {
-        for (let i = 0; i < 5; i++) {
-          await db.insert(costEvents).values(makeCostEvent({
-            biller: hybrid,
-            provider: hybrid,
-            billingType: "unknown",
-            idempotencyKey: `${hybrid}-unk-${i}`,
-          }));
-        }
+    // Hybrid billers (claude-bridge, openai-codex, claude-code) always set a
+    // concrete billingType at emit time (bridge: classifyBridgeBilling; watcher:
+    // billerForSource default subscription_included), so an 'unknown' row for any
+    // of them is an emitter/config bug. G2 has no biller exemption, so it flags
+    // them like every other biller.
+    for (const hybrid of ["claude-bridge", "openai-codex", "claude-code"] as const) {
+      it(`flags ${hybrid} unknown rows (no exemption)`, async () => {
+        await db.insert(costEvents).values(makeCostEvent({
+          biller: hybrid,
+          provider: hybrid,
+          billingType: "unknown",
+          idempotencyKey: `${hybrid}-unk`,
+        }));
         const r = await gateG2(db, baseArgs, [companyId]);
-        assert.equal(r.passed, true, `${hybrid} unknown rows should be ignored, got: ${r.detail}`);
+        assert.equal(r.passed, false, `${hybrid} unknown row should fail G2, got: ${r.detail}`);
+        assert.ok(r.detail.includes(hybrid));
       });
     }
+
+    it("passes when a claude-code row carries a concrete billingType", async () => {
+      await db.insert(costEvents).values(makeCostEvent({
+        biller: "claude-code",
+        billingType: "subscription_included",
+        idempotencyKey: "cc-classified",
+      }));
+      const r = await gateG2(db, baseArgs, [companyId]);
+      assert.equal(r.passed, true, `classified claude-code row should pass, got: ${r.detail}`);
+    });
   });
 
   describe("G2b — billing_type matches expected per biller", () => {
