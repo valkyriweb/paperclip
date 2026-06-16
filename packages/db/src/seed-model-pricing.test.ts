@@ -43,6 +43,28 @@ describe("usdPerTokenToCpmMicros", () => {
   });
 });
 
+describe("seedModelPricing alias-keyed provider guard", () => {
+  it("rejects a seed row whose provider is a pricing alias", async () => {
+    // 'claude-bridge' aliases to 'anthropic' — seeding under it would create a
+    // row no lookup ever reaches. The guard must reject it before any DB work.
+    await expect(
+      seedModelPricing({
+        rows: [
+          {
+            provider: "claude-bridge",
+            model: "claude-sonnet-4-6",
+            input_per_token_usd: "0.000003",
+            output_per_token_usd: "0.000015",
+            cache_read_per_token_usd: null,
+            cache_write_per_token_usd: null,
+            source: "test",
+          },
+        ],
+      }),
+    ).rejects.toThrow(/claude-bridge.*anthropic/);
+  });
+});
+
 describeEmbeddedPostgres("seedModelPricing", () => {
   it(
     "inserts each row exactly once and is idempotent on re-run",
