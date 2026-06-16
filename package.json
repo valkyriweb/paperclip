@@ -23,6 +23,8 @@
     "test:run:serialized": "pnpm run preflight:workspace-links && pnpm --filter @paperclipai/plugin-sdk ensure-build-deps && node scripts/run-vitest-stable.mjs --mode serialized",
     "db:generate": "pnpm --filter @paperclipai/db generate",
     "db:migrate": "pnpm --filter @paperclipai/db migrate",
+    "db:seed-model-pricing": "pnpm --filter @paperclipai/db seed:pricing",
+    "db:backfill-cost-cents": "pnpm --filter @paperclipai/db backfill:cost-cents",
     "issue-references:backfill": "pnpm run preflight:workspace-links && tsx scripts/backfill-issue-reference-mentions.ts",
     "verify:budget-rollout": "pnpm --filter @paperclipai/server exec tsx ../scripts/verify-budget-rollout.ts",
     "verify:budget-rollout:test": "pnpm --filter @paperclipai/server exec tsx --test ../scripts/verify-budget-rollout.test.ts",
