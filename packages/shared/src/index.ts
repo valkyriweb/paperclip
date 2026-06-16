@@ -1,5 +1,10 @@
 export { agentAdapterTypeSchema, optionalAgentAdapterTypeSchema } from "./adapter-type.js";
-export { computeCostCents } from "./pricing.js";
+export {
+  computeCostCents,
+  PRICING_PROVIDER_ALIASES,
+  pricingProviderFor,
+  normalizeModelForPricing,
+} from "./pricing.js";
 export type { CostEventTokens, ModelPricingRates } from "./pricing.js";
 export {
   getAgentOrgChainHealth,

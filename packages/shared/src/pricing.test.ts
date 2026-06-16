@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { computeCostCents } from "./pricing.js";
+import { computeCostCents, pricingProviderFor, normalizeModelForPricing } from "./pricing.js";
 
 // Anthropic Sonnet 4.6 reference rates:
 //   input $3/Mtok, cached $0.30/Mtok, cacheWrite $3.75/Mtok, output $15/Mtok.
@@ -98,5 +98,27 @@ describe("computeCostCents", () => {
         { ...sonnet, inputCpmMicros: -300_000_000 },
       ),
     ).toBe(0);
+  });
+});
+
+describe("pricingProviderFor", () => {
+  it("resolves a transport alias to its billing provider", () => {
+    expect(pricingProviderFor("claude-bridge")).toBe("anthropic");
+  });
+
+  it("passes a provider with no alias through unchanged", () => {
+    expect(pricingProviderFor("openai")).toBe("openai");
+    expect(pricingProviderFor("anthropic")).toBe("anthropic");
+  });
+});
+
+describe("normalizeModelForPricing", () => {
+  it("collapses dots to dashes so dot/dash model names match", () => {
+    expect(normalizeModelForPricing("gpt-5.5")).toBe("gpt-5-5");
+    expect(normalizeModelForPricing("claude-3.5-haiku")).toBe("claude-3-5-haiku");
+  });
+
+  it("leaves an already-dashed name unchanged", () => {
+    expect(normalizeModelForPricing("claude-sonnet-4-6")).toBe("claude-sonnet-4-6");
   });
 });

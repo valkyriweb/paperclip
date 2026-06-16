@@ -432,4 +432,106 @@ describeEmbeddedPostgres("backfillCostCents", () => {
     },
     20_000,
   );
+
+  // The live path (server/services/costs.ts) normalizes dots→dashes on BOTH
+  // sides of the model comparison; the backfill must do the same or it leaves
+  // dot/dash-mismatched rows unpriced at 0¢. Both forms occur in the wild: the
+  // seed stores dash form, emitters send either.
+  it(
+    "prices a dot-form event model against a dash-form seed row",
+    async () => {
+      const db = createDb(connectionString);
+      await db.insert(modelPricing).values({
+        provider: "openai",
+        model: "gpt-5-5", // seed stores dash form
+        effectiveAt: new Date("2026-05-01T00:00:00.000Z"),
+        inputCpmMicros: 300_000_000,
+        cachedInputCpmMicros: 0,
+        cacheWriteCpmMicros: 0,
+        outputCpmMicros: 1_500_000_000,
+        source: "test",
+      });
+      const id = randomUUID();
+      await db.insert(costEvents).values({
+        id,
+        companyId,
+        agentId,
+        provider: "openai",
+        biller: "openai",
+        billingType: "metered_api",
+        model: "gpt-5.5", // emitter sent dot form
+        inputTokens: 1_000_000,
+        outputTokens: 100_000,
+        cachedInputTokens: 0,
+        cacheCreationInputTokens: 0,
+        costCents: 0,
+        occurredAt: new Date("2026-05-15T00:00:00.000Z"),
+      });
+
+      const summary = await backfillCostCents({ connectionString });
+      expect(summary.priced).toBe(1);
+      expect(summary.unmatched).toBe(0);
+
+      const sql = postgres(connectionString, { max: 1, onnotice: () => {} });
+      try {
+        const [row] = await sql.unsafe<{ cost_cents: number }[]>(
+          `SELECT cost_cents FROM cost_events WHERE id = $1`,
+          [id],
+        );
+        expect(row.cost_cents).toBe(450); // 1M input * $3 + 100k output * $15
+      } finally {
+        await sql.end();
+      }
+    },
+    20_000,
+  );
+
+  it(
+    "prices a dash-form event model against a dot-form seed row (inverse)",
+    async () => {
+      const db = createDb(connectionString);
+      await db.insert(modelPricing).values({
+        provider: "openai",
+        model: "gpt-5.5", // seed stores dot form
+        effectiveAt: new Date("2026-05-01T00:00:00.000Z"),
+        inputCpmMicros: 300_000_000,
+        cachedInputCpmMicros: 0,
+        cacheWriteCpmMicros: 0,
+        outputCpmMicros: 1_500_000_000,
+        source: "test",
+      });
+      const id = randomUUID();
+      await db.insert(costEvents).values({
+        id,
+        companyId,
+        agentId,
+        provider: "openai",
+        biller: "openai",
+        billingType: "metered_api",
+        model: "gpt-5-5", // emitter sent dash form
+        inputTokens: 1_000_000,
+        outputTokens: 100_000,
+        cachedInputTokens: 0,
+        cacheCreationInputTokens: 0,
+        costCents: 0,
+        occurredAt: new Date("2026-05-15T00:00:00.000Z"),
+      });
+
+      const summary = await backfillCostCents({ connectionString });
+      expect(summary.priced).toBe(1);
+      expect(summary.unmatched).toBe(0);
+
+      const sql = postgres(connectionString, { max: 1, onnotice: () => {} });
+      try {
+        const [row] = await sql.unsafe<{ cost_cents: number }[]>(
+          `SELECT cost_cents FROM cost_events WHERE id = $1`,
+          [id],
+        );
+        expect(row.cost_cents).toBe(450);
+      } finally {
+        await sql.end();
+      }
+    },
+    20_000,
+  );
 });
