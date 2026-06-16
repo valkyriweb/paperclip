@@ -1,7 +1,7 @@
 import postgres from "postgres";
 import { and, eq, gt, lte, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
-import { computeCostCents } from "@paperclipai/shared";
+import { computeCostCents, pricingProviderFor, normalizeModelForPricing } from "@paperclipai/shared";
 
 import { costEvents } from "./schema/cost_events.js";
 import { modelPricing } from "./schema/model_pricing.js";
@@ -22,15 +22,6 @@ import { modelPricing } from "./schema/model_pricing.js";
  *
  * Substream: see agent-system/PAPERCLIP-BUDGET-INTEGRATION.md P2.5.
  */
-
-/**
- * Keep this aliased in sync with the same table in `server/src/services/costs.ts`.
- * Both should ideally read from one canonical map; for now this is a one-shot
- * script with no live coupling, so we duplicate-and-comment.
- */
-const PRICING_PROVIDER_ALIASES: Record<string, string> = {
-  "claude-bridge": "anthropic",
-};
 
 const METERED_BILLING_TYPES = ["metered_api", "subscription_overage", "credits"] as const;
 
@@ -102,7 +93,7 @@ export async function backfillCostCents(
       lastId = batch[batch.length - 1].id;
 
       for (const row of batch) {
-        const lookupProvider = PRICING_PROVIDER_ALIASES[row.provider] ?? row.provider;
+        const lookupProvider = pricingProviderFor(row.provider);
         const [pricing] = await db
           .select({
             inputCpmMicros: modelPricing.inputCpmMicros,
@@ -114,7 +105,9 @@ export async function backfillCostCents(
           .where(
             and(
               eq(modelPricing.provider, lookupProvider),
-              eq(modelPricing.model, row.model),
+              // Mirror the live path (server/services/costs.ts): normalize both
+              // sides so dot-form and dash-form model names match.
+              sql`replace(${modelPricing.model}, '.', '-') = ${normalizeModelForPricing(row.model)}`,
               lte(modelPricing.effectiveAt, row.occurredAt),
             ),
           )

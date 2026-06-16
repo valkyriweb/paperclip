@@ -63,3 +63,36 @@ export function computeCostCents(tokens: CostEventTokens, pricing: ModelPricingR
     tokens.outputTokens * pricing.outputCpmMicros;
   return Math.max(0, Math.round(microCentTokenProduct / 1e12));
 }
+
+/**
+ * Transport-style providers whose cost is priced as the underlying billing
+ * provider. claude-bridge proxies Anthropic models through Luke's local
+ * subscription; attribution stays 'claude-bridge' on the cost_events row, but
+ * the pricing lookup falls back to 'anthropic'.
+ *
+ * Shared so the live path (server/services/costs.ts), the backfill
+ * (packages/db/backfill-cost-cents.ts), and the seed guard all resolve the
+ * same way and can't drift.
+ */
+export const PRICING_PROVIDER_ALIASES: Record<string, string> = {
+  "claude-bridge": "anthropic",
+};
+
+/** Resolve the canonical `model_pricing` provider key for a cost_events row. */
+export function pricingProviderFor(provider: string): string {
+  return PRICING_PROVIDER_ALIASES[provider] ?? provider;
+}
+
+/**
+ * Normalize a model name for pricing lookup by collapsing `.` to `-`.
+ *
+ * The vercel-ai-gateway seed stores models in dash form (`gpt-5-5`,
+ * `claude-3-5-haiku`) even though canonical ids use dots (`gpt-5.5`,
+ * `claude-3.5-haiku`) — 86 of 180 seed rows. Emitters send either form
+ * depending on their SDK/registry. Callers normalize the lookup parameter and
+ * apply the same `replace(model, '.', '-')` to the stored column, so all four
+ * dot/dash pairings match in one query.
+ */
+export function normalizeModelForPricing(model: string): string {
+  return model.replace(/\./g, "-");
+}

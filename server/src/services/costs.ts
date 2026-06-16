@@ -2,19 +2,9 @@ import { and, desc, eq, getTableColumns, gte, isNotNull, isNull, lt, lte, sql } 
 import { alias } from "drizzle-orm/pg-core";
 import type { Db } from "@paperclipai/db";
 import { activityLog, agents, companies, costEvents, heartbeatRuns, issues, modelPricing, projects } from "@paperclipai/db";
-import { computeCostCents as sharedComputeCostCents } from "@paperclipai/shared";
+import { computeCostCents as sharedComputeCostCents, pricingProviderFor, normalizeModelForPricing } from "@paperclipai/shared";
 import { notFound, unprocessable } from "../errors.js";
 import { budgetService, type BudgetServiceHooks } from "./budgets.js";
-
-/**
- * Transport-style providers whose cost should be priced as if they were the
- * underlying billing provider. claude-bridge proxies Anthropic models through
- * Luke's local subscription; attribution stays as 'claude-bridge' on the
- * cost_events row, but the pricing lookup falls back to 'anthropic'.
- */
-const PRICING_PROVIDER_ALIASES: Record<string, string> = {
-  "claude-bridge": "anthropic",
-};
 
 /**
  * Providers that are billed per token against a paid API endpoint. The
@@ -61,38 +51,6 @@ export function classifyBillingTypeFromProvider(provider: string | null | undefi
   if (SERVER_METERED_PROVIDERS.has(provider)) return "metered_api";
   if (SERVER_SUBSCRIPTION_ONLY_PROVIDERS.has(provider)) return "subscription_included";
   return "unknown";
-}
-
-/**
- * Resolve the canonical `model_pricing` provider key for a cost_events row.
- */
-function pricingProviderFor(provider: string): string {
-  return PRICING_PROVIDER_ALIASES[provider] ?? provider;
-}
-
-/**
- * Normalize a model name for pricing lookup by collapsing `.` to `-`.
- *
- * The vercel-ai-gateway seed stores models as `gpt-5-5` / `claude-3-5-haiku`
- * (dash form) even though their canonical `vendor_model_id` uses dots
- * (`openai/gpt-5.5`, `anthropic/claude-3.5-haiku`). 86 of 180 seed rows hit
- * this transform. Emitters in the wild send either form depending on which
- * SDK or model registry they read from:
- *   - Multica forwarder relays whatever Pi reports (often the dot form)
- *   - Claude-bridge relays whatever Anthropic returns (sometimes either)
- *   - Heartbeat path historically sent the seed (dash) form
- *
- * Rather than force every emitter to know the seed's exact transform, we
- * normalize both sides of the comparison at lookup time. Strict eq on a
- * computed expression — `replace(model, '.', '-') = $normalized` — so the
- * single query catches all four pairings (dot/dot, dot/dash, dash/dot,
- * dash/dash) without a fallback round-trip.
- *
- * Discovered 2026-05-17 during smoke #5 (provider=pi, model=gpt-5.5 priced
- * at 0¢ despite seed row "gpt-5-5" existing).
- */
-function normalizeModelForPricing(model: string): string {
-  return model.replace(/\./g, "-");
 }
 
 /**

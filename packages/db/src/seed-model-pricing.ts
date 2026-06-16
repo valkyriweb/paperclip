@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
+import { PRICING_PROVIDER_ALIASES } from "@paperclipai/shared";
 
 import { modelPricing } from "./schema/model_pricing.js";
 
@@ -72,6 +73,20 @@ export async function seedModelPricing(
   const rows =
     options.rows ??
     (JSON.parse(await readFile(SEED_DATA_PATH, "utf8")) as SeedFile).rows;
+
+  // An alias-keyed provider (e.g. 'claude-bridge') would be inserted under a key
+  // the live path and backfill never look up — they resolve it to its canonical
+  // provider before querying — so the row would silently never price. Reject it
+  // at seed time and make the author use the canonical provider.
+  const aliased = rows.find((row) => row.provider in PRICING_PROVIDER_ALIASES);
+  if (aliased) {
+    const canonical = PRICING_PROVIDER_ALIASES[aliased.provider];
+    throw new Error(
+      `Seed row provider '${aliased.provider}' is a pricing alias for '${canonical}'. ` +
+        `Seed under '${canonical}' instead — alias-keyed rows are unreachable by the ` +
+        `live path and backfill, which resolve '${aliased.provider}' → '${canonical}' before lookup.`,
+    );
+  }
 
   if (rows.length === 0) {
     return { total: 0, inserted: 0, skipped: 0, effectiveAt };
