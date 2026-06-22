@@ -300,7 +300,7 @@ describe("execution workspace policy helpers", () => {
     });
   });
 
-  it("falls back to the instance default environment when the agent has none", () => {
+  it("falls back to the agent default environment before the company default", () => {
     expect(
       resolveExecutionWorkspaceEnvironmentId({
         projectPolicy: null,
@@ -333,8 +333,7 @@ describe("execution workspace policy helpers", () => {
         issueSettings: null,
         workspaceConfig: null,
         agentDefaultEnvironmentId: null,
-        instanceDefaultEnvironmentId: "instance-env",
-        localDefaultEnvironmentId: "local-env",
+        defaultEnvironmentId: "default-env",
       }),
     ).toEqual({
       environmentId: "default-env",
@@ -343,9 +342,11 @@ describe("execution workspace policy helpers", () => {
     });
     expect(
       resolveExecutionWorkspaceEnvironmentId({
+        projectPolicy: { enabled: true, environmentId: null },
+        issueSettings: null,
+        workspaceConfig: null,
         agentDefaultEnvironmentId: null,
-        instanceDefaultEnvironmentId: null,
-        localDefaultEnvironmentId: "local-env",
+        defaultEnvironmentId: "default-env",
       }),
     ).toEqual({
       environmentId: "default-env",

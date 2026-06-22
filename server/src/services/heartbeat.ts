@@ -8629,12 +8629,17 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
       ? existingExecutionWorkspace?.config ?? null
       : null;
     const localEnvironment = await environmentsSvc.ensureLocalEnvironment(agent.companyId);
+    // Bermont overlay keeps the single-fallback resolver (PAPA-380/430/431 conflict guard),
+    // so upstream's instance-scoped default is folded into the one fallback here, preserving
+    // upstream precedence agent > project > instance > local. A null instance default leaves
+    // bermont's prior behavior (the company-local environment) unchanged.
+    const instanceDefaultEnvironmentId = (await instanceSettings.get()).defaultEnvironmentId;
     const environmentResolution = resolveExecutionWorkspaceEnvironmentId({
       projectPolicy: projectExecutionWorkspacePolicy,
       issueSettings: issueExecutionWorkspaceSettings,
       workspaceConfig: requestedReusableExecutionWorkspaceConfig,
       agentDefaultEnvironmentId: agent.defaultEnvironmentId,
-      defaultEnvironmentId: localEnvironment.id,
+      defaultEnvironmentId: instanceDefaultEnvironmentId ?? localEnvironment.id,
     });
     // PAPA-380 / PAPA-431: when the resolver refuses silent reuse of the
     // persisted workspace environment, also force a fresh workspace

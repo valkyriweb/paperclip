@@ -3004,16 +3004,6 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
         continue;
       }
 
-      if (await hasActiveExecutionPath(issue.companyId, issue.id)) {
-        result.skipped += 1;
-        continue;
-      }
-
-      if (await hasPendingWakeInteraction(issue.companyId, issue.id)) {
-        result.skipped += 1;
-        continue;
-      }
-
       if (await isAutomaticRecoverySuppressedByPauseHold(db, issue.companyId, issue.id, treeControlSvc)) {
         result.skipped += 1;
         continue;
@@ -3035,10 +3025,20 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
         continue;
       }
 
+      // Bermont overlay: superseded-routine cleanup must run before the pending-wake and
+      // active-path guards below — a stale *queued* recovery run for a superseded routine
+      // must still be cancelled + escalated (see heartbeat-process-recovery
+      // "suppresses queued stale routine recovery"). The upstream early hasActiveExecutionPath
+      // pre-check was dropped here as redundant with the `if (activeExecutionPath)` guard below.
       const supersededRoutineExecution = await suppressSupersededRoutineExecutionRecovery(issue);
       if (supersededRoutineExecution) {
         result.escalated += 1;
         result.issueIds.push(issue.id);
+        continue;
+      }
+
+      if (await hasPendingWakeInteraction(issue.companyId, issue.id)) {
+        result.skipped += 1;
         continue;
       }
 
