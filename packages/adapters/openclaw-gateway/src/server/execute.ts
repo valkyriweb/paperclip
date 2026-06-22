@@ -255,7 +255,11 @@ function resolveAuthToken(config: Record<string, unknown>, headers: Record<strin
   const authHeader =
     headerMapGetIgnoreCase(headers, "x-openclaw-auth") ??
     headerMapGetIgnoreCase(headers, "authorization");
-  return tokenFromAuthHeader(authHeader);
+  const fromHeader = tokenFromAuthHeader(authHeader);
+  if (fromHeader) return fromHeader;
+
+  // Fallback to environment variable
+  return nonEmpty(process.env.OPENCLAW_TOKEN);
 }
 
 function isSensitiveLogKey(key: string): boolean {
@@ -1329,10 +1333,11 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 
   const sessionKeyStrategy = normalizeSessionKeyStrategy(ctx.config.sessionKeyStrategy);
   const configuredSessionKey = nonEmpty(ctx.config.sessionKey);
+  const configuredAgentId = nonEmpty(ctx.config.agentId);
   const sessionKey = resolveSessionKey({
     strategy: sessionKeyStrategy,
     configuredSessionKey,
-    agentId: nonEmpty(ctx.config.agentId),
+    agentId: configuredAgentId,
     runId: ctx.runId,
     issueId: wakePayload.issueId,
   });
@@ -1360,7 +1365,6 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   }
   agentParams.paperclip = paperclipPayload;
 
-  const configuredAgentId = nonEmpty(ctx.config.agentId);
   if (configuredAgentId && !nonEmpty(agentParams.agentId)) {
     agentParams.agentId = configuredAgentId;
   }

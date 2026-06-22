@@ -135,7 +135,6 @@ describe("execution workspace policy helpers", () => {
       parseProjectExecutionWorkspacePolicy({
         enabled: true,
         defaultMode: "isolated",
-        environmentId: "8f8ab8f2-d95f-4315-9f08-d683a1e0f73b",
         workspaceStrategy: {
           type: "git_worktree",
           worktreeParentDir: ".paperclip/worktrees",
@@ -146,7 +145,6 @@ describe("execution workspace policy helpers", () => {
     ).toEqual({
       enabled: true,
       defaultMode: "isolated_workspace",
-      environmentId: "8f8ab8f2-d95f-4315-9f08-d683a1e0f73b",
       workspaceStrategy: {
         type: "git_worktree",
         worktreeParentDir: ".paperclip/worktrees",
@@ -157,11 +155,9 @@ describe("execution workspace policy helpers", () => {
     expect(
       parseIssueExecutionWorkspaceSettings({
         mode: "project_primary",
-        environmentId: "8f8ab8f2-d95f-4315-9f08-d683a1e0f73b",
       }),
     ).toEqual({
       mode: "shared_workspace",
-      environmentId: "8f8ab8f2-d95f-4315-9f08-d683a1e0f73b",
     });
   });
 
@@ -304,7 +300,7 @@ describe("execution workspace policy helpers", () => {
     });
   });
 
-  it("falls back to the agent default environment before the company default", () => {
+  it("falls back to the instance default environment when the agent has none", () => {
     expect(
       resolveExecutionWorkspaceEnvironmentId({
         projectPolicy: null,
@@ -337,7 +333,8 @@ describe("execution workspace policy helpers", () => {
         issueSettings: null,
         workspaceConfig: null,
         agentDefaultEnvironmentId: null,
-        defaultEnvironmentId: "default-env",
+        instanceDefaultEnvironmentId: "instance-env",
+        localDefaultEnvironmentId: "local-env",
       }),
     ).toEqual({
       environmentId: "default-env",
@@ -346,11 +343,9 @@ describe("execution workspace policy helpers", () => {
     });
     expect(
       resolveExecutionWorkspaceEnvironmentId({
-        projectPolicy: { enabled: true, environmentId: null },
-        issueSettings: null,
-        workspaceConfig: null,
         agentDefaultEnvironmentId: null,
-        defaultEnvironmentId: "default-env",
+        instanceDefaultEnvironmentId: null,
+        localDefaultEnvironmentId: "local-env",
       }),
     ).toEqual({
       environmentId: "default-env",

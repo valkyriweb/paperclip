@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Agent } from "@paperclipai/shared";
-import { AlertTriangle, CheckCircle2, ChevronRight, CircleDashed, GitBranch, ListChecks, Loader2, MessageSquareQuote, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronRight, CircleDashed, FileText, GitBranch, ImagePlus, ListChecks, Loader2, MessageSquareQuote, X, XCircle } from "lucide-react";
 import { Link } from "@/lib/router";
 import { formatAssigneeUserLabel } from "../lib/assignees";
 import {
@@ -8,7 +8,6 @@ import {
   collectSuggestedTaskClientKeys,
   countSuggestedTaskNodes,
   getCheckboxConfirmationSelectedLabels,
-  getRequestConfirmationTargetHref,
   getQuestionAnswerLabels,
   type AskUserQuestionsAnswer,
   type AskUserQuestionsInteraction,
@@ -59,6 +58,7 @@ interface IssueThreadInteractionCardProps {
   onCancelInteraction?: (
     interaction: AskUserQuestionsInteraction,
   ) => Promise<void> | void;
+  onUploadImage?: (file: File) => Promise<string>;
 }
 
 function resolveActorLabel(args: {
@@ -154,6 +154,54 @@ function statusClasses(status: IssueThreadInteraction["status"]) {
       return {
         shell: "border-sky-500/70 bg-transparent",
         badge: "border-sky-500/70 bg-sky-500/10 text-sky-900 dark:bg-sky-500/15 dark:text-sky-100",
+      };
+  }
+}
+
+/**
+ * A confirmation that targets the issue's `plan` document renders as a distinct
+ * plan card (PAP-95g): a full state-coloured outline — violet while in review,
+ * green once approved, red when changes are requested (PAP-75 palette) — with no
+ * left stripe, so plans stand out from comments and status rows.
+ */
+function isPlanConfirmation(interaction: IssueThreadInteraction): boolean {
+  if (interaction.kind !== "request_confirmation") return false;
+  const target = interaction.payload.target;
+  return target?.type === "issue_document" && target?.key === "plan";
+}
+
+function planStatusClasses(status: IssueThreadInteraction["status"]) {
+  switch (status) {
+    case "accepted":
+    case "answered":
+      return {
+        shell: "border-2 border-green-500/80 bg-transparent",
+        badge: "border-green-500/60 bg-green-500/10 text-green-900 dark:bg-green-500/15 dark:text-green-100",
+        label: "Approved",
+        Icon: CheckCircle2,
+      };
+    case "rejected":
+    case "cancelled":
+      return {
+        shell: "border-2 border-red-500/80 bg-transparent",
+        badge: "border-red-500/60 bg-red-500/10 text-red-900 dark:bg-red-500/15 dark:text-red-100",
+        label: "Changes requested",
+        Icon: XCircle,
+      };
+    case "failed":
+    case "expired":
+      return {
+        shell: "border-2 border-amber-500/70 bg-transparent",
+        badge: "border-amber-500/60 bg-amber-500/10 text-amber-900 dark:bg-amber-500/15 dark:text-amber-100",
+        label: "Expired",
+        Icon: AlertTriangle,
+      };
+    default:
+      return {
+        shell: "border-2 border-violet-500/80 bg-transparent",
+        badge: "border-violet-500/60 bg-violet-500/10 text-violet-900 dark:bg-violet-500/15 dark:text-violet-100",
+        label: "In review",
+        Icon: FileText,
       };
   }
 }
@@ -984,18 +1032,33 @@ function requestConfirmationTargetLabel(target: RequestConfirmationTarget) {
   return `${target.key}${revision}`;
 }
 
+function requestConfirmationTargetHref({
+  interaction,
+  target,
+}: {
+  interaction: Pick<IssueThreadInteraction, "issueId">;
+  target: RequestConfirmationTarget;
+}) {
+  if (target.href) return target.href;
+  if (target.type === "issue_document") {
+    const issueId = target.issueId ?? interaction.issueId;
+    return `/issues/${issueId}#document-${encodeURIComponent(target.key)}`;
+  }
+  return null;
+}
+
 function RequestConfirmationTargetChip({
-  issueId,
+  interaction,
   target,
   tone = "default",
 }: {
-  issueId: string;
+  interaction: Pick<IssueThreadInteraction, "issueId">;
   target: RequestConfirmationTarget | null | undefined;
   tone?: "default" | "subtle";
 }) {
   if (!target) return null;
 
-  const href = getRequestConfirmationTargetHref({ issueId, target });
+  const href = requestConfirmationTargetHref({ interaction, target });
   const className = cn(
     "inline-flex max-w-full items-center gap-1.5 rounded-sm border px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.16em]",
     tone === "default"
@@ -1038,7 +1101,7 @@ function ConfirmationDeclinedBlock({
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2 text-sm leading-6 text-foreground">
         <span className="font-medium">Declined</span>
-        <RequestConfirmationTargetChip issueId={issueId} target={target} />
+        <RequestConfirmationTargetChip interaction={{ issueId }} target={target} />
       </div>
       {result?.reason ? (
         <blockquote className="rounded-sm border-l-2 border-rose-500/70 bg-rose-500/10 px-3 py-2 text-sm leading-6 text-rose-900 dark:text-rose-100">
@@ -1080,14 +1143,14 @@ function ConfirmationExpiredBlock({
       {expiredByTargetChange ? (
         <div className="flex flex-wrap items-center gap-2">
           <RequestConfirmationTargetChip
-            issueId={issueId}
+            interaction={{ issueId }}
             target={staleTarget}
             tone="subtle"
           />
           {staleTarget && target ? (
             <ChevronRight className="h-3.5 w-3.5 text-amber-700" />
           ) : null}
-          <RequestConfirmationTargetChip issueId={issueId} target={target} />
+          <RequestConfirmationTargetChip interaction={{ issueId }} target={target} />
         </div>
       ) : null}
     </div>
@@ -1113,18 +1176,24 @@ function RequestConfirmationResolution({
     return (
       <div className="flex flex-wrap items-center gap-2 text-sm leading-6 text-foreground">
         <span className="font-medium">Confirmed</span>
-        <RequestConfirmationTargetChip issueId={interaction.issueId} target={target} />
+        <RequestConfirmationTargetChip interaction={interaction} target={target} />
       </div>
     );
   }
 
   if (interaction.status === "rejected") {
     return (
-      <ConfirmationDeclinedBlock
-        issueId={interaction.issueId}
-        result={interaction.result}
-        target={target}
-      />
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center gap-2 text-sm leading-6 text-foreground">
+          <span className="font-medium">Declined</span>
+          <RequestConfirmationTargetChip interaction={interaction} target={target} />
+        </div>
+        {interaction.result?.reason ? (
+          <div className="rounded-sm border-l-2 border-rose-500/70 bg-rose-500/10 px-3 py-2 text-sm leading-6 text-rose-900 dark:text-rose-100">
+            <MarkdownBody>{interaction.result.reason}</MarkdownBody>
+          </div>
+        ) : null}
+      </div>
     );
   }
 
@@ -1147,10 +1216,13 @@ function RequestConfirmationResolution({
 
 function RequestConfirmationCard({
   interaction,
+  isPlan = false,
   onAcceptInteraction,
   onRejectInteraction,
+  onUploadImage,
 }: {
   interaction: RequestConfirmationInteraction;
+  isPlan?: boolean;
   onAcceptInteraction?: (
     interaction: RequestConfirmationInteraction,
   ) => Promise<void> | void;
@@ -1158,16 +1230,24 @@ function RequestConfirmationCard({
     interaction: RequestConfirmationInteraction,
     reason?: string,
   ) => Promise<void> | void;
+  onUploadImage?: (file: File) => Promise<string>;
 }) {
   const [rejecting, setRejecting] = useState(false);
   const [working, setWorking] = useState<"accept" | "reject" | null>(null);
   const [rejectReason, setRejectReason] = useState(interaction.result?.reason ?? "");
   const [rejectAttempted, setRejectAttempted] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [shots, setShots] = useState<{ name: string; url: string }[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  // Screenshots ride along in the decline reason as markdown image refs so the
+  // board can attach images when sending a plan back — no schema change needed.
+  const allowScreenshots = isPlan && Boolean(onUploadImage);
   const rejectRequiresReason = interaction.payload.rejectRequiresReason === true;
   const allowDeclineReason = interaction.payload.allowDeclineReason !== false;
   const trimmedRejectReason = rejectReason.trim();
-  const canReject = !rejectRequiresReason || trimmedRejectReason.length > 0;
+  const canReject = !rejectRequiresReason || trimmedRejectReason.length > 0 || shots.length > 0;
   const declineReasonInvalid = rejectRequiresReason && !canReject;
   const declineReasonPlaceholder =
     interaction.payload.declineReasonPlaceholder
@@ -1179,11 +1259,39 @@ function RequestConfirmationCard({
     setRejectReason(interaction.result?.reason ?? "");
     setRejectAttempted(false);
     setActionError(null);
+    setShots([]);
+    setUploadError(null);
     if (interaction.status !== "pending") {
       setRejecting(false);
       setWorking(null);
     }
   }, [interaction.id, interaction.result?.reason, interaction.status]);
+
+  async function handleAddScreenshots(files: FileList | null) {
+    if (!onUploadImage || !files || files.length === 0) return;
+    setUploadError(null);
+    setUploading(true);
+    try {
+      const uploaded: { name: string; url: string }[] = [];
+      for (const file of Array.from(files)) {
+        if (!file.type.startsWith("image/")) continue;
+        const url = await onUploadImage(file);
+        uploaded.push({ name: file.name || "screenshot", url });
+      }
+      if (uploaded.length > 0) setShots((current) => [...current, ...uploaded]);
+    } catch {
+      setUploadError("Couldn't upload that image. Try again.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function composeReason() {
+    const text = trimmedRejectReason;
+    if (shots.length === 0) return text || undefined;
+    const images = shots.map((s) => `![${s.name}](${s.url})`).join("\n");
+    return [text, images].filter(Boolean).join("\n\n");
+  }
 
   async function handleAccept() {
     if (!onAcceptInteraction) return;
@@ -1204,7 +1312,7 @@ function RequestConfirmationCard({
     setWorking("reject");
     setActionError(null);
     try {
-      await onRejectInteraction(interaction, trimmedRejectReason || undefined);
+      await onRejectInteraction(interaction, composeReason());
       setRejecting(false);
     } catch {
       setActionError("Try again");
@@ -1226,7 +1334,7 @@ function RequestConfirmationCard({
             </div>
           ) : null}
           <RequestConfirmationTargetChip
-            issueId={interaction.issueId}
+            interaction={interaction}
             target={interaction.payload.target}
           />
         </div>
@@ -1237,7 +1345,7 @@ function RequestConfirmationCard({
           <div className="flex flex-wrap items-center justify-end gap-2">
             <Button
               size="sm"
-              variant={rejecting ? "outline" : "default"}
+              variant={rejecting ? "outline" : isPlan ? "cta" : "default"}
               disabled={!onAcceptInteraction || working !== null}
               onClick={() => void handleAccept()}
             >
@@ -1282,6 +1390,69 @@ function RequestConfirmationCard({
               />
               {rejectAttempted && declineReasonInvalid ? (
                 <p className="text-xs text-destructive">A decline reason is required.</p>
+              ) : null}
+              {allowScreenshots ? (
+                <div className="space-y-2">
+                  {shots.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {shots.map((shot, index) => (
+                        <div
+                          key={`${shot.url}-${index}`}
+                          className="group relative h-16 w-16 overflow-hidden rounded-sm border border-border/70"
+                        >
+                          <img
+                            src={shot.url}
+                            alt={shot.name}
+                            className="h-full w-full object-cover"
+                          />
+                          <button
+                            type="button"
+                            aria-label={`Remove ${shot.name}`}
+                            className="absolute right-0.5 top-0.5 rounded-full bg-background/90 p-0.5 text-foreground opacity-0 transition-opacity group-hover:opacity-100"
+                            onClick={() =>
+                              setShots((current) => current.filter((_, i) => i !== index))
+                            }
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={(event) => {
+                      void handleAddScreenshots(event.target.value ? event.target.files : null);
+                      event.target.value = "";
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={working !== null || uploading}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    {uploading ? (
+                      <>
+                        <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                        Uploading...
+                      </>
+                    ) : (
+                      <>
+                        <ImagePlus className="mr-2 h-3.5 w-3.5" />
+                        Attach screenshots
+                      </>
+                    )}
+                  </Button>
+                  {uploadError ? (
+                    <p className="text-xs text-destructive">{uploadError}</p>
+                  ) : null}
+                </div>
               ) : null}
               <div className="flex flex-wrap justify-end gap-2">
                 <Button
@@ -1360,7 +1531,7 @@ function RequestCheckboxConfirmationResolution({
               ? "Confirmed with no options selected"
               : `Confirmed ${selectedCount} of ${totalOptions} ${totalOptions === 1 ? "option" : "options"}`}
           </span>
-          <RequestConfirmationTargetChip issueId={interaction.issueId} target={target} />
+          <RequestConfirmationTargetChip interaction={interaction} target={target} />
         </div>
         {visibleLabels.length > 0 ? (
           <div className="flex flex-wrap gap-1.5">
@@ -1387,27 +1558,19 @@ function RequestCheckboxConfirmationResolution({
   }
 
   if (interaction.status === "rejected") {
-    return (
-      <ConfirmationDeclinedBlock
-        issueId={interaction.issueId}
-        result={interaction.result}
-        target={target}
-      />
-    );
+    return <RequestConfirmationResolution interaction={interaction as unknown as RequestConfirmationInteraction} />;
   }
 
   if (interaction.status === "expired") {
-    return (
-      <ConfirmationExpiredBlock
-        issueId={interaction.issueId}
-        result={interaction.result}
-        target={target}
-      />
-    );
+    return <RequestConfirmationResolution interaction={interaction as unknown as RequestConfirmationInteraction} />;
   }
 
   if (interaction.status === "failed") {
-    return <ConfirmationFailedBlock />;
+    return (
+      <p className="text-sm leading-6 text-muted-foreground">
+        This request could not be resolved. Try again or create a new request.
+      </p>
+    );
   }
 
   return null;
@@ -1505,7 +1668,6 @@ function RequestCheckboxConfirmationCard({
       setRejecting(false);
       setWorking(null);
     }
-    // optionSeed guards against option list identity churn for the same interaction.
   }, [interaction.id, interaction.status, interaction.result?.reason, defaultSelected, optionSeed]);
 
   const rejectRequiresReason = interaction.payload.rejectRequiresReason === true;
@@ -1595,7 +1757,7 @@ function RequestCheckboxConfirmationCard({
     ? `All ${totalOptions} options selected`
     : `${selectedCount} of ${totalOptions} ${totalOptions === 1 ? "option" : "options"} selected`;
   const boundsHint = maxSelected != null
-    ? `Pick ${minSelected === maxSelected ? `exactly ${maxSelected}` : `${minSelected}–${maxSelected}`}.`
+    ? `Pick ${minSelected === maxSelected ? `exactly ${maxSelected}` : `${minSelected}-${maxSelected}`}.`
     : minSelected > 0
       ? `Pick at least ${minSelected}.`
       : null;
@@ -1610,7 +1772,7 @@ function RequestCheckboxConfirmationCard({
           </div>
         ) : null}
         <RequestConfirmationTargetChip
-          issueId={interaction.issueId}
+          interaction={interaction}
           target={interaction.payload.target}
         />
       </div>
@@ -1765,9 +1927,12 @@ export function IssueThreadInteractionCard({
   onRejectInteraction,
   onSubmitInteractionAnswers,
   onCancelInteraction,
+  onUploadImage,
 }: IssueThreadInteractionCardProps) {
-  const StatusIcon = statusIcon(interaction.status);
-  const styles = statusClasses(interaction.status);
+  const isPlan = isPlanConfirmation(interaction);
+  const planStyles = isPlan ? planStatusClasses(interaction.status) : null;
+  const StatusIcon = planStyles ? planStyles.Icon : statusIcon(interaction.status);
+  const styles = planStyles ?? statusClasses(interaction.status);
   const createdByLabel = resolveActorLabel({
     agentId: interaction.createdByAgentId,
     userId: interaction.createdByUserId,
@@ -1793,9 +1958,9 @@ export function IssueThreadInteractionCard({
           <div className="flex flex-wrap items-center gap-2">
             <span className={cn("inline-flex items-center gap-1 rounded-sm border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em]", styles.badge)}>
               <StatusIcon className="h-3.5 w-3.5" />
-              {interactionKindLabel(interaction.kind)}
+              {isPlan ? "Plan" : interactionKindLabel(interaction.kind)}
               <span className="text-current/60">/</span>
-              {statusLabel(interaction.status)}
+              {planStyles ? planStyles.label : statusLabel(interaction.status)}
             </span>
             {interaction.continuationPolicy === "wake_assignee"
               || interaction.continuationPolicy === "wake_assignee_on_accept" ? (
@@ -1814,8 +1979,10 @@ export function IssueThreadInteractionCard({
                 ? "Suggested task tree"
                 : interaction.kind === "ask_user_questions"
                   ? interaction.payload.title ?? "Questions for the operator"
-                  : interaction.kind === "request_checkbox_confirmation"
-                    ? "Checkbox confirmation requested"
+                : interaction.kind === "request_checkbox_confirmation"
+                  ? "Checkbox confirmation requested"
+                  : isPlan
+                    ? "Plan review"
                     : "Confirmation requested")}
           </div>
           {interaction.summary ? (
@@ -1863,8 +2030,10 @@ export function IssueThreadInteractionCard({
         ) : (
           <RequestConfirmationCard
             interaction={interaction}
+            isPlan={isPlan}
             onAcceptInteraction={onAcceptInteraction}
             onRejectInteraction={onRejectInteraction}
+            onUploadImage={onUploadImage}
           />
         )}
       </div>
