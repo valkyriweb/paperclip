@@ -10,6 +10,7 @@ export type AgentSkillState =
 
 export type AgentSkillOrigin =
   | "company_managed"
+  | "paperclip_required"
   | "user_installed"
   | "external_unknown";
 

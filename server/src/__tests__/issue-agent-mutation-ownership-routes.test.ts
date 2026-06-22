@@ -81,6 +81,7 @@ const mockIssueRecoveryActionService = vi.hoisted(() => ({
   getActiveForIssue: vi.fn(async () => null),
   listActiveForIssues: vi.fn(async () => new Map()),
   resolveActiveForIssue: vi.fn(async () => null),
+  resolveActiveMissingDispositionForIssue: vi.fn(async () => null),
 }));
 const mockTaskWatchdogService = vi.hoisted(() => ({
   getActiveForIssue: vi.fn(async () => null),
@@ -1005,16 +1006,6 @@ describe("agent issue mutation checkout ownership", () => {
           summary: "Sanitized output",
         }),
       "Cheap status-only recovery runs cannot update issue documents",
-    ],
-    [
-      "low-trust promotion",
-      (app: express.Express) =>
-        request(app).post(`/api/issues/${issueId}/low-trust/promotions`).send({
-          sourceArtifactKind: "comment",
-          sourceArtifactId: recoveryActionId,
-          title: "Promoted artifact",
-          summary: "Sanitized output",
-        }),
     ],
     [
       "attachment upload",

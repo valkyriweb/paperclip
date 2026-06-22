@@ -2004,6 +2004,10 @@ describe("realizeExecutionWorkspace", () => {
     const bareRemote = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-worktree-bare-symref-"));
     await runGit(bareRemote, ["init", "--bare"]);
     await runGit(repoRoot, ["remote", "add", "origin", bareRemote]);
+    // createTempRepo only creates `main`; create `master` explicitly so origin
+    // advertises both branches regardless of the local git init.defaultBranch
+    // (otherwise `push main master` fails when master was never created locally).
+    await runGit(repoRoot, ["branch", "master", "main"]);
     await runGit(repoRoot, ["push", "-u", "origin", "main", "master"]);
     await runGit(repoRoot, ["fetch", "origin"]);
     // Explicitly set refs/remotes/origin/HEAD to exercise the symbolic-ref path
