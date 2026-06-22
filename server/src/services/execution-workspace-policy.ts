@@ -179,6 +179,9 @@ function resolveAssigneeIntendedExecutionWorkspaceEnvironment(input: {
 }
 
 export function resolveExecutionWorkspaceEnvironmentId(input: {
+  projectPolicy: ProjectExecutionWorkspacePolicy | null;
+  issueSettings: IssueExecutionWorkspaceSettings | null;
+  workspaceConfig: { environmentId?: string | null } | null;
   agentDefaultEnvironmentId: string | null;
   defaultEnvironmentId: string;
 }): ExecutionWorkspaceEnvironmentResolution {

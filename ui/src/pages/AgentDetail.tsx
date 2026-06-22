@@ -2657,6 +2657,27 @@ export function AgentSkillsTab({
       })),
     [adapterEntryByKey, companySkills],
   );
+  const requiredSkillRows = useMemo<SkillRow[]>(
+    () =>
+      (skillSnapshot?.entries ?? [])
+        .filter((entry) => entry.required)
+        .map((entry) => {
+          const companySkill = companySkillByKey.get(entry.key);
+          return {
+            id: companySkill?.id ?? `required:${entry.key}`,
+            key: entry.key,
+            name: companySkill?.name ?? entry.key,
+            description: companySkill?.description ?? null,
+            detail: entry.detail ?? null,
+            locationLabel: entry.locationLabel ?? null,
+            originLabel: entry.originLabel ?? null,
+            linkTo: companySkill ? `/skills/${companySkill.id}` : null,
+            readOnly: false,
+            adapterEntry: entry,
+          };
+        }),
+    [companySkillByKey, skillSnapshot],
+  );
   const unmanagedSkillRows = useMemo<SkillRow[]>(
     () =>
       (skillSnapshot?.entries ?? [])

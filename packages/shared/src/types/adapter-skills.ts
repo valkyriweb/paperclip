@@ -25,6 +25,8 @@ export interface AgentSkillEntry {
   currentVersionId?: string | null;
   desired: boolean;
   managed: boolean;
+  required?: boolean;
+  requiredReason?: string | null;
   state: AgentSkillState;
   origin?: AgentSkillOrigin;
   originLabel?: string | null;
