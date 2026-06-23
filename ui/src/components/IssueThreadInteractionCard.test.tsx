@@ -35,9 +35,10 @@ vi.mock("@/lib/router", () => ({
 }));
 
 async function act(callback: () => void | Promise<void>) {
-  let pending: Promise<void> | void = undefined;
+  let pending: Promise<void> | undefined;
   flushSync(() => {
-    pending = callback();
+    const result = callback();
+    pending = result instanceof Promise ? result : undefined;
   });
   if (pending) {
     await pending;
