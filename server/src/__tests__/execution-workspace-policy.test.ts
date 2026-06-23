@@ -135,7 +135,6 @@ describe("execution workspace policy helpers", () => {
       parseProjectExecutionWorkspacePolicy({
         enabled: true,
         defaultMode: "isolated",
-        environmentId: "8f8ab8f2-d95f-4315-9f08-d683a1e0f73b",
         workspaceStrategy: {
           type: "git_worktree",
           worktreeParentDir: ".paperclip/worktrees",
@@ -146,7 +145,6 @@ describe("execution workspace policy helpers", () => {
     ).toEqual({
       enabled: true,
       defaultMode: "isolated_workspace",
-      environmentId: "8f8ab8f2-d95f-4315-9f08-d683a1e0f73b",
       workspaceStrategy: {
         type: "git_worktree",
         worktreeParentDir: ".paperclip/worktrees",
@@ -157,11 +155,9 @@ describe("execution workspace policy helpers", () => {
     expect(
       parseIssueExecutionWorkspaceSettings({
         mode: "project_primary",
-        environmentId: "8f8ab8f2-d95f-4315-9f08-d683a1e0f73b",
       }),
     ).toEqual({
       mode: "shared_workspace",
-      environmentId: "8f8ab8f2-d95f-4315-9f08-d683a1e0f73b",
     });
   });
 

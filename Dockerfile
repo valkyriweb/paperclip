@@ -134,7 +134,6 @@ ENV NODE_ENV=production \
   GEMINI_SANDBOX=false \
   PINCHTAB_BINARY_PATH=/usr/local/share/pinchtab/pinchtab-linux-amd64
 
-VOLUME ["/paperclip"]
 EXPOSE 3100
 
 ENTRYPOINT ["docker-entrypoint.sh"]
