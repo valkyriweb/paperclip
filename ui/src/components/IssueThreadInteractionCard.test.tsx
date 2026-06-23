@@ -34,8 +34,19 @@ vi.mock("@/lib/router", () => ({
   ),
 }));
 
-function act(callback: () => void) {
-  flushSync(callback);
+async function act(callback: () => void | Promise<void>) {
+  let pending: Promise<void> | void = undefined;
+  flushSync(() => {
+    pending = callback();
+  });
+  if (pending) {
+    await pending;
+    // Drain floating promises (e.g. fire-and-forget upload handlers that the
+    // change/click handler kicks off) past a macrotask boundary, then flush any
+    // state updates they scheduled.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    flushSync(() => {});
+  }
 }
 
 function renderCard(
