@@ -430,11 +430,13 @@ jobs:
       # mcr.microsoft.com/playwright container where `playwright install chrome`
       # cannot apt-install the Chrome .deb (su: Authentication failure). Fall back
       # to the image's bundled Chromium, which is the behaviour this fork shipped
-      # green before the upstream merge.
+      # green before the upstream merge. Deliberately leave PAPERCLIP_PLAYWRIGHT_CHANNEL
+      # UNSET so playwright.config.ts omits `channel` and uses bundled Chromium. Do
+      # not let an upstream sync re-add it: setting it to "chrome" reintroduces the
+      # "Chromium distribution 'chrome' is not found" failure in this container.
       - name: Run e2e tests
         env:
           PAPERCLIP_E2E_SKIP_LLM: "true"
-          PAPERCLIP_PLAYWRIGHT_CHANNEL: "chrome"
         run: pnpm run test:e2e
 
       - name: Upload Playwright report
