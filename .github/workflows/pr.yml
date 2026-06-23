@@ -24,8 +24,12 @@ jobs:
           fetch-depth: 0
 
       - name: Block manual lockfile edits
+        # Upstream-sync PRs (and lockfile-refresh chores) legitimately carry
+        # pnpm-lock.yaml: bermont commits the lockfile for reproducible Docker
+        # image builds, unlike upstream's CI-owns-the-lockfile model.
         if: >-
           !startsWith(github.head_ref, 'chore/refresh-lockfile') &&
+          !contains(github.head_ref, 'upstream-sync') &&
           github.event.pull_request.user.login != 'dependabot[bot]'
         run: |
           # Diff the PR branch against its merge base so recent base-branch commits
