@@ -354,15 +354,11 @@ async function buildReferencedCatalogSkill(
     ? existingSkill
     : null;
   const errorStart = errors.length;
+  const descriptorFiles = descriptor.files ?? [SKILL_ENTRYPOINT];
 
-  const files = await collectReferencedSkillFiles(source, descriptor.files ?? [SKILL_ENTRYPOINT], prefix, errors);
+  const files = await collectReferencedSkillFiles(source, descriptorFiles, prefix, errors);
   const skillMarkdown = await readReferencedFileText(source, SKILL_ENTRYPOINT, prefix, errors);
   if (!skillMarkdown) {
-    const nextErrors = errors.slice(errorStart);
-    if (fallbackSkill && canFallbackToExistingReferencedSkill(nextErrors)) {
-      errors.splice(errorStart, nextErrors.length);
-      return fallbackSkill;
-    }
     return null;
   }
 
@@ -396,17 +392,12 @@ async function buildReferencedCatalogSkill(
     errors.push(`${prefix} referenced inventory does not contain SKILL.md.`);
   }
   if (!name || !description) {
-    const nextErrors = errors.slice(errorStart);
-    if (fallbackSkill && canFallbackToExistingReferencedSkill(nextErrors)) {
-      errors.splice(errorStart, nextErrors.length);
-      return fallbackSkill;
-    }
     return null;
   }
 
   let filesForManifest = files;
   const nextErrors = errors.slice(errorStart);
-  if (fallbackSkill && canFallbackToExistingReferencedSkill(nextErrors)) {
+  if (fallbackSkill && canFallbackToExistingReferencedSkill(nextErrors, fallbackSkill, descriptorFiles)) {
     errors.splice(errorStart, nextErrors.length);
     filesForManifest = fallbackSkill.files;
   }
@@ -453,8 +444,12 @@ function canReuseExistingReferencedSkill(
   );
 }
 
-function canFallbackToExistingReferencedSkill(errors: string[]) {
-  if (errors.length === 0) return false;
+function canFallbackToExistingReferencedSkill(
+  errors: string[],
+  fallbackSkill: CatalogSkill,
+  descriptorFiles: string[],
+) {
+  if (errors.length === 0 || !descriptorMatchesFallbackInventory(descriptorFiles, fallbackSkill.files)) return false;
   const hasRecoverableFetchError = errors.some((error) => isRecoverableReferencedFetchError(error));
   return (
     hasRecoverableFetchError &&
@@ -463,6 +458,13 @@ function canFallbackToExistingReferencedSkill(errors: string[]) {
       error.includes("referenced inventory does not contain SKILL.md."),
     )
   );
+}
+
+function descriptorMatchesFallbackInventory(descriptorFiles: string[], fallbackFiles: CatalogSkillFile[]) {
+  if (descriptorFiles.some((file) => file.includes("*"))) return false;
+  const expectedFiles = descriptorFiles.slice().sort();
+  const actualFiles = fallbackFiles.map((file) => file.path).sort();
+  return expectedFiles.length === actualFiles.length && expectedFiles.every((file, index) => file === actualFiles[index]);
 }
 
 function isReferencedFetchError(error: string) {

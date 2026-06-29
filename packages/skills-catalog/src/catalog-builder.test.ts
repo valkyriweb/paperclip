@@ -135,7 +135,7 @@ describe("skills catalog manifest", () => {
     expect(result.manifest.skills[0]!.contentHash).toMatch(/^sha256:[a-f0-9]{64}$/);
   });
 
-  it("reuses the existing manifest entry when a pinned GitHub reference is temporarily unavailable", async () => {
+  it("does not reuse existing inventory when a globbed GitHub reference is temporarily unavailable", async () => {
     const packageDir = await createCatalogPackage();
     await writeReference(packageDir, "optional", "research", "remote-research", {
       source: {
@@ -216,10 +216,10 @@ describe("skills catalog manifest", () => {
       generatedAt: "2026-05-26T00:00:00.000Z",
     });
 
-    expect(result.errors).toEqual([]);
-    expect(result.manifest.skills).toHaveLength(1);
-    expect(result.manifest.skills[0]?.name).toBe("Remote Research");
-    expect(result.manifest.skills[0]?.files.map((file) => file.path)).toEqual(["SKILL.md", "scripts/run.py"]);
+    expect(result.errors).toEqual(expect.arrayContaining([
+      expect.stringContaining("failed to fetch GitHub tree: HTTP 403"),
+    ]));
+    expect(result.manifest.skills).toHaveLength(0);
   });
 
   it("reuses the existing file inventory when GitHub tree fetch fails after reading SKILL.md", async () => {
@@ -234,7 +234,7 @@ describe("skills catalog manifest", () => {
         commit: "0123456789abcdef0123456789abcdef01234567",
         path: "skills/remote-research",
       },
-      files: ["SKILL.md", "scripts/**"],
+      files: ["SKILL.md", "scripts/run.py"],
       recommendedForRoles: ["researcher"],
       tags: ["research"],
     });
