@@ -222,6 +222,105 @@ describe("skills catalog manifest", () => {
     expect(result.manifest.skills[0]?.files.map((file) => file.path)).toEqual(["SKILL.md", "scripts/run.py"]);
   });
 
+  it("reuses the existing manifest entry when GitHub tree fetch fails after reading SKILL.md", async () => {
+    const packageDir = await createCatalogPackage();
+    await writeReference(packageDir, "optional", "research", "remote-research", {
+      source: {
+        type: "github",
+        hostname: "github.com",
+        owner: "example",
+        repo: "remote-skill",
+        ref: "v1.0.0",
+        commit: "0123456789abcdef0123456789abcdef01234567",
+        path: "skills/remote-research",
+      },
+      files: ["SKILL.md", "scripts/**"],
+      recommendedForRoles: ["researcher"],
+      tags: ["research"],
+    });
+    await fs.mkdir(path.join(packageDir, "generated"), { recursive: true });
+    await fs.writeFile(
+      path.join(packageDir, "generated", "catalog.json"),
+      formatCatalogManifest({
+        schemaVersion: 1,
+        packageName: "@paperclipai/skills-catalog",
+        packageVersion: "0.3.1",
+        generatedAt: "2026-05-26T00:00:00.000Z",
+        skills: [{
+          id: "paperclipai:optional:research:remote-research",
+          key: "paperclipai/optional/research/remote-research",
+          kind: "optional",
+          category: "research",
+          slug: "remote-research",
+          name: "Remote Research",
+          description: "Research recent discussion from a pinned upstream skill.",
+          path: "catalog/optional/research/remote-research",
+          entrypoint: "SKILL.md",
+          trustLevel: "scripts_executables",
+          compatibility: "compatible",
+          defaultInstall: false,
+          recommendedForRoles: ["researcher"],
+          requires: [],
+          tags: ["research"],
+          files: [
+            {
+              path: "SKILL.md",
+              kind: "skill",
+              sizeBytes: 128,
+              sha256: "a".repeat(64),
+            },
+            {
+              path: "scripts/run.py",
+              kind: "script",
+              sizeBytes: 14,
+              sha256: "b".repeat(64),
+            },
+          ],
+          contentHash: `sha256:${"c".repeat(64)}`,
+          source: {
+            type: "github",
+            hostname: "github.com",
+            owner: "example",
+            repo: "remote-skill",
+            ref: "v1.0.0",
+            commit: "0123456789abcdef0123456789abcdef01234567",
+            path: "skills/remote-research",
+            url: "https://github.com/example/remote-skill/tree/v1.0.0/skills/remote-research",
+          },
+        }],
+      }),
+      "utf8",
+    );
+    const skillMarkdown = [
+      "---",
+      "name: Remote Research",
+      "description: Research recent discussion from a pinned upstream skill.",
+      "---",
+      "",
+      "Use this skill.",
+      "",
+    ].join("\n");
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.includes("/git/trees/")) {
+        return new Response("forbidden", { status: 403 });
+      }
+      if (url.endsWith("/skills/remote-research/SKILL.md")) {
+        return new Response(skillMarkdown, { status: 200 });
+      }
+      return new Response("not found", { status: 404 });
+    }));
+
+    const result = await buildCatalogManifest({
+      packageDir,
+      generatedAt: "2026-05-26T00:00:00.000Z",
+    });
+
+    expect(result.errors).toEqual([]);
+    expect(result.manifest.skills).toHaveLength(1);
+    expect(result.manifest.skills[0]?.name).toBe("Remote Research");
+    expect(result.manifest.skills[0]?.files.map((file) => file.path)).toEqual(["SKILL.md", "scripts/run.py"]);
+  });
+
   it("reports frontmatter, directory, uniqueness, and inventory errors together", async () => {
     const packageDir = await createCatalogPackage();
     await writeSkill(packageDir, "bundled", "Bad_Category", "duplicate", {
