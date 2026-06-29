@@ -404,10 +404,11 @@ async function buildReferencedCatalogSkill(
     return null;
   }
 
+  let filesForManifest = files;
   const nextErrors = errors.slice(errorStart);
   if (fallbackSkill && canFallbackToExistingReferencedSkill(nextErrors)) {
     errors.splice(errorStart, nextErrors.length);
-    return fallbackSkill;
+    filesForManifest = fallbackSkill.files;
   }
 
   return {
@@ -420,14 +421,14 @@ async function buildReferencedCatalogSkill(
     description,
     path: toPosixPath(path.relative(packageDir, candidate.absolutePath)),
     entrypoint: SKILL_ENTRYPOINT,
-    trustLevel: deriveTrustLevel(files),
+    trustLevel: deriveTrustLevel(filesForManifest),
     compatibility: "compatible",
     defaultInstall,
     recommendedForRoles,
     requires,
     tags,
-    files,
-    contentHash: buildContentHash(files),
+    files: filesForManifest,
+    contentHash: buildContentHash(filesForManifest),
     source,
   };
 }

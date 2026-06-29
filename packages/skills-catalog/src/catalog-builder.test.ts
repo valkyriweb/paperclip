@@ -172,9 +172,9 @@ describe("skills catalog manifest", () => {
           trustLevel: "scripts_executables",
           compatibility: "compatible",
           defaultInstall: false,
-          recommendedForRoles: ["researcher"],
-          requires: [],
-          tags: ["research"],
+          recommendedForRoles: ["stale-role"],
+          requires: ["stale-requirement"],
+          tags: ["stale-tag"],
           files: [
             {
               path: "SKILL.md",
@@ -222,7 +222,7 @@ describe("skills catalog manifest", () => {
     expect(result.manifest.skills[0]?.files.map((file) => file.path)).toEqual(["SKILL.md", "scripts/run.py"]);
   });
 
-  it("reuses the existing manifest entry when GitHub tree fetch fails after reading SKILL.md", async () => {
+  it("reuses the existing file inventory when GitHub tree fetch fails after reading SKILL.md", async () => {
     const packageDir = await createCatalogPackage();
     await writeReference(packageDir, "optional", "research", "remote-research", {
       source: {
@@ -259,9 +259,9 @@ describe("skills catalog manifest", () => {
           trustLevel: "scripts_executables",
           compatibility: "compatible",
           defaultInstall: false,
-          recommendedForRoles: ["researcher"],
-          requires: [],
-          tags: ["research"],
+          recommendedForRoles: ["stale-role"],
+          requires: ["stale-requirement"],
+          tags: ["stale-tag"],
           files: [
             {
               path: "SKILL.md",
@@ -318,6 +318,8 @@ describe("skills catalog manifest", () => {
     expect(result.errors).toEqual([]);
     expect(result.manifest.skills).toHaveLength(1);
     expect(result.manifest.skills[0]?.name).toBe("Remote Research");
+    expect(result.manifest.skills[0]?.recommendedForRoles).toEqual(["researcher"]);
+    expect(result.manifest.skills[0]?.tags).toEqual(["research"]);
     expect(result.manifest.skills[0]?.files.map((file) => file.path)).toEqual(["SKILL.md", "scripts/run.py"]);
   });
 
