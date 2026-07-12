@@ -72,13 +72,20 @@ COPY docker/otel/traceloop-init.js /opt/otel/preload/traceloop-init.js
 
 # Install 1Password CLI (op) so agents can read secrets from 1Password vaults
 # via OP_SERVICE_ACCOUNT_TOKEN without needing a workstation port-forward.
+ARG TARGETARCH=amd64
 ARG OP_CLI_VERSION=2.34.1
-ARG OP_CLI_SHA256=b13ed106335419ea0fb0ebd7ebbb3b48cf26a2f214eb4b2fd8d950548e7980ed
-RUN apt-get update \
+ARG OP_CLI_SHA256_AMD64=b13ed106335419ea0fb0ebd7ebbb3b48cf26a2f214eb4b2fd8d950548e7980ed
+ARG OP_CLI_SHA256_ARM64=fd730a28ffa68376ac62b563d30e20e30ef59d3e2f142d9c6a959cfac5b50f60
+RUN case "${TARGETARCH}" in \
+      amd64) op_arch=amd64; op_sha="${OP_CLI_SHA256_AMD64}" ;; \
+      arm64) op_arch=arm64; op_sha="${OP_CLI_SHA256_ARM64}" ;; \
+      *) echo "Unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+  && apt-get update \
   && apt-get install -y --no-install-recommends openssh-client jq unzip \
   && curl -sSfLo /tmp/op.zip \
-      "https://cache.agilebits.com/dist/1P/op2/pkg/v${OP_CLI_VERSION}/op_linux_amd64_v${OP_CLI_VERSION}.zip" \
-  && echo "${OP_CLI_SHA256}  /tmp/op.zip" | sha256sum -c - \
+      "https://cache.agilebits.com/dist/1P/op2/pkg/v${OP_CLI_VERSION}/op_linux_${op_arch}_v${OP_CLI_VERSION}.zip" \
+  && echo "${op_sha}  /tmp/op.zip" | sha256sum -c - \
   && unzip -oj /tmp/op.zip op -d /usr/local/bin \
   && chmod +x /usr/local/bin/op \
   && rm /tmp/op.zip \
