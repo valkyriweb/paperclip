@@ -25,14 +25,17 @@ GOOGLE_ADS_CLIENT_SECRET=...
 GOOGLE_ADS_REFRESH_TOKEN=...
 # Choose exactly one GA4 mode:
 GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/google-ga4-service-account.json
-# or the existing GOOGLE_ADS_CLIENT_ID / GOOGLE_ADS_CLIENT_SECRET /
-# GOOGLE_ADS_REFRESH_TOKEN OAuth tuple, authorized for analytics.readonly
+# or a dedicated OAuth tuple authorized for analytics.readonly:
+GOOGLE_ANALYTICS_CLIENT_ID=...
+GOOGLE_ANALYTICS_CLIENT_SECRET=...
+GOOGLE_ANALYTICS_REFRESH_TOKEN=...
+# A combined GOOGLE_ADS_* OAuth tuple carrying analytics.readonly also works.
 PAPERCLIP_MEASUREMENT_PYTHON=/opt/google-ads-python/bin/python
 ```
 
 `PAPERCLIP_MEASUREMENT_CONFIG` is a non-secret allowlist. `googleAdsLoginCustomerId` is optional, numeric, and is passed only to the Google Ads client as `login_customer_id` (for manager-account access). The feature fails closed, at request time, if configuration is omitted, malformed, missing the requesting company, or missing the chosen provider's IDs; it never prevents Paperclip from starting.
 
-GA4 has exactly two mutually exclusive server-side credential modes: ADC/service-account credentials through `GOOGLE_APPLICATION_CREDENTIALS`, or the existing Ads OAuth client-id/client-secret/refresh-token tuple authorized with `analytics.readonly`. Configuring any OAuth value alongside ADC is rejected.
+GA4 has two mutually exclusive server-side credential modes: ADC/service-account credentials through `GOOGLE_APPLICATION_CREDENTIALS`, or OAuth credentials authorized with `analytics.readonly`. Prefer the dedicated `GOOGLE_ANALYTICS_CLIENT_ID` / `GOOGLE_ANALYTICS_CLIENT_SECRET` / `GOOGLE_ANALYTICS_REFRESH_TOKEN` tuple when Ads and Analytics use different grants; a combined `GOOGLE_ADS_*` tuple remains supported. Configuring OAuth alongside ADC is rejected.
 
 The Google credential variables, GA4 service-account path, measurement configuration, provider Python path, selected allowlist, and Ads login customer ID are explicit server-only values. The `pi_local` adapter removes every one from both local and remote spawned Pi environments; Pi only receives its normal Paperclip agent token and calls `POST /api/companies/:companyId/measurement/query`.
 

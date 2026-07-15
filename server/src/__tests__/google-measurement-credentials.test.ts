@@ -31,7 +31,18 @@ function ga4Credentials(env: Record<string, string>) {
 }
 
 describe("GA4 credential modes", () => {
-  it("uses the existing Ads OAuth tuple with analytics.readonly", () => {
+  it("prefers a dedicated Analytics OAuth tuple", () => {
+    expect(ga4Credentials({
+      GOOGLE_ANALYTICS_CLIENT_ID: "analytics-client-id",
+      GOOGLE_ANALYTICS_CLIENT_SECRET: "analytics-client-secret",
+      GOOGLE_ANALYTICS_REFRESH_TOKEN: "analytics-refresh-token",
+      GOOGLE_ADS_CLIENT_ID: "ads-client-id",
+      GOOGLE_ADS_CLIENT_SECRET: "ads-client-secret",
+      GOOGLE_ADS_REFRESH_TOKEN: "ads-refresh-token",
+    })).toEqual({ mode: "oauth", scopes: ["https://www.googleapis.com/auth/analytics.readonly"], refresh: "analytics-refresh-token" });
+  });
+
+  it("supports a combined Ads OAuth tuple authorized for analytics.readonly", () => {
     expect(ga4Credentials({
       GOOGLE_ADS_CLIENT_ID: "client-id",
       GOOGLE_ADS_CLIENT_SECRET: "client-secret",
@@ -42,9 +53,9 @@ describe("GA4 credential modes", () => {
   it("rejects mixed ADC and OAuth modes", () => {
     expect(ga4Credentials({
       GOOGLE_APPLICATION_CREDENTIALS: "/server/account.json",
-      GOOGLE_ADS_CLIENT_ID: "client-id",
-      GOOGLE_ADS_CLIENT_SECRET: "client-secret",
-      GOOGLE_ADS_REFRESH_TOKEN: "refresh-token",
+      GOOGLE_ANALYTICS_CLIENT_ID: "client-id",
+      GOOGLE_ANALYTICS_CLIENT_SECRET: "client-secret",
+      GOOGLE_ANALYTICS_REFRESH_TOKEN: "refresh-token",
     })).toEqual({ error: "GA4 credential modes are mutually exclusive" });
   });
 });

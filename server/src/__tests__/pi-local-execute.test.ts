@@ -50,7 +50,7 @@ async function writeMeasurementPiCommand(commandPath: string, capturePath: strin
   const script = `#!/usr/bin/env node
 const fs = require("node:fs");
 if (process.argv.includes("--list-models")) { console.log("provider  model"); console.log("google    gemini-3-flash-preview"); process.exit(0); }
-const serverOnlyKeys = ["PAPERCLIP_MEASUREMENT_CONFIG", "PAPERCLIP_MEASUREMENT_PYTHON", "PAPERCLIP_MEASUREMENT_ALLOWED_IDS", "PAPERCLIP_MEASUREMENT_GOOGLE_ADS_LOGIN_CUSTOMER_ID", "GOOGLE_ADS_DEVELOPER_TOKEN", "GOOGLE_ADS_CLIENT_ID", "GOOGLE_ADS_CLIENT_SECRET", "GOOGLE_ADS_REFRESH_TOKEN", "GOOGLE_APPLICATION_CREDENTIALS"];
+const serverOnlyKeys = ["PAPERCLIP_MEASUREMENT_CONFIG", "PAPERCLIP_MEASUREMENT_PYTHON", "PAPERCLIP_MEASUREMENT_ALLOWED_IDS", "PAPERCLIP_MEASUREMENT_GOOGLE_ADS_LOGIN_CUSTOMER_ID", "GOOGLE_ADS_DEVELOPER_TOKEN", "GOOGLE_ADS_CLIENT_ID", "GOOGLE_ADS_CLIENT_SECRET", "GOOGLE_ADS_REFRESH_TOKEN", "GOOGLE_ANALYTICS_CLIENT_ID", "GOOGLE_ANALYTICS_CLIENT_SECRET", "GOOGLE_ANALYTICS_REFRESH_TOKEN", "GOOGLE_APPLICATION_CREDENTIALS"];
 fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({ args: process.argv.slice(2), env: Object.fromEntries(serverOnlyKeys.map((key) => [key, process.env[key]])) }));
 console.log(JSON.stringify({ type: "turn_end", message: { role: "assistant", content: "" }, toolResults: [] }));
 `;
@@ -121,6 +121,9 @@ describe("pi_local execute", () => {
       GOOGLE_ADS_CLIENT_ID: "client-id",
       GOOGLE_ADS_CLIENT_SECRET: "client-secret",
       GOOGLE_ADS_REFRESH_TOKEN: "refresh-token",
+      GOOGLE_ANALYTICS_CLIENT_ID: "analytics-client-id",
+      GOOGLE_ANALYTICS_CLIENT_SECRET: "analytics-client-secret",
+      GOOGLE_ANALYTICS_REFRESH_TOKEN: "analytics-refresh-token",
       GOOGLE_APPLICATION_CREDENTIALS: "/server/service-account.json",
     };
     const previousEnv = Object.fromEntries(Object.keys(serverOnlyEnv).map((key) => [key, process.env[key]]));

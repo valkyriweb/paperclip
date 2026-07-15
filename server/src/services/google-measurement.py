@@ -35,8 +35,11 @@ def ads(request, ids):
 
 def ga4_credentials():
     has_adc = bool(os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"))
-    oauth_names = ("GOOGLE_ADS_CLIENT_ID", "GOOGLE_ADS_CLIENT_SECRET", "GOOGLE_ADS_REFRESH_TOKEN")
-    oauth_values = [os.environ.get(name) for name in oauth_names]
+    analytics_names = ("GOOGLE_ANALYTICS_CLIENT_ID", "GOOGLE_ANALYTICS_CLIENT_SECRET", "GOOGLE_ANALYTICS_REFRESH_TOKEN")
+    ads_names = ("GOOGLE_ADS_CLIENT_ID", "GOOGLE_ADS_CLIENT_SECRET", "GOOGLE_ADS_REFRESH_TOKEN")
+    analytics_values = [os.environ.get(name) for name in analytics_names]
+    ads_values = [os.environ.get(name) for name in ads_names]
+    oauth_values = analytics_values if any(analytics_values) else ads_values
     has_oauth = any(oauth_values)
     if has_adc and has_oauth:
         raise RuntimeError("GA4 credential modes are mutually exclusive")
