@@ -91,6 +91,8 @@ export interface PreparedAdapterExecutionTargetRuntime {
 export interface AdapterExecutionTargetProcessOptions {
   cwd: string;
   env: Record<string, string>;
+  /** Remove inherited server variables before spawning a local child. */
+  envRemove?: string[];
   stdin?: string;
   timeoutSec: number;
   graceSec: number;
@@ -439,8 +441,14 @@ export async function runAdapterExecutionTargetProcess(
     const runLogTail = options.runLogTail?.create() ?? null;
     let execCommand = command;
     let execArgs = args;
+    if (options.envRemove?.length) {
+      const unsetKeys = options.envRemove.filter((key) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(key));
+      if (unsetKeys.length !== options.envRemove.length) throw new Error("Invalid environment variable removal key");
+      execCommand = "sh";
+      execArgs = ["-c", `unset ${unsetKeys.join(" ")}; exec \"$@\"`, "paperclip-env", command, ...args];
+    }
     if (runLogTail) {
-      ({ command: execCommand, args: execArgs } = runLogTail.wrapCommand(command, args));
+      ({ command: execCommand, args: execArgs } = runLogTail.wrapCommand(execCommand, execArgs));
       runLogTail.start(options.onLog);
     }
     try {
@@ -478,6 +486,7 @@ export async function runAdapterExecutionTargetProcess(
   return await runChildProcess(runId, command, args, {
     cwd: options.cwd,
     env,
+    envRemove: options.envRemove,
     stdin: options.stdin,
     timeoutSec: options.timeoutSec,
     graceSec: options.graceSec,

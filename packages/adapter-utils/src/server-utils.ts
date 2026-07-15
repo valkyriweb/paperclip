@@ -1984,6 +1984,7 @@ async function resolveSpawnTarget(
   options: {
     remoteExecution?: RemoteExecutionSpec | null;
     remoteEnv?: Record<string, string> | null;
+    remoteEnvRemove?: string[];
   } = {},
 ): Promise<SpawnTarget> {
   const remote = options.remoteExecution ?? null;
@@ -1999,6 +2000,7 @@ async function resolveSpawnTarget(
       env: Object.fromEntries(
         Object.entries(options.remoteEnv ?? {}).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
       ),
+      envRemove: options.remoteEnvRemove,
     });
     return {
       command: sshResolved,
@@ -2818,6 +2820,7 @@ export async function runChildProcess(
   opts: {
     cwd: string;
     env: Record<string, string>;
+    envRemove?: string[];
     timeoutSec: number;
     graceSec: number;
     onLog: (stream: "stdout" | "stderr", chunk: string) => Promise<void>;
@@ -2834,6 +2837,7 @@ export async function runChildProcess(
       ...sanitizeInheritedPaperclipEnv(process.env),
       ...opts.env,
     };
+    for (const key of opts.envRemove ?? []) delete rawMerged[key];
 
     // Strip Claude Code nesting-guard env vars so spawned `claude` processes
     // don't refuse to start with "cannot be launched inside another session".
@@ -2854,6 +2858,7 @@ export async function runChildProcess(
     void resolveSpawnTarget(command, args, opts.cwd, mergedEnv, {
       remoteExecution: opts.remoteExecution ?? null,
       remoteEnv: opts.remoteExecution ? opts.env : null,
+      remoteEnvRemove: opts.remoteExecution ? opts.envRemove : undefined,
     })
       .then((target) => {
         const child = spawn(target.command, target.args, {

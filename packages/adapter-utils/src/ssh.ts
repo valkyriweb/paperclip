@@ -33,6 +33,7 @@ export interface SshCommandResult {
 
 export interface SshRemoteExecutionSpec extends SshConnectionConfig {
   remoteCwd: string;
+  envRemove?: string[];
 }
 
 export function createSshCommandManagedRuntimeRunner(input: {
@@ -1207,12 +1208,13 @@ export async function buildSshSpawnTarget(input: {
   command: string;
   args: string[];
   env: Record<string, string>;
+  envRemove?: string[];
 }): Promise<{
   command: string;
   args: string[];
   cleanup: () => Promise<void>;
 }> {
-  for (const key of Object.keys(input.env)) {
+  for (const key of [...Object.keys(input.env), ...(input.envRemove ?? [])]) {
     if (!isValidShellEnvKey(key)) {
       throw new Error(`Invalid SSH environment variable key: ${key}`);
     }
@@ -1229,6 +1231,7 @@ export async function buildSshSpawnTarget(input: {
     'if [ -f "$HOME/.zprofile" ]; then . "$HOME/.zprofile" >/dev/null 2>&1 || true; fi',
     'export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"',
     '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" >/dev/null 2>&1 || true',
+    ...(input.envRemove?.length ? [`unset ${input.envRemove.join(" ")}`] : []),
     `cd ${shellQuote(input.spec.remoteCwd)}`,
     envArgs.length > 0
       ? `exec env ${envArgs.join(" ")} ${remoteCommandParts}`
