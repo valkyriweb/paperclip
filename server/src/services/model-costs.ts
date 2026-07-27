@@ -6,7 +6,18 @@ export interface ModelCostInput {
   model?: string | null;
   inputTokens?: number | null;
   cachedInputTokens?: number | null;
+  cacheCreationInputTokens?: number | null;
   outputTokens?: number | null;
+  /**
+   * Whether `inputTokens` already contains `cachedInputTokens`.
+   *
+   * This is a property of the SOURCE, not the model: gpt-5.5 billed straight
+   * from OpenAI bundles cached reads into prompt tokens, while the same model
+   * through the OpenClaw gateway reports them separately (upstream computes
+   * `input + cacheRead + cacheWrite`). An adapter that knows its own shape
+   * should say so; the per-model default is only a guess for callers that do not.
+   */
+  cachedTokensIncludedInInput?: boolean;
 }
 
 interface ModelRates {
@@ -14,7 +25,17 @@ interface ModelRates {
   cachedInputMicrosPerMillion: number;
   outputMicrosPerMillion: number;
   cachedTokensIncludedInInput?: boolean;
+  /**
+   * Cache writes priced as a multiple of the input rate. Anthropic charges
+   * 1.25x; the OpenAI-lane models bill nothing for a cache write, so they set 0.
+   * Kept as a multiplier rather than an absolute rate so it cannot drift out of
+   * step with the input rate it derives from.
+   */
+  cacheWriteMultiplier?: number;
 }
+
+/** Anthropic's published cache-write premium, and the sane default elsewhere. */
+const DEFAULT_CACHE_WRITE_MULTIPLIER = 1.25;
 
 const MODEL_RATES: Array<{ match: RegExp; rates: ModelRates }> = [
   {
@@ -60,6 +81,7 @@ const MODEL_RATES: Array<{ match: RegExp; rates: ModelRates }> = [
       inputMicrosPerMillion: 1_000_000,
       cachedInputMicrosPerMillion: 100_000,
       outputMicrosPerMillion: 6_000_000,
+      cacheWriteMultiplier: 0,
     },
   },
   {
@@ -68,6 +90,7 @@ const MODEL_RATES: Array<{ match: RegExp; rates: ModelRates }> = [
       inputMicrosPerMillion: 2_500_000,
       cachedInputMicrosPerMillion: 250_000,
       outputMicrosPerMillion: 15_000_000,
+      cacheWriteMultiplier: 0,
     },
   },
   {
@@ -78,6 +101,7 @@ const MODEL_RATES: Array<{ match: RegExp; rates: ModelRates }> = [
       inputMicrosPerMillion: 5_000_000,
       cachedInputMicrosPerMillion: 500_000,
       outputMicrosPerMillion: 30_000_000,
+      cacheWriteMultiplier: 0,
     },
   },
   {
@@ -86,6 +110,7 @@ const MODEL_RATES: Array<{ match: RegExp; rates: ModelRates }> = [
       inputMicrosPerMillion: 5_000_000,
       cachedInputMicrosPerMillion: 500_000,
       outputMicrosPerMillion: 30_000_000,
+      cacheWriteMultiplier: 0,
       cachedTokensIncludedInInput: true,
     },
   },
@@ -95,6 +120,7 @@ const MODEL_RATES: Array<{ match: RegExp; rates: ModelRates }> = [
       inputMicrosPerMillion: 2_500_000,
       cachedInputMicrosPerMillion: 250_000,
       outputMicrosPerMillion: 15_000_000,
+      cacheWriteMultiplier: 0,
       cachedTokensIncludedInInput: true,
     },
   },
@@ -104,6 +130,7 @@ const MODEL_RATES: Array<{ match: RegExp; rates: ModelRates }> = [
       inputMicrosPerMillion: 400_000,
       cachedInputMicrosPerMillion: 100_000,
       outputMicrosPerMillion: 1_600_000,
+      cacheWriteMultiplier: 0,
       cachedTokensIncludedInInput: true,
     },
   },
@@ -136,13 +163,21 @@ function estimateKnownModelCostCents(input: ModelCostInput): number {
   if (!match) return 0;
 
   const cachedInputTokens = nonNegative(input.cachedInputTokens);
-  const inputTokens = match.rates.cachedTokensIncludedInInput
+  const cacheCreationInputTokens = nonNegative(input.cacheCreationInputTokens);
+  // The caller knows its own payload shape; the model table is only the default.
+  const cachedIncludedInInput =
+    input.cachedTokensIncludedInInput ?? match.rates.cachedTokensIncludedInInput ?? false;
+  const inputTokens = cachedIncludedInInput
     ? Math.max(0, nonNegative(input.inputTokens) - cachedInputTokens)
     : nonNegative(input.inputTokens);
   const outputTokens = nonNegative(input.outputTokens);
+  const cacheWriteMicrosPerMillion =
+    match.rates.inputMicrosPerMillion *
+    (match.rates.cacheWriteMultiplier ?? DEFAULT_CACHE_WRITE_MULTIPLIER);
   const microDollars =
     tokenMicros(inputTokens, match.rates.inputMicrosPerMillion) +
     tokenMicros(cachedInputTokens, match.rates.cachedInputMicrosPerMillion) +
+    tokenMicros(cacheCreationInputTokens, cacheWriteMicrosPerMillion) +
     tokenMicros(outputTokens, match.rates.outputMicrosPerMillion);
   return Math.max(0, Math.round(microDollars / 10_000));
 }

@@ -69,6 +69,7 @@ export function costService(db: Db, budgetHooks: BudgetServiceHooks = {}) {
 
       const billingType = data.billingType ?? "unknown";
       const cachedInputTokens = data.cachedInputTokens ?? 0;
+      const cacheCreationInputTokens = data.cacheCreationInputTokens ?? 0;
       const costCents = resolveCostEventCostCents({
         costCents: data.costCents,
         billingType,
@@ -76,6 +77,7 @@ export function costService(db: Db, budgetHooks: BudgetServiceHooks = {}) {
         model: data.model,
         inputTokens: data.inputTokens,
         cachedInputTokens,
+        cacheCreationInputTokens,
         outputTokens: data.outputTokens,
       });
 
@@ -87,6 +89,7 @@ export function costService(db: Db, budgetHooks: BudgetServiceHooks = {}) {
           biller: data.biller ?? data.provider,
           billingType,
           cachedInputTokens,
+          cacheCreationInputTokens,
           costCents,
         })
         .returning()
