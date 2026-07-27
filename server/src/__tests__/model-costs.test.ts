@@ -278,4 +278,24 @@ describe("cached-token input semantics", () => {
   it("still nets cached tokens out when the source bundles them", () => {
     expect(resolveModelCostCents({ ...base, cachedTokensIncludedInInput: true })).toBe(320);
   });
+
+  it("does not bill a bundled cache write twice on a cache-write-priced model", () => {
+    // Claude models carry the 1.25x cache-write multiplier. A caller declaring
+    // the bundled shape means input already contains both cache buckets, so a
+    // write must be priced once at 1.25x -- not also at the input rate.
+    //
+    // 1M input total = 600k true input + 200k cached read + 200k cache write.
+    // $3/1M x 600k + $0.30/1M x 200k + $3.75/1M x 200k = $1.80 + $0.06 + $0.75 = $2.61.
+    const cost = resolveModelCostCents({
+      ...base,
+      model: "clawrouter/claude-sonnet-5",
+      inputTokens: 1_000_000,
+      cachedInputTokens: 200_000,
+      cacheCreationInputTokens: 200_000,
+      cachedTokensIncludedInInput: true,
+    });
+    // Without subtracting the write bucket the 200k would also be billed at the
+    // input rate, inflating this to 321.
+    expect(cost).toBe(261);
+  });
 });

@@ -52,7 +52,17 @@ async function getMonthlySpendTotal(
 export function costService(db: Db, budgetHooks: BudgetServiceHooks = {}) {
   const budgets = budgetService(db, budgetHooks);
   return {
-    createEvent: async (companyId: string, data: Omit<typeof costEvents.$inferInsert, "companyId">) => {
+    createEvent: async (
+      companyId: string,
+      data: Omit<typeof costEvents.$inferInsert, "companyId"> & {
+        /**
+         * Route-level shape hint, not a column: whether `inputTokens` already
+         * includes the cache buckets. Destructured out before the insert.
+         */
+        cachedTokensIncludedInInput?: boolean;
+      },
+    ) => {
+      const { cachedTokensIncludedInInput, ...row } = data;
       const agent = await db
         .select()
         .from(agents)
@@ -79,12 +89,13 @@ export function costService(db: Db, budgetHooks: BudgetServiceHooks = {}) {
         cachedInputTokens,
         cacheCreationInputTokens,
         outputTokens: data.outputTokens,
+        cachedTokensIncludedInInput,
       });
 
       const event = await db
         .insert(costEvents)
         .values({
-          ...data,
+          ...row,
           companyId,
           biller: data.biller ?? data.provider,
           billingType,

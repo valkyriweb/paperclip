@@ -16,6 +16,9 @@ export interface ModelCostInput {
    * through the OpenClaw gateway reports them separately (upstream computes
    * `input + cacheRead + cacheWrite`). An adapter that knows its own shape
    * should say so; the per-model default is only a guess for callers that do not.
+   *
+   * True means the reported input total is inclusive of both cache buckets
+   * (reads and writes), matching that `input + cacheRead + cacheWrite` sum.
    */
   cachedTokensIncludedInInput?: boolean;
 }
@@ -167,8 +170,12 @@ function estimateKnownModelCostCents(input: ModelCostInput): number {
   // The caller knows its own payload shape; the model table is only the default.
   const cachedIncludedInInput =
     input.cachedTokensIncludedInInput ?? match.rates.cachedTokensIncludedInInput ?? false;
+  // When the source folds cache tokens into its input total it folds in *both*
+  // buckets, so both come back out before input is priced. Subtracting only the
+  // reads would bill a cache write twice: once at the input rate, then again at
+  // the cache-write multiplier below.
   const inputTokens = cachedIncludedInInput
-    ? Math.max(0, nonNegative(input.inputTokens) - cachedInputTokens)
+    ? Math.max(0, nonNegative(input.inputTokens) - cachedInputTokens - cacheCreationInputTokens)
     : nonNegative(input.inputTokens);
   const outputTokens = nonNegative(input.outputTokens);
   const cacheWriteMicrosPerMillion =
