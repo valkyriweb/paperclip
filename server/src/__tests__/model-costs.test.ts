@@ -126,3 +126,35 @@ describe("resolveCostEventCostCents", () => {
     ).toBe(801);
   });
 });
+
+describe("fleet model rate coverage (fork)", () => {
+  const tokens = { inputTokens: 1_000_000, cachedInputTokens: 0, outputTokens: 1_000_000 };
+
+  it.each([
+    "clawrouter/claude-opus-5-200k",
+    "clawrouter/gpt-5.6-terra",
+    "clawrouter/gpt-5.6-sol",
+  ])("estimates non-zero subscription cost for %s", (model) => {
+    expect(
+      resolveCostEventCostCents({
+        costCents: 0,
+        billingType: "subscription_included",
+        provider: "clawrouter",
+        model,
+        ...tokens,
+      }),
+    ).toBeGreaterThan(0);
+  });
+
+  it("still records zero when the billing type is unknown", () => {
+    expect(
+      resolveCostEventCostCents({
+        costCents: 0,
+        billingType: "unknown",
+        provider: "clawrouter",
+        model: "clawrouter/gpt-5.6-terra",
+        ...tokens,
+      }),
+    ).toBe(0);
+  });
+});

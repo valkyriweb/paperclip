@@ -18,7 +18,7 @@ interface ModelRates {
 
 const MODEL_RATES: Array<{ match: RegExp; rates: ModelRates }> = [
   {
-    match: /claude-opus-4/i,
+    match: /claude-opus-(4|5)/i,
     rates: {
       inputMicrosPerMillion: 5_000_000,
       cachedInputMicrosPerMillion: 500_000,
@@ -39,6 +39,15 @@ const MODEL_RATES: Array<{ match: RegExp; rates: ModelRates }> = [
       inputMicrosPerMillion: 1_000_000,
       cachedInputMicrosPerMillion: 100_000,
       outputMicrosPerMillion: 5_000_000,
+    },
+  },
+  {
+    match: /gpt-5\.6/i,
+    rates: {
+      inputMicrosPerMillion: 5_000_000,
+      cachedInputMicrosPerMillion: 500_000,
+      outputMicrosPerMillion: 30_000_000,
+      cachedTokensIncludedInInput: true,
     },
   },
   {
