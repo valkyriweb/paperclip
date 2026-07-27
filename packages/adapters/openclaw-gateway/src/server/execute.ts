@@ -991,6 +991,11 @@ export function diffSessionUsage(
   };
 }
 
+// sessions.usage is advertise:false upstream, so a gateway that does not implement it may
+// never answer at all. Billing telemetry is bounded well below the run timeout: a slow or
+// silent usage lookup must not add latency to every run, and it is sampled twice per run.
+const USAGE_LOOKUP_TIMEOUT_MS = 5_000;
+
 async function fetchSessionUsageTotals(
   client: GatewayWsClient,
   sessionKey: string,
@@ -1001,7 +1006,7 @@ async function fetchSessionUsageTotals(
     const payload = await client.request<Record<string, unknown>>(
       "sessions.usage",
       { key: sessionKey },
-      { timeoutMs },
+      { timeoutMs: Math.min(timeoutMs, USAGE_LOOKUP_TIMEOUT_MS) },
     );
     return parseSessionUsageTotals(payload, sessionKey);
   } catch (err) {
