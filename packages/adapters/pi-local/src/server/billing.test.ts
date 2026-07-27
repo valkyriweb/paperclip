@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolvePiBillingType } from "./execute.ts";
+import { resolvePiBillingType } from "./execute.js";
 
 describe("resolvePiBillingType", () => {
   it("marks subscription-backed billers as subscription_included", () => {
