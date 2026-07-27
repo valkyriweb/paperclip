@@ -991,28 +991,44 @@ export function diffSessionUsage(
   };
 }
 
-// sessions.usage is advertise:false upstream, so a gateway that does not implement it may
-// never answer at all. Billing telemetry is bounded well below the run timeout: a slow or
-// silent usage lookup must not add latency to every run, and it is sampled twice per run.
-const USAGE_LOOKUP_TIMEOUT_MS = 5_000;
+// sessions.usage is advertise:false upstream, so it is absent from the connect handshake's
+// method list and cannot be feature-detected. A gateway that does not implement it may never
+// answer at all, so the lookup is bounded well below the run timeout.
+const USAGE_LOOKUP_TIMEOUT_MS = 3_000;
+
+// Once a gateway fails to answer, stop asking it. Otherwise every run on that gateway pays
+// the timeout twice, forever, for telemetry that is never going to arrive.
+const gatewaysWithoutSessionUsage = new Set<string>();
+
+/** Test seam: this cache is process-wide and would otherwise leak between cases. */
+export function resetSessionUsageSupportForTest(): void {
+  gatewaysWithoutSessionUsage.clear();
+}
 
 async function fetchSessionUsageTotals(
   client: GatewayWsClient,
+  gatewayId: string,
   sessionKey: string,
-  timeoutMs: number,
   onLog: (stream: "stdout" | "stderr", chunk: string) => Promise<void> | void,
 ): Promise<SessionUsageTotals | null> {
+  if (gatewaysWithoutSessionUsage.has(gatewayId)) {
+    return null;
+  }
   try {
     const payload = await client.request<Record<string, unknown>>(
       "sessions.usage",
       { key: sessionKey },
-      { timeoutMs: Math.min(timeoutMs, USAGE_LOOKUP_TIMEOUT_MS) },
+      { timeoutMs: USAGE_LOOKUP_TIMEOUT_MS },
     );
     return parseSessionUsageTotals(payload, sessionKey);
   } catch (err) {
-    // Billing telemetry must never fail a run.
+    // Billing telemetry must never fail a run, nor slow down every subsequent one.
+    gatewaysWithoutSessionUsage.add(gatewayId);
     const message = err instanceof Error ? err.message : String(err);
-    await onLog("stdout", `[openclaw-gateway] sessions.usage unavailable: ${message}\n`);
+    await onLog(
+      "stdout",
+      `[openclaw-gateway] sessions.usage unavailable (${message}); usage will not be recorded for ${gatewayId}\n`,
+    );
     return null;
   }
 }
@@ -1381,11 +1397,12 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       );
 
       // Sample cumulative session usage before dispatch so the run's own consumption can be
-      // differenced out afterwards.
-      const sessionUsageBaseline = await fetchSessionUsageTotals(
+      // differenced out afterwards. Deliberately not awaited here: the run is what the user is
+      // waiting on, and this resolves long before it finishes.
+      const sessionUsageBaselinePromise = fetchSessionUsageTotals(
         client,
+        urlValue,
         sessionKey,
-        connectTimeoutMs,
         ctx.onLog,
       );
 
@@ -1514,8 +1531,8 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         usage && costUsd > 0
           ? null
           : diffSessionUsage(
-              sessionUsageBaseline,
-              await fetchSessionUsageTotals(client, sessionKey, connectTimeoutMs, ctx.onLog),
+              await sessionUsageBaselinePromise,
+              await fetchSessionUsageTotals(client, urlValue, sessionKey, ctx.onLog),
             );
       const effectiveUsage = usage ?? parseUsage(sessionUsageDelta);
       const effectiveCostUsd = costUsd > 0 ? costUsd : (sessionUsageDelta?.costUsd ?? 0);
