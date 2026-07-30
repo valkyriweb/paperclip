@@ -1242,7 +1242,7 @@ export interface WorkerToHostMethods {
   "issues.create": [
     params: {
       companyId: string;
-      projectId?: string;
+      projectId?: string | null;
       goalId?: string;
       parentId?: string;
       inheritExecutionWorkspaceFromIssueId?: string;

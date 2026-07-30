@@ -118,7 +118,7 @@ const K8S_IN_CLUSTER_ENV_PASSTHROUGH = [
 ];
 
 export function buildPluginWorkerEnv(input: {
-  manifest: Pick<PaperclipPluginManifestV1, "capabilities">;
+  manifest: Pick<PaperclipPluginManifestV1, "id" | "capabilities">;
   instanceInfo: { deploymentMode?: string | null; deploymentExposure?: string | null };
   processEnv?: NodeJS.ProcessEnv;
 }): Record<string, string> {
@@ -127,14 +127,23 @@ export function buildPluginWorkerEnv(input: {
     PAPERCLIP_DEPLOYMENT_MODE: input.instanceInfo.deploymentMode ?? "",
     PAPERCLIP_DEPLOYMENT_EXPOSURE: input.instanceInfo.deploymentExposure ?? "",
   };
-  const canRegisterEnvironmentDrivers = Array.isArray(input.manifest.capabilities)
-    && input.manifest.capabilities.includes("environment.drivers.register");
-  if (!canRegisterEnvironmentDrivers) return env;
+  const capabilities = Array.isArray(input.manifest.capabilities) ? input.manifest.capabilities : [];
+  if (capabilities.includes("environment.drivers.register")) {
+    for (const key of [...ADAPTER_ENV_PASSTHROUGH, ...K8S_IN_CLUSTER_ENV_PASSTHROUGH]) {
+      const value = processEnv[key];
+      if (value && value.trim().length > 0) {
+        env[key] = value;
+      }
+    }
+  }
 
-  for (const key of [...ADAPTER_ENV_PASSTHROUGH, ...K8S_IN_CLUSTER_ENV_PASSTHROUGH]) {
-    const value = processEnv[key];
-    if (value && value.trim().length > 0) {
-      env[key] = value;
+  if (capabilities.includes("secrets.read-ref")) {
+    // Hex encoding keeps operator-injected fallback secrets collision-free per approved plugin.
+    const pluginPrefix = `PAPERCLIP_PLUGIN_${Buffer.from(input.manifest.id, "utf8").toString("hex").toUpperCase()}_`;
+    for (const [key, value] of Object.entries(processEnv)) {
+      if (key.startsWith(pluginPrefix) && value && value.trim().length > 0) {
+        env[key] = value;
+      }
     }
   }
   return env;

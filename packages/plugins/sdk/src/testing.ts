@@ -2451,7 +2451,8 @@ export function createTestHarness(options: TestHarnessOptions): TestHarness {
         agentId: runCtx.agentId ?? "agent-test",
         runId: runCtx.runId ?? randomUUID(),
         companyId: runCtx.companyId ?? "company-test",
-        projectId: runCtx.projectId ?? "project-test",
+        issueId: "issueId" in runCtx ? runCtx.issueId ?? null : "issue-test",
+        projectId: "projectId" in runCtx ? runCtx.projectId ?? null : "project-test",
       };
       return await handler(params, ctxToPass) as T;
     },

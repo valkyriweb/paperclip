@@ -252,8 +252,10 @@ export interface ToolRunContext {
   runId: string;
   /** UUID of the company the run belongs to. */
   companyId: string;
-  /** UUID of the project the run belongs to. */
-  projectId: string;
+  /** UUID of the issue the run belongs to, when issue-scoped. */
+  issueId: string | null;
+  /** UUID of the project the run belongs to, when project-scoped. */
+  projectId: string | null;
 }
 
 /**
@@ -1346,7 +1348,7 @@ export interface PluginIssuesClient {
   get(issueId: string, companyId: string): Promise<Issue | null>;
   create(input: {
     companyId: string;
-    projectId?: string;
+    projectId?: string | null;
     goalId?: string;
     parentId?: string;
     inheritExecutionWorkspaceFromIssueId?: string;

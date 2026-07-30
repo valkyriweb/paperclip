@@ -31,6 +31,7 @@ import {
   agents,
   companies,
   heartbeatRuns,
+  issues,
   pluginLogs,
   pluginWebhookDeliveries,
   projects,
@@ -452,8 +453,8 @@ interface PluginToolExecuteRequest {
   tool: string;
   /** Parameters matching the tool's declared JSON Schema. */
   parameters?: unknown;
-  /** Agent run context. */
-  runContext: ToolRunContext;
+  /** Explicit run context for board diagnostics. Agent callers use their authenticated run. */
+  runContext?: Partial<ToolRunContext>;
 }
 
 /**
@@ -747,6 +748,69 @@ export function pluginRoutes(
     return companyId === undefined ? base : { ...base, companyId };
   }
 
+  type ToolContextResolution =
+    | { context: ToolRunContext }
+    | { status: 400 | 403 | 422; error: string };
+
+  function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+  }
+
+  function readOptionalToolContextId(
+    source: Record<string, unknown>,
+    key: "issueId" | "projectId" | "taskId",
+    sourceName: string,
+  ): { value: string | null } | { error: string } {
+    const value = source[key];
+    if (value === undefined || value === null) return { value: null };
+    if (typeof value !== "string" || value.trim().length === 0) {
+      return { error: `"${sourceName}.${key}" must be a non-empty string or null` };
+    }
+    return { value: value.trim() };
+  }
+
+  function normalizeSuppliedToolRunContext(
+    input: unknown,
+    requireIdentity: boolean,
+  ): { context?: Partial<ToolRunContext>; error?: string } {
+    if (input === undefined && !requireIdentity) return { context: undefined };
+    if (!isRecord(input)) {
+      return { error: '"runContext" must be an object' };
+    }
+
+    const context: Partial<ToolRunContext> = {};
+    for (const key of ["agentId", "runId", "companyId"] as const) {
+      const value = input[key];
+      if (value === undefined && !requireIdentity) continue;
+      if (typeof value !== "string" || value.trim().length === 0) {
+        return { error: `"runContext.${key}" must be a non-empty string` };
+      }
+      context[key] = value.trim();
+    }
+
+    for (const key of ["issueId", "projectId"] as const) {
+      if (!(key in input)) continue;
+      const parsed = readOptionalToolContextId(input, key, "runContext");
+      if ("error" in parsed) return parsed;
+      context[key] = parsed.value;
+    }
+
+    return { context };
+  }
+
+  function suppliedToolContextMismatch(
+    supplied: Partial<ToolRunContext> | undefined,
+    authoritative: ToolRunContext,
+  ): string | null {
+    if (!supplied) return null;
+    for (const key of ["agentId", "runId", "companyId", "issueId", "projectId"] as const) {
+      if (supplied[key] !== undefined && supplied[key] !== authoritative[key]) {
+        return `"runContext.${key}" does not match the authenticated agent run`;
+      }
+    }
+    return null;
+  }
+
   async function validateToolRunContextScope(runContext: ToolRunContext): Promise<string | null> {
     const [agent] = await db
       .select({ companyId: agents.companyId })
@@ -769,16 +833,111 @@ export function pluginRoutes(
       return '"runContext.runId" does not belong to "runContext.agentId"';
     }
 
-    const [project] = await db
-      .select({ companyId: projects.companyId })
-      .from(projects)
-      .where(eq(projects.id, runContext.projectId))
-      .limit(1);
-    if (!project || project.companyId !== runContext.companyId) {
-      return '"runContext.projectId" does not belong to "runContext.companyId"';
+    if (runContext.issueId) {
+      const [issue] = await db
+        .select({ companyId: issues.companyId, projectId: issues.projectId })
+        .from(issues)
+        .where(eq(issues.id, runContext.issueId))
+        .limit(1);
+      if (!issue || issue.companyId !== runContext.companyId) {
+        return '"runContext.issueId" does not belong to "runContext.companyId"';
+      }
+      if (issue.projectId !== runContext.projectId) {
+        return '"runContext.projectId" does not match "runContext.issueId"';
+      }
+      return null;
+    }
+
+    if (runContext.projectId) {
+      const [project] = await db
+        .select({ companyId: projects.companyId })
+        .from(projects)
+        .where(eq(projects.id, runContext.projectId))
+        .limit(1);
+      if (!project || project.companyId !== runContext.companyId) {
+        return '"runContext.projectId" does not belong to "runContext.companyId"';
+      }
     }
 
     return null;
+  }
+
+  async function authenticatedAgentToolRunContext(
+    req: Request,
+    supplied: Partial<ToolRunContext> | undefined,
+  ): Promise<ToolContextResolution> {
+    const actor = req.actor;
+    if (actor.type !== "agent") {
+      return { status: 403, error: "Authenticated agent context is unavailable" };
+    }
+    const runId = actor.runId?.trim();
+    if (!runId) {
+      return { status: 400, error: "Authenticated agent tool execution requires an active run" };
+    }
+
+    const [run] = await db
+      .select({
+        companyId: heartbeatRuns.companyId,
+        agentId: heartbeatRuns.agentId,
+        contextSnapshot: heartbeatRuns.contextSnapshot,
+      })
+      .from(heartbeatRuns)
+      .where(eq(heartbeatRuns.id, runId))
+      .limit(1);
+    if (!run || run.companyId !== actor.companyId || run.agentId !== actor.agentId) {
+      return { status: 403, error: "Authenticated agent run is outside the caller scope" };
+    }
+
+    if (run.contextSnapshot !== null && run.contextSnapshot !== undefined && !isRecord(run.contextSnapshot)) {
+      return { status: 422, error: 'Authenticated agent run "contextSnapshot" must be an object' };
+    }
+
+    const snapshot = (run.contextSnapshot ?? {}) as Record<string, unknown>;
+    const parsedIssueId = readOptionalToolContextId(snapshot, "issueId", "heartbeatRun.contextSnapshot");
+    if ("error" in parsedIssueId) return { status: 422, error: parsedIssueId.error };
+    const parsedTaskId = readOptionalToolContextId(snapshot, "taskId", "heartbeatRun.contextSnapshot");
+    if ("error" in parsedTaskId) return { status: 422, error: parsedTaskId.error };
+    if (parsedIssueId.value && parsedTaskId.value && parsedIssueId.value !== parsedTaskId.value) {
+      return { status: 422, error: "Authenticated agent run has inconsistent issue and task context" };
+    }
+    const parsedProjectId = readOptionalToolContextId(snapshot, "projectId", "heartbeatRun.contextSnapshot");
+    if ("error" in parsedProjectId) return { status: 422, error: parsedProjectId.error };
+
+    const issueId = parsedIssueId.value ?? parsedTaskId.value;
+    let projectId = parsedProjectId.value;
+    if (issueId) {
+      const [issue] = await db
+        .select({ companyId: issues.companyId, projectId: issues.projectId })
+        .from(issues)
+        .where(eq(issues.id, issueId))
+        .limit(1);
+      if (!issue || issue.companyId !== run.companyId) {
+        return { status: 403, error: "Authenticated agent run references an issue outside the caller scope" };
+      }
+      if (projectId && projectId !== issue.projectId) {
+        return { status: 422, error: "Authenticated agent run has inconsistent issue and project context" };
+      }
+      projectId = issue.projectId;
+    } else if (projectId) {
+      const [project] = await db
+        .select({ companyId: projects.companyId })
+        .from(projects)
+        .where(eq(projects.id, projectId))
+        .limit(1);
+      if (!project || project.companyId !== run.companyId) {
+        return { status: 403, error: "Authenticated agent run references a project outside the caller scope" };
+      }
+    }
+
+    const context: ToolRunContext = {
+      agentId: actor.agentId,
+      runId,
+      companyId: actor.companyId,
+      issueId,
+      projectId,
+    };
+    const mismatch = suppliedToolContextMismatch(supplied, context);
+    return mismatch ? { status: 403, error: mismatch } : { context };
   }
 
   /**
@@ -931,7 +1090,7 @@ export function pluginRoutes(
    * Request body:
    * - `tool`: Fully namespaced tool name (e.g., "acme.linear:search-issues")
    * - `parameters`: Parameters matching the tool's declared JSON Schema
-   * - `runContext`: Agent run context with agentId, runId, companyId, projectId
+   * - `runContext`: Optional caller context. Agent callers use authenticated run context.
    *
    * Response: `ToolExecutionResult`
    * Errors:
@@ -954,7 +1113,7 @@ export function pluginRoutes(
       return;
     }
 
-    const { tool, parameters, runContext } = body;
+    const { tool, parameters } = body;
 
     // Validate required fields
     if (!tool || typeof tool !== "string") {
@@ -962,23 +1121,41 @@ export function pluginRoutes(
       return;
     }
 
-    if (!runContext || typeof runContext !== "object") {
-      res.status(400).json({ error: '"runContext" is required and must be an object' });
+    const normalized = normalizeSuppliedToolRunContext(body.runContext, req.actor.type !== "agent");
+    if (normalized.error) {
+      res.status(400).json({ error: normalized.error });
       return;
     }
 
-    if (!runContext.agentId || !runContext.runId || !runContext.companyId || !runContext.projectId) {
-      res.status(400).json({
-        error: '"runContext" must include agentId, runId, companyId, and projectId',
-      });
-      return;
-    }
-
-    assertCompanyAccess(req, runContext.companyId);
-    const scopeError = await validateToolRunContextScope(runContext);
-    if (scopeError) {
-      res.status(403).json({ error: scopeError });
-      return;
+    let runContext: ToolRunContext;
+    if (req.actor.type === "agent") {
+      const resolved = await authenticatedAgentToolRunContext(req, normalized.context);
+      if ("error" in resolved) {
+        res.status(resolved.status).json({ error: resolved.error });
+        return;
+      }
+      runContext = resolved.context;
+    } else {
+      const supplied = normalized.context;
+      if (!supplied?.agentId || !supplied.runId || !supplied.companyId) {
+        res.status(400).json({
+          error: '"runContext" must include agentId, runId, and companyId',
+        });
+        return;
+      }
+      runContext = {
+        agentId: supplied.agentId,
+        runId: supplied.runId,
+        companyId: supplied.companyId,
+        issueId: supplied.issueId ?? null,
+        projectId: supplied.projectId ?? null,
+      };
+      assertCompanyAccess(req, runContext.companyId);
+      const scopeError = await validateToolRunContextScope(runContext);
+      if (scopeError) {
+        res.status(403).json({ error: scopeError });
+        return;
+      }
     }
 
     // Verify the tool exists

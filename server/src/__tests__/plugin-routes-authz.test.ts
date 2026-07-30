@@ -101,6 +101,7 @@ const companyB = "33333333-3333-4333-8333-333333333333";
 const agentA = "44444444-4444-4444-8444-444444444444";
 const runA = "55555555-5555-4555-8555-555555555555";
 const projectA = "66666666-6666-4666-8666-666666666666";
+const issueA = "77777777-7777-4777-8777-777777777777";
 const pluginId = "11111111-1111-4111-8111-111111111111";
 
 function boardActor(overrides: Record<string, unknown> = {}) {
@@ -619,6 +620,7 @@ describe.sequential("plugin tool and bridge authz", () => {
         agentId: agentA,
         runId: runA,
         companyId: companyA,
+        issueId: null,
         projectId: projectA,
       },
     );
@@ -956,101 +958,240 @@ describe.sequential("plugin tool and bridge authz", () => {
     expect(listToolsForAgent).toHaveBeenCalled();
   });
 
-  it("allows agent JWT to execute a tool within its company scope", async () => {
+  it("derives agent tool context from the authenticated actor and heartbeat run", async () => {
     const executeTool = vi.fn().mockResolvedValue({ content: "ok" });
-    const { app } = await createApp(
-      agentActor(),
-      {},
-      {
-        db: createSelectQueueDb([
-          [{ companyId: companyA }],
-          [{ companyId: companyA, agentId: agentA }],
-          [{ companyId: companyA }],
-        ]),
-        toolDeps: {
-          toolDispatcher: {
-            listToolsForAgent: vi.fn(),
-            getTool: vi.fn(() => ({ name: "paperclip.example:search", pluginDbId: pluginId })),
-            executeTool,
-          },
+    const { app } = await createApp(agentActor(), {}, {
+      db: createSelectQueueDb([
+        [{ companyId: companyA, agentId: agentA, contextSnapshot: { issueId: issueA } }],
+        [{ companyId: companyA, projectId: projectA }],
+      ]),
+      toolDeps: {
+        toolDispatcher: {
+          listToolsForAgent: vi.fn(),
+          getTool: vi.fn(() => ({ name: "paperclip.example:search", pluginDbId: pluginId })),
+          executeTool,
         },
       },
-    );
+    });
 
     const res = await request(app)
       .post("/api/plugins/tools/execute")
       .send({
         tool: "paperclip.example:search",
         parameters: { q: "test" },
-        runContext: { agentId: agentA, runId: runA, companyId: companyA, projectId: projectA },
       });
 
     expect(res.status).toBe(200);
     expect(executeTool).toHaveBeenCalledWith(
       "paperclip.example:search",
       { q: "test" },
-      { agentId: agentA, runId: runA, companyId: companyA, projectId: projectA },
+      {
+        agentId: agentA,
+        runId: runA,
+        companyId: companyA,
+        issueId: issueA,
+        projectId: projectA,
+      },
     );
   });
 
-  it("rejects agent JWT when runContext.companyId is outside the agent's company scope", async () => {
-    const executeTool = vi.fn();
-    const { app } = await createApp(
-      agentActor(),
-      {},
-      {
-        db: createSelectQueueDb([]),
-        toolDeps: {
-          toolDispatcher: {
-            listToolsForAgent: vi.fn(),
-            getTool: vi.fn(() => ({ name: "paperclip.example:search", pluginDbId: pluginId })),
-            executeTool,
-          },
+  it("derives issue context from the legacy heartbeat taskId alias", async () => {
+    const executeTool = vi.fn().mockResolvedValue({ content: "ok" });
+    const { app } = await createApp(agentActor(), {}, {
+      db: createSelectQueueDb([
+        [{ companyId: companyA, agentId: agentA, contextSnapshot: { taskId: issueA } }],
+        [{ companyId: companyA, projectId: projectA }],
+      ]),
+      toolDeps: {
+        toolDispatcher: {
+          listToolsForAgent: vi.fn(),
+          getTool: vi.fn(() => ({ name: "paperclip.example:search", pluginDbId: pluginId })),
+          executeTool,
         },
       },
+    });
+
+    const res = await request(app)
+      .post("/api/plugins/tools/execute")
+      .send({ tool: "paperclip.example:search", parameters: {} });
+
+    expect(res.status).toBe(200);
+    expect(executeTool).toHaveBeenCalledWith(
+      "paperclip.example:search",
+      {},
+      {
+        agentId: agentA,
+        runId: runA,
+        companyId: companyA,
+        issueId: issueA,
+        projectId: projectA,
+      },
     );
+  });
+
+  it("rejects conflicting heartbeat issueId and taskId context", async () => {
+    const executeTool = vi.fn();
+    const { app } = await createApp(agentActor(), {}, {
+      db: createSelectQueueDb([
+        [{
+          companyId: companyA,
+          agentId: agentA,
+          contextSnapshot: { issueId: issueA, taskId: "88888888-8888-4888-8888-888888888888" },
+        }],
+      ]),
+      toolDeps: {
+        toolDispatcher: {
+          listToolsForAgent: vi.fn(),
+          getTool: vi.fn(() => ({ name: "paperclip.example:search", pluginDbId: pluginId })),
+          executeTool,
+        },
+      },
+    });
+
+    const res = await request(app)
+      .post("/api/plugins/tools/execute")
+      .send({ tool: "paperclip.example:search", parameters: {} });
+
+    expect(res.status).toBe(422);
+    expect(res.body.error).toMatch(/inconsistent issue and task context/i);
+    expect(executeTool).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["agentId", { agentId: "88888888-8888-4888-8888-888888888888" }],
+    ["runId", { runId: "99999999-9999-4999-8999-999999999999" }],
+    ["companyId", { companyId: companyB }],
+    ["issueId", { issueId: issueA }],
+    ["projectId", { projectId: projectA }],
+  ])("rejects agent spoofing through runContext.%s", async (_field, runContext) => {
+    const executeTool = vi.fn();
+    const { app } = await createApp(agentActor(), {}, {
+      db: createSelectQueueDb([
+        [{ companyId: companyA, agentId: agentA, contextSnapshot: {} }],
+      ]),
+      toolDeps: {
+        toolDispatcher: {
+          listToolsForAgent: vi.fn(),
+          getTool: vi.fn(() => ({ name: "paperclip.example:search", pluginDbId: pluginId })),
+          executeTool,
+        },
+      },
+    });
 
     const res = await request(app)
       .post("/api/plugins/tools/execute")
       .send({
         tool: "paperclip.example:search",
         parameters: {},
-        runContext: { agentId: agentA, runId: runA, companyId: companyB, projectId: projectA },
+        runContext,
       });
 
     expect(res.status).toBe(403);
     expect(executeTool).not.toHaveBeenCalled();
   });
 
-  it("rejects agent JWT when runContext.agentId does not belong to runContext.companyId", async () => {
-    const otherAgent = "77777777-7777-4777-8777-777777777777";
-    const executeTool = vi.fn();
-    const { app } = await createApp(
-      agentActor(),
-      {},
-      {
-        db: createSelectQueueDb([
-          [{ companyId: companyB }],
-        ]),
-        toolDeps: {
-          toolDispatcher: {
-            listToolsForAgent: vi.fn(),
-            getTool: vi.fn(() => ({ name: "paperclip.example:search", pluginDbId: pluginId })),
-            executeTool,
-          },
+  it("derives a null projectId for projectless issues", async () => {
+    const executeTool = vi.fn().mockResolvedValue({ content: "ok" });
+    const { app } = await createApp(agentActor(), {}, {
+      db: createSelectQueueDb([
+        [{ companyId: companyA, agentId: agentA, contextSnapshot: { issueId: issueA } }],
+        [{ companyId: companyA, projectId: null }],
+      ]),
+      toolDeps: {
+        toolDispatcher: {
+          listToolsForAgent: vi.fn(),
+          getTool: vi.fn(() => ({ name: "paperclip.example:search", pluginDbId: pluginId })),
+          executeTool,
         },
       },
-    );
+    });
 
     const res = await request(app)
       .post("/api/plugins/tools/execute")
-      .send({
-        tool: "paperclip.example:search",
-        parameters: {},
-        runContext: { agentId: otherAgent, runId: runA, companyId: companyA, projectId: projectA },
-      });
+      .send({ tool: "paperclip.example:search", parameters: {} });
+
+    expect(res.status).toBe(200);
+    expect(executeTool).toHaveBeenCalledWith(
+      "paperclip.example:search",
+      {},
+      {
+        agentId: agentA,
+        runId: runA,
+        companyId: companyA,
+        issueId: issueA,
+        projectId: null,
+      },
+    );
+  });
+
+  it("rejects heartbeat issue context from another company", async () => {
+    const executeTool = vi.fn();
+    const { app } = await createApp(agentActor(), {}, {
+      db: createSelectQueueDb([
+        [{ companyId: companyA, agentId: agentA, contextSnapshot: { issueId: issueA } }],
+        [{ companyId: companyB, projectId: projectA }],
+      ]),
+      toolDeps: {
+        toolDispatcher: {
+          listToolsForAgent: vi.fn(),
+          getTool: vi.fn(() => ({ name: "paperclip.example:search", pluginDbId: pluginId })),
+          executeTool,
+        },
+      },
+    });
+
+    const res = await request(app)
+      .post("/api/plugins/tools/execute")
+      .send({ tool: "paperclip.example:search", parameters: {} });
 
     expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/issue outside the caller scope/i);
+    expect(executeTool).not.toHaveBeenCalled();
+  });
+
+  it("returns 422 for malformed heartbeat context", async () => {
+    const executeTool = vi.fn();
+    const { app } = await createApp(agentActor(), {}, {
+      db: createSelectQueueDb([
+        [{ companyId: companyA, agentId: agentA, contextSnapshot: { issueId: 42 } }],
+      ]),
+      toolDeps: {
+        toolDispatcher: {
+          listToolsForAgent: vi.fn(),
+          getTool: vi.fn(() => ({ name: "paperclip.example:search", pluginDbId: pluginId })),
+          executeTool,
+        },
+      },
+    });
+
+    const res = await request(app)
+      .post("/api/plugins/tools/execute")
+      .send({ tool: "paperclip.example:search", parameters: {} });
+
+    expect(res.status).toBe(422);
+    expect(res.body.error).toMatch(/contextSnapshot\.issueId/i);
+    expect(executeTool).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when agent authentication has no active run", async () => {
+    const executeTool = vi.fn();
+    const { app } = await createApp(agentActor({ runId: undefined }), {}, {
+      db: createSelectQueueDb([]),
+      toolDeps: {
+        toolDispatcher: {
+          listToolsForAgent: vi.fn(),
+          getTool: vi.fn(() => ({ name: "paperclip.example:search", pluginDbId: pluginId })),
+          executeTool,
+        },
+      },
+    });
+
+    const res = await request(app)
+      .post("/api/plugins/tools/execute")
+      .send({ tool: "paperclip.example:search", parameters: {} });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/requires an active run/i);
     expect(executeTool).not.toHaveBeenCalled();
   });
 });

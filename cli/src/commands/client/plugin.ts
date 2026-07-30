@@ -87,6 +87,10 @@ interface PluginJsonOptions extends BaseClientOptions {
   payloadJson?: string;
 }
 
+interface PluginToolExecuteOptions extends PluginJsonOptions {
+  paramsJson?: string;
+}
+
 interface PluginStreamOptions extends BaseClientOptions {
   durationMs?: string;
 }
@@ -302,6 +306,22 @@ export function runPluginInitCommand(packageName: string, opts: PluginInitOption
   return {
     outputDir,
     nextCommands: buildPluginInitNextCommands(outputDir),
+  };
+}
+
+export function buildPluginToolExecuteRequest(
+  tool: string | undefined,
+  opts: Pick<PluginToolExecuteOptions, "paramsJson" | "payloadJson">,
+): unknown {
+  if (opts.payloadJson !== undefined) {
+    return parseJson(opts.payloadJson);
+  }
+  if (!tool?.trim()) {
+    throw new Error("Tool name is required unless --payload-json supplies the complete request body.");
+  }
+  return {
+    tool: tool.trim(),
+    parameters: parseJson(opts.paramsJson ?? "{}"),
   };
 }
 
@@ -669,7 +689,22 @@ export function registerPluginCommands(program: Command): void {
 
   addPluginGet(plugin, "ui-contributions", "List plugin UI contributions", "/api/plugins/ui-contributions");
   addPluginGet(plugin, "tools", "List plugin tools", "/api/plugins/tools");
-  addPluginPost(plugin, "tool:execute", "Execute a plugin tool", "/api/plugins/tools/execute");
+  addCommonClientOptions(
+    plugin
+      .command("tool:execute [tool]")
+      .description("Execute a plugin tool. Agent auth derives run context from --run-id or $PAPERCLIP_RUN_ID.")
+      .option("--params-json <json>", "Tool parameters as JSON", "{}")
+      .option("--payload-json <json>", "Complete request payload (legacy compatibility)")
+      .action(async (tool: string | undefined, opts: PluginToolExecuteOptions) => {
+        try {
+          const ctx = resolveCommandContext(opts);
+          const payload = buildPluginToolExecuteRequest(tool, opts);
+          printOutput(await ctx.api.post("/api/plugins/tools/execute", payload), { json: ctx.json });
+        } catch (err) {
+          handleCommandError(err);
+        }
+      }),
+  );
   addPluginSubGet(plugin, "health", "Get plugin health", "health");
   addPluginSubGet(plugin, "logs", "Get plugin logs", "logs");
   addPluginSubPost(plugin, "upgrade", "Upgrade a plugin", "upgrade");

@@ -150,7 +150,7 @@ describe("buildPluginWorkerEnv", () => {
 
   it("passes only model provider keys through to environment driver plugins", () => {
     const env = buildPluginWorkerEnv({
-      manifest: { capabilities: ["environment.drivers.register"] },
+      manifest: { id: "paperclip.environment", capabilities: ["environment.drivers.register"] },
       instanceInfo,
       processEnv: {
         ANTHROPIC_API_KEY: "anthropic-token",
@@ -170,7 +170,7 @@ describe("buildPluginWorkerEnv", () => {
 
   it("passes in-cluster Kubernetes service-discovery vars to environment driver plugins", () => {
     const env = buildPluginWorkerEnv({
-      manifest: { capabilities: ["environment.drivers.register"] },
+      manifest: { id: "paperclip.environment", capabilities: ["environment.drivers.register"] },
       instanceInfo,
       processEnv: {
         KUBERNETES_SERVICE_HOST: "10.0.0.1",
@@ -190,10 +190,43 @@ describe("buildPluginWorkerEnv", () => {
 
   it("does not pass provider keys to non-environment plugins", () => {
     const env = buildPluginWorkerEnv({
-      manifest: { capabilities: ["ui.slots.register"] },
+      manifest: { id: "paperclip.ui", capabilities: ["ui.slots.register"] },
       instanceInfo,
       processEnv: {
         OPENAI_API_KEY: "openai-token",
+      },
+    });
+
+    expect(env).toEqual({
+      PAPERCLIP_DEPLOYMENT_MODE: "authenticated",
+      PAPERCLIP_DEPLOYMENT_EXPOSURE: "public",
+    });
+  });
+
+  it("passes only the matching plugin's namespaced operator secrets", () => {
+    const env = buildPluginWorkerEnv({
+      manifest: { id: "valkyriweb.tellme", capabilities: ["secrets.read-ref"] },
+      instanceInfo,
+      processEnv: {
+        PAPERCLIP_PLUGIN_76616C6B7972697765622E74656C6C6D65_INTEGRATION_TOKEN: "tellme-token",
+        PAPERCLIP_PLUGIN_6F746865722E706C7567696E_INTEGRATION_TOKEN: "other-token",
+        DATABASE_URL: "postgres://private",
+      },
+    });
+
+    expect(env).toEqual({
+      PAPERCLIP_DEPLOYMENT_MODE: "authenticated",
+      PAPERCLIP_DEPLOYMENT_EXPOSURE: "public",
+      PAPERCLIP_PLUGIN_76616C6B7972697765622E74656C6C6D65_INTEGRATION_TOKEN: "tellme-token",
+    });
+  });
+
+  it("does not pass namespaced operator secrets without secret capability approval", () => {
+    const env = buildPluginWorkerEnv({
+      manifest: { id: "valkyriweb.tellme", capabilities: ["http.outbound"] },
+      instanceInfo,
+      processEnv: {
+        PAPERCLIP_PLUGIN_76616C6B7972697765622E74656C6C6D65_INTEGRATION_TOKEN: "tellme-token",
       },
     });
 

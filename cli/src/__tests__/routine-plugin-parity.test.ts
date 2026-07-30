@@ -1,12 +1,16 @@
 import { Command } from "commander";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { registerPluginCommands } from "../commands/client/plugin.js";
+import {
+  buildPluginToolExecuteRequest,
+  registerPluginCommands,
+} from "../commands/client/plugin.js";
 import { registerRoutineApiCommands } from "../commands/client/routine-api.js";
 
 const COMPANY_ID = "22222222-2222-4222-8222-222222222222";
 const ROUTINE_ID = "33333333-3333-4333-8333-333333333333";
 const REVISION_ID = "44444444-4444-4444-8444-444444444444";
 const TRIGGER_ID = "55555555-5555-4555-8555-555555555555";
+const RUN_ID = "66666666-6666-4666-8666-666666666666";
 
 function createProgram(): Command {
   const program = new Command();
@@ -67,6 +71,54 @@ describe("routine and plugin parity commands", () => {
       ["POST", `http://localhost:3100/api/routine-triggers/${TRIGGER_ID}/rotate-secret`],
       ["POST", "http://localhost:3100/api/routine-triggers/public/public-id/fire"],
     ]);
+  });
+
+  it("builds ergonomic tool execution payloads without runContext", () => {
+    expect(buildPluginToolExecuteRequest("paperclip.example:search", {
+      paramsJson: '{"q":"test"}',
+    })).toEqual({
+      tool: "paperclip.example:search",
+      parameters: { q: "test" },
+    });
+  });
+
+  it("preserves complete --payload-json tool execution payloads", () => {
+    const payload = {
+      tool: "paperclip.example:search",
+      parameters: { q: "legacy" },
+      runContext: { agentId: "agent-1" },
+    };
+    expect(buildPluginToolExecuteRequest(undefined, {
+      payloadJson: JSON.stringify(payload),
+    })).toEqual(payload);
+  });
+
+  it("posts tool parameters and forwards the authenticated run id", async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse()));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await run([
+      "plugin",
+      "tool:execute",
+      "paperclip.example:search",
+      "--params-json",
+      '{"q":"test"}',
+      "--run-id",
+      RUN_ID,
+    ]);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:3100/api/plugins/tools/execute");
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: "POST",
+      headers: expect.objectContaining({
+        "x-paperclip-run-id": RUN_ID,
+      }),
+      body: JSON.stringify({
+        tool: "paperclip.example:search",
+        parameters: { q: "test" },
+      }),
+    });
   });
 
   it("wraps deeper plugin endpoints", async () => {
