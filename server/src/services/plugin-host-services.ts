@@ -90,6 +90,33 @@ const DNS_LOOKUP_TIMEOUT_MS = 5_000;
 const ALLOWED_PROTOCOLS = new Set(["http:", "https:"]);
 const TELEMETRY_EVENT_NAME_REGEX = /^[a-z0-9][a-z0-9_-]*$/;
 
+function pluginPrivateHttpOrigins(pluginKey: string): Set<string> {
+  const prefix = Buffer.from(pluginKey, "utf8").toString("hex").toUpperCase();
+  const raw = process.env[`PAPERCLIP_PLUGIN_${prefix}_PRIVATE_HTTP_ORIGINS`] ?? "";
+  const origins = new Set<string>();
+  for (const value of raw.split(",")) {
+    try {
+      const url = new URL(value.trim());
+      const hostname = url.hostname.toLowerCase();
+      if (
+        url.protocol === "http:"
+        && !url.username
+        && !url.password
+        && (hostname === "localhost"
+          || hostname === "127.0.0.1"
+          || hostname === "[::1]"
+          || hostname.endsWith(".svc")
+          || hostname.endsWith(".svc.cluster.local"))
+      ) {
+        origins.add(url.origin);
+      }
+    } catch {
+      // Ignore malformed operator allowlist entries.
+    }
+  }
+  return origins;
+}
+
 /**
  * Check if an IP address is in a private/reserved range (RFC 1918, loopback,
  * link-local, etc.) that plugins should never be able to reach.
@@ -148,7 +175,10 @@ interface ValidatedFetchTarget {
   useTls: boolean;
 }
 
-async function validateAndResolveFetchUrl(urlString: string): Promise<ValidatedFetchTarget> {
+async function validateAndResolveFetchUrl(
+  urlString: string,
+  allowedPrivateOrigins: ReadonlySet<string> = new Set(),
+): Promise<ValidatedFetchTarget> {
   let parsed: URL;
   try {
     parsed = new URL(urlString);
@@ -188,13 +218,14 @@ async function validateAndResolveFetchUrl(urlString: string): Promise<ValidatedF
     // when some IPs are private. This handles multi-homed hosts that resolve
     // to both private and public addresses.
     const safeResults = results.filter((entry) => !isPrivateIP(entry.address));
-    if (safeResults.length === 0) {
+    const privateOriginAllowed = allowedPrivateOrigins.has(parsed.origin);
+    if (safeResults.length === 0 && !privateOriginAllowed) {
       throw new Error(
         `All resolved IPs for ${originalHostname} are in private/reserved ranges`,
       );
     }
 
-    const resolved = safeResults[0]!;
+    const resolved = (privateOriginAllowed ? results : safeResults)[0]!;
     return {
       parsedUrl: parsed,
       resolvedAddress: resolved.address,
@@ -499,6 +530,7 @@ export function buildHostServices(
   const stateStore = pluginStateStore(db);
   const pluginDb = pluginDatabaseService(db);
   const secretsHandler = createPluginSecretsHandler({ db, pluginId });
+  const allowedPrivateHttpOrigins = pluginPrivateHttpOrigins(pluginKey);
   const companies = companyService(db);
   const agents = agentService(db);
   const managedAgents = pluginManagedAgentService(db, {
@@ -1223,7 +1255,7 @@ export function buildHostServices(
       async fetch(params) {
         // SSRF protection: validate protocol whitelist + block private IPs.
         // Resolve once, then connect directly to that IP to prevent DNS rebinding.
-        const target = await validateAndResolveFetchUrl(params.url);
+        const target = await validateAndResolveFetchUrl(params.url, allowedPrivateHttpOrigins);
 
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), PLUGIN_FETCH_TIMEOUT_MS);
