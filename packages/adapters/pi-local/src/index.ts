@@ -34,6 +34,7 @@ Core fields:
 - thinking (string, optional): thinking level (off, minimal, low, medium, high, xhigh)
 - command (string, optional): defaults to "pi"
 - env (object, optional): KEY=VALUE environment variables
+- measurementEnabled (boolean, optional): enables the bundled read-only measurement_query tool. Google credentials are server-only and are never passed to Pi.
 
 Operational fields:
 - timeoutSec (number, optional): run timeout in seconds
@@ -44,5 +45,6 @@ Notes:
 - Paperclip requires an explicit \`model\` value for \`pi_local\` agents.
 - Sessions are stored in ~/.pi/paperclips/ and resumed with --session.
 - All tools (read, bash, edit, write, grep, find, ls) are enabled by default.
+- Set measurementEnabled only for agents allowed to query their company's configured Google Ads/GA4 allowlists. The tool accepts only fixed reports and bounded date/row inputs.
 - Agent instructions are appended to Pi's system prompt via --append-system-prompt, while the user task is sent via -p.
 `;

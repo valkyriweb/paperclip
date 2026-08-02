@@ -69,9 +69,13 @@ RUN npm install --global --omit=dev @anthropic-ai/claude-code@latest @openai/cod
   && chown -R node:node /opt/otel
 
 COPY docker/otel/traceloop-init.js /opt/otel/preload/traceloop-init.js
+COPY docker/requirements-google-measurement.txt /tmp/requirements-google-measurement.txt
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends openssh-client jq gnupg \
+  && apt-get install -y --no-install-recommends openssh-client jq gnupg python3-venv \
+  && python3 -m venv /opt/google-ads-python \
+  && /opt/google-ads-python/bin/pip install --no-cache-dir --requirement /tmp/requirements-google-measurement.txt \
+  && /opt/google-ads-python/bin/python -c "from google.ads.googleads.client import GoogleAdsClient; from google.analytics.data_v1beta import BetaAnalyticsDataClient" \
   && curl -sS https://downloads.1password.com/linux/keys/1password.asc \
     | gpg --dearmor --output /usr/share/keyrings/1password-archive-keyring.gpg \
   && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/1password-archive-keyring.gpg] https://downloads.1password.com/linux/debian/$(dpkg --print-architecture) stable main" \
@@ -86,7 +90,7 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends 1password-cli \
   && rm -rf /var/lib/apt/lists/* \
   && mkdir -p /paperclip \
-  && chown node:node /paperclip
+  && chown -R node:node /paperclip /opt/google-ads-python
 
 COPY scripts/docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
@@ -105,6 +109,7 @@ ENV NODE_ENV=production \
   PAPERCLIP_DEPLOYMENT_EXPOSURE=private \
   OPENCODE_ALLOW_ALL_MODELS=true \
   GEMINI_SANDBOX=false \
+  PAPERCLIP_MEASUREMENT_PYTHON=/opt/google-ads-python/bin/python \
   NODE_PATH=/opt/otel/node_modules
 
 EXPOSE 3100

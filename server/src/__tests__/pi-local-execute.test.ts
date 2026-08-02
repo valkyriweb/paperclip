@@ -46,6 +46,18 @@ process.exit(0);
   await fs.chmod(commandPath, 0o755);
 }
 
+async function writeMeasurementPiCommand(commandPath: string, capturePath: string): Promise<void> {
+  const script = `#!/usr/bin/env node
+const fs = require("node:fs");
+if (process.argv.includes("--list-models")) { console.log("provider  model"); console.log("google    gemini-3-flash-preview"); process.exit(0); }
+const serverOnlyKeys = ["PAPERCLIP_MEASUREMENT_CONFIG", "PAPERCLIP_MEASUREMENT_PYTHON", "PAPERCLIP_MEASUREMENT_ALLOWED_IDS", "PAPERCLIP_MEASUREMENT_GOOGLE_ADS_LOGIN_CUSTOMER_ID", "GOOGLE_ADS_DEVELOPER_TOKEN", "GOOGLE_ADS_CLIENT_ID", "GOOGLE_ADS_CLIENT_SECRET", "GOOGLE_ADS_REFRESH_TOKEN", "GOOGLE_ANALYTICS_CLIENT_ID", "GOOGLE_ANALYTICS_CLIENT_SECRET", "GOOGLE_ANALYTICS_REFRESH_TOKEN", "GOOGLE_APPLICATION_CREDENTIALS"];
+fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({ args: process.argv.slice(2), env: Object.fromEntries(serverOnlyKeys.map((key) => [key, process.env[key]])) }));
+console.log(JSON.stringify({ type: "turn_end", message: { role: "assistant", content: "" }, toolResults: [] }));
+`;
+  await fs.writeFile(commandPath, script, "utf8");
+  await fs.chmod(commandPath, 0o755);
+}
+
 describe("pi_local execute", () => {
   it("fails the run when Pi exhausts automatic retries despite exiting 0", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-pi-execute-"));
@@ -89,6 +101,45 @@ describe("pi_local execute", () => {
     } finally {
       if (previousHome === undefined) delete process.env.HOME;
       else process.env.HOME = previousHome;
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("injects the per-run measurement extension without passing server measurement configuration", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-pi-measurement-"));
+    const workspace = path.join(root, "workspace");
+    const commandPath = path.join(root, "pi");
+    const capturePath = path.join(root, "capture.json");
+    await fs.mkdir(workspace, { recursive: true });
+    await writeMeasurementPiCommand(commandPath, capturePath);
+    const serverOnlyEnv = {
+      PAPERCLIP_MEASUREMENT_CONFIG: "server-config",
+      PAPERCLIP_MEASUREMENT_PYTHON: "/server/python",
+      PAPERCLIP_MEASUREMENT_ALLOWED_IDS: '["123"]',
+      PAPERCLIP_MEASUREMENT_GOOGLE_ADS_LOGIN_CUSTOMER_ID: "456",
+      GOOGLE_ADS_DEVELOPER_TOKEN: "developer-token",
+      GOOGLE_ADS_CLIENT_ID: "client-id",
+      GOOGLE_ADS_CLIENT_SECRET: "client-secret",
+      GOOGLE_ADS_REFRESH_TOKEN: "refresh-token",
+      GOOGLE_ANALYTICS_CLIENT_ID: "analytics-client-id",
+      GOOGLE_ANALYTICS_CLIENT_SECRET: "analytics-client-secret",
+      GOOGLE_ANALYTICS_REFRESH_TOKEN: "analytics-refresh-token",
+      GOOGLE_APPLICATION_CREDENTIALS: "/server/service-account.json",
+    };
+    const previousEnv = Object.fromEntries(Object.keys(serverOnlyEnv).map((key) => [key, process.env[key]]));
+    Object.assign(process.env, serverOnlyEnv);
+    try {
+      await execute({ runId: "run-measurement", agent: { id: "agent-1", companyId: "company-1", name: "Aster", adapterType: "pi_local", adapterConfig: {} }, runtime: { sessionId: null, sessionParams: null, sessionDisplayId: null, taskKey: null }, config: { command: commandPath, cwd: workspace, model: "google/gemini-3-flash-preview", measurementEnabled: true }, context: {}, authToken: "run-jwt-token", onLog: async () => {} });
+      const captured = JSON.parse(await fs.readFile(capturePath, "utf8"));
+      expect(captured.args).toContain("read,bash,edit,write,grep,find,ls,measurement_query");
+      expect(captured.args).toContain("--extension");
+      // JSON omits undefined values: an empty object proves every explicit server-only key is absent.
+      expect(captured.env).toEqual({});
+    } finally {
+      for (const [key, value] of Object.entries(previousEnv)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
       await fs.rm(root, { recursive: true, force: true });
     }
   });

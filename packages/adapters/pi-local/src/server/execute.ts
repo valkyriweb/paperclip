@@ -56,6 +56,32 @@ const __moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const PAPERCLIP_SESSIONS_DIR = path.join(os.homedir(), ".pi", "paperclips");
 const PI_AGENT_SKILLS_DIR = path.join(os.homedir(), ".pi", "agent", "skills");
 
+// These deployment credentials/configuration belong exclusively to the Paperclip server.
+// Keep this explicit so newly added Google variables require a security review.
+const SERVER_ONLY_MEASUREMENT_ENV = new Set([
+  "PAPERCLIP_MEASUREMENT_CONFIG",
+  "PAPERCLIP_MEASUREMENT_PYTHON",
+  "PAPERCLIP_MEASUREMENT_ALLOWED_IDS",
+  "PAPERCLIP_MEASUREMENT_GOOGLE_ADS_LOGIN_CUSTOMER_ID",
+  "GOOGLE_ADS_DEVELOPER_TOKEN",
+  "GOOGLE_ADS_CLIENT_ID",
+  "GOOGLE_ADS_CLIENT_SECRET",
+  "GOOGLE_ADS_REFRESH_TOKEN",
+  "GOOGLE_ANALYTICS_CLIENT_ID",
+  "GOOGLE_ANALYTICS_CLIENT_SECRET",
+  "GOOGLE_ANALYTICS_REFRESH_TOKEN",
+  "GOOGLE_APPLICATION_CREDENTIALS",
+]);
+
+function withoutServerOnlyMeasurementEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(env).filter(
+      (entry): entry is [string, string] =>
+        typeof entry[1] === "string" && !SERVER_ONLY_MEASUREMENT_ENV.has(entry[0]),
+    ),
+  );
+}
+
 function firstNonEmptyLine(text: string): string {
   return (
     text
@@ -259,6 +285,8 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   const command = asString(config.command, "pi");
   const model = asString(config.model, "").trim();
   const thinking = asString(config.thinking, "").trim();
+  const measurementEnabled = config.measurementEnabled === true;
+  const measurementExtensionPath = fileURLToPath(new URL("./measurement-extension.js", import.meta.url));
 
   // Parse model into provider and model id
   const provider = parseModelProvider(model);
@@ -382,11 +410,9 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         mergedEnv[pathKey] = [...additions, basePath].filter(Boolean).join(path.delimiter);
       }
     }
-    const runtimeEnv = Object.fromEntries(
-      Object.entries(mergedEnv).filter(
-        (entry): entry is [string, string] => typeof entry[1] === "string",
-      ),
-    );
+    // Google credential/config variables are server-only. The Pi child receives
+    // only its normal Paperclip API token, then calls the authenticated gateway.
+    const runtimeEnv = withoutServerOnlyMeasurementEnv(mergedEnv);
     const timeoutSec = resolveAdapterExecutionTargetTimeoutSec(
       executionTarget,
       asNumber(config.timeoutSec, 0),
@@ -511,11 +537,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       if (paperclipBridge) {
         Object.assign(env, paperclipBridge.env);
         loggedEnv = buildInvocationEnvForLogs(env, {
-          runtimeEnv: Object.fromEntries(
-            Object.entries(ensurePathInEnv({ ...process.env, ...env })).filter(
-              (entry): entry is [string, string] => typeof entry[1] === "string",
-            ),
-          ),
+          runtimeEnv: withoutServerOnlyMeasurementEnv(ensurePathInEnv({ ...process.env, ...env })),
           includeRuntimeKeys: ["HOME"],
           resolvedCommand,
         });
@@ -685,7 +707,8 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       if (modelId) args.push("--model", modelId);
       if (thinking) args.push("--thinking", thinking);
 
-      args.push("--tools", "read,bash,edit,write,grep,find,ls");
+      args.push("--tools", measurementEnabled ? "read,bash,edit,write,grep,find,ls,measurement_query" : "read,bash,edit,write,grep,find,ls");
+      if (measurementEnabled) args.push("--extension", measurementExtensionPath);
       args.push("--session", sessionFile);
       args.push("--skill", remoteSkillsDir ?? PI_AGENT_SKILLS_DIR);
 
@@ -738,7 +761,10 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 
       const proc = await runAdapterExecutionTargetProcess(runId, runtimeExecutionTarget, command, args, {
         cwd,
-        env: executionTargetIsRemote ? env : runtimeEnv,
+        // Remote bridge setup can add environment values after runtimeEnv is made;
+        // apply the same denylist at the final process boundary.
+        env: executionTargetIsRemote ? withoutServerOnlyMeasurementEnv(env) : runtimeEnv,
+        envRemove: [...SERVER_ONLY_MEASUREMENT_ENV],
         timeoutSec,
         graceSec,
         onSpawn,

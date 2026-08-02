@@ -155,6 +155,53 @@ describe("sandbox adapter execution targets", () => {
     });
   });
 
+  it("preserves env removal when sandbox run-log streaming wraps the command", async () => {
+    const runner = {
+      execute: vi.fn(async () => ({
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        stdout: "ok\n",
+        stderr: "",
+        pid: null,
+        startedAt: new Date().toISOString(),
+      })),
+    };
+    const target: AdapterSandboxExecutionTarget = {
+      kind: "remote",
+      transport: "sandbox",
+      remoteCwd: "/workspace",
+      runner,
+    };
+    const start = vi.fn();
+    const finish = vi.fn(async () => {});
+
+    await runAdapterExecutionTargetProcess("run-env-remove", target, "agent-cli", ["--json"], {
+      cwd: "/local/workspace",
+      env: { GOOGLE_ADS_REFRESH_TOKEN: "server-secret" },
+      envRemove: ["GOOGLE_ADS_REFRESH_TOKEN"],
+      stdin: "prompt",
+      timeoutSec: 5,
+      graceSec: 1,
+      onLog: async () => {},
+      runLogTail: {
+        create: () => ({
+          wrapCommand: (command, args) => ({ command: "stream-logs", args: [command, ...args] }),
+          start,
+          finish,
+          abort: vi.fn(async () => {}),
+        }),
+      },
+    });
+
+    expect(runner.execute).toHaveBeenCalledWith(expect.objectContaining({
+      command: "stream-logs",
+      args: ["sh", "-c", "unset GOOGLE_ADS_REFRESH_TOKEN; exec \"$@\"", "paperclip-env", "agent-cli", "--json"],
+    }));
+    expect(start).toHaveBeenCalledOnce();
+    expect(finish).toHaveBeenCalledOnce();
+  });
+
   it("applies the remote sandbox fallback when adapter timeoutSec is unset", () => {
     const sandboxTarget: AdapterSandboxExecutionTarget = {
       kind: "remote",
