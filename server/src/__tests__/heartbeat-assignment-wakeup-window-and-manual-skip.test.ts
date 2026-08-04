@@ -105,6 +105,9 @@ describeEmbeddedPostgres("assignment wakeup window gating and manual skip reason
       if (activeRuns.length === 0) break;
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
+    // A run leaving "running" status can still have trailing async work (e.g.
+    // durable failure writes) land a moment later; give it a beat to settle.
+    await new Promise((resolve) => setTimeout(resolve, 150));
     await db.delete(heartbeatRunEvents);
     await db.delete(environmentLeases);
     await db.delete(activityLog);
@@ -113,6 +116,10 @@ describeEmbeddedPostgres("assignment wakeup window gating and manual skip reason
     await db.delete(issueComments);
     await db.delete(issues);
     await db.delete(agentRuntimeState);
+    // Fire-and-forget wakeup/execution failure paths can still land a durable
+    // agentWakeupRequests write after the delete above, so clear it again
+    // immediately before the FK-dependent agents delete.
+    await db.delete(agentWakeupRequests);
     await db.delete(agents);
     await db.delete(companySkills);
     await db.delete(companies);
@@ -289,5 +296,34 @@ describeEmbeddedPostgres("assignment wakeup window gating and manual skip reason
       .where(and(eq(agentWakeupRequests.companyId, companyId), eq(agentWakeupRequests.agentId, agentId)));
     expect(stored).toHaveLength(1);
     expect(stored[0]?.reason).toBe("heartbeat.wakeOnDemand.disabled");
+  });
+
+  it("falls back to the agent's most recent skip reason when a repeat same-day cap block writes no new row", async () => {
+    const { companyId, agentId } = await seedCompanyAndAgent({
+      heartbeat: { wakeOnDemand: true, maxDailyRuns: 0 },
+    });
+
+    const app = createApp(db, boardActor(companyId));
+    const first = await request(app).post(`/api/agents/${agentId}/wakeup`).send({ source: "on_demand" });
+    expect(first.status).toBe(202);
+    expect(first.body.status).toBe("skipped");
+    expect(first.body.reason).toBe("heartbeat.daily_run_limit");
+
+    // The daily-cap block dedupes: a second same-day skip for the same
+    // reason writes no new agentWakeupRequests row, so this request's own
+    // idempotency key matches nothing directly.
+    const second = await request(app).post(`/api/agents/${agentId}/wakeup`).send({ source: "on_demand" });
+    expect(second.status).toBe(202);
+    expect(second.body.status).toBe("skipped");
+    // Before the fix, a miss on the exact idempotency key silently fell back
+    // to the generic "wakeup_skipped" message even though the precise reason
+    // was durably recorded moments earlier under a different key.
+    expect(second.body.reason).toBe("heartbeat.daily_run_limit");
+
+    const rows = await db
+      .select({ reason: agentWakeupRequests.reason })
+      .from(agentWakeupRequests)
+      .where(and(eq(agentWakeupRequests.companyId, companyId), eq(agentWakeupRequests.agentId, agentId)));
+    expect(rows).toHaveLength(1);
   });
 });

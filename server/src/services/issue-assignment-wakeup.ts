@@ -44,25 +44,32 @@ export function queueIssueAssignmentWakeup(input: {
       contextSnapshot: { issueId: input.issue.id, source: input.contextSource },
     })
     .catch(async (err) => {
-      const agent = await input.db
-        .select({ companyId: agents.companyId })
-        .from(agents)
-        .where(eq(agents.id, input.issue.assigneeAgentId!))
-        .then((rows) => rows[0] ?? null);
-      if (agent) {
-        await input.db.insert(agentWakeupRequests).values({
-          companyId: agent.companyId,
-          agentId: input.issue.assigneeAgentId!,
-          source: "assignment",
-          triggerDetail: "system",
-          reason: "issue_assignment_wakeup_failed",
-          payload: { issueId: input.issue.id, mutation: input.mutation },
-          status: "failed",
-          requestedByActorType: input.requestedByActorType ?? null,
-          requestedByActorId: input.requestedByActorId ?? null,
-          finishedAt: new Date(),
-          error: err instanceof Error ? err.message : String(err),
-        });
+      try {
+        const agent = await input.db
+          .select({ companyId: agents.companyId })
+          .from(agents)
+          .where(eq(agents.id, input.issue.assigneeAgentId!))
+          .then((rows) => rows[0] ?? null);
+        if (agent) {
+          await input.db.insert(agentWakeupRequests).values({
+            companyId: agent.companyId,
+            agentId: input.issue.assigneeAgentId!,
+            source: "assignment",
+            triggerDetail: "system",
+            reason: "issue_assignment_wakeup_failed",
+            payload: { issueId: input.issue.id, mutation: input.mutation },
+            status: "failed",
+            requestedByActorType: input.requestedByActorType ?? null,
+            requestedByActorId: input.requestedByActorId ?? null,
+            finishedAt: new Date(),
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      } catch (writeErr) {
+        // This is a fire-and-forget best-effort durability write; a failure
+        // here (e.g. agent deleted mid-flight, pool exhausted) must not
+        // reject this promise and crash callers that use `void`.
+        logger.warn({ writeErr, issueId: input.issue.id }, "failed to durably record issue assignment wakeup failure");
       }
       logger.warn({ err, issueId: input.issue.id }, "failed to wake assignee on issue assignment");
       if (input.rethrowOnError) throw err;

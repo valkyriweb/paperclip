@@ -780,7 +780,25 @@ export function agentRoutes(
       .orderBy(desc(agentWakeupRequests.requestedAt))
       .limit(1)
       .then((rows) => rows[0] ?? null);
-    const reason = skippedRequest?.reason ?? "wakeup_skipped";
+    // Some skip paths (e.g. repeat same-day budget-cap blocks) intentionally
+    // dedupe and don't write a new row per idempotency key, so fall back to
+    // the agent's most recent skip instead of the generic message.
+    const fallbackSkippedRequest =
+      skippedRequest ??
+      (await db
+        .select({ reason: agentWakeupRequests.reason })
+        .from(agentWakeupRequests)
+        .where(
+          and(
+            eq(agentWakeupRequests.companyId, agent.companyId),
+            eq(agentWakeupRequests.agentId, agent.id),
+            eq(agentWakeupRequests.status, "skipped"),
+          ),
+        )
+        .orderBy(desc(agentWakeupRequests.requestedAt))
+        .limit(1)
+        .then((rows) => rows[0] ?? null));
+    const reason = fallbackSkippedRequest?.reason ?? "wakeup_skipped";
     const message = reason === "wakeup_skipped" ? "Wakeup was skipped." : `Wakeup was skipped: ${reason}.`;
     const issueId = typeof payload?.issueId === "string" && payload.issueId.trim() ? payload.issueId : null;
     if (reason !== "wakeup_skipped") {
