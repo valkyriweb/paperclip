@@ -1534,6 +1534,11 @@ export function Inbox() {
     queryClient.invalidateQueries({ queryKey: queryKeys.issues.listMineByMe(selectedCompanyId) });
     queryClient.invalidateQueries({ queryKey: queryKeys.issues.listTouchedByMe(selectedCompanyId) });
     queryClient.invalidateQueries({ queryKey: queryKeys.issues.listUnreadTouchedByMe(selectedCompanyId) });
+    // An issue can be both "touched by me" and blocked at the same time, so an
+    // archive/unarchive/read-state change made from the Mine tab must also
+    // refresh the Blocked tab's own query — otherwise it keeps showing the
+    // issue's stale pre-action state until an unrelated refetch happens.
+    queryClient.invalidateQueries({ queryKey: queryKeys.issues.listBlockedAttention(selectedCompanyId) });
     queryClient.invalidateQueries({ queryKey: queryKeys.sidebarBadges(selectedCompanyId) });
   };
 

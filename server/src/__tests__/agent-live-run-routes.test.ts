@@ -8,6 +8,7 @@ const mockAgentService = vi.hoisted(() => ({
 
 const mockHeartbeatService = vi.hoisted(() => ({
   buildRunOutputSilence: vi.fn(),
+  buildRunOutputSilenceMap: vi.fn(),
   decorateActiveRunStatus: vi.fn(),
   getRunIssueSummary: vi.fn(),
   getActiveRunIssueSummaryForAgent: vi.fn(),
@@ -215,6 +216,10 @@ describe("agent live run routes", () => {
     });
     mockHeartbeatService.getActiveRunIssueSummaryForAgent.mockResolvedValue(null);
     mockHeartbeatService.buildRunOutputSilence.mockResolvedValue(null);
+    mockHeartbeatService.buildRunOutputSilenceMap.mockImplementation(
+      async (_companyId: string, runs: Array<{ id: string }>) =>
+        new Map(runs.map((run) => [run.id, null])),
+    );
     mockHeartbeatService.getRunLogAccess.mockResolvedValue({
       id: "run-1",
       companyId: "company-1",
@@ -340,6 +345,61 @@ describe("agent live run routes", () => {
     });
   });
 
+  it("scopes issue live-run polling to the issue's runs without leaking companyId, and keeps outputSilence present", async () => {
+    const rows = [
+      {
+        id: "run-1",
+        status: "running",
+        invocationSource: "on_demand",
+        triggerDetail: "manual",
+        contextCommentId: null,
+        contextWakeCommentId: null,
+        startedAt: new Date("2026-04-10T09:30:00.000Z"),
+        finishedAt: null,
+        createdAt: new Date("2026-04-10T09:29:59.000Z"),
+        agentId: "agent-1",
+        agentName: "Builder",
+        adapterType: "codex_local",
+        logBytes: 0,
+        livenessState: "healthy",
+        livenessReason: null,
+        continuationAttempt: 0,
+        lastUsefulActionAt: null,
+        nextAction: null,
+        lastOutputAt: null,
+        lastOutputSeq: null,
+        lastOutputStream: null,
+        lastOutputBytes: 0,
+        processStartedAt: null,
+      },
+    ];
+    const { db } = createLiveRunsDbStub(rows);
+
+    const res = await requestApp(
+      await createApp(db),
+      (baseUrl) => request(baseUrl).get("/api/issues/PC1A2-1295/live-runs"),
+    );
+
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toHaveLength(1);
+    // The row passed to decorateActiveRunStatus must not carry an injected
+    // companyId -- companyId belongs in the `expected` second argument only,
+    // otherwise it leaks into the JSON response via the return-value spread.
+    expect(mockHeartbeatService.decorateActiveRunStatus).toHaveBeenCalledWith(
+      expect.not.objectContaining({ companyId: expect.anything() }),
+      { companyId: "company-1", issueId: "issue-1" },
+    );
+    expect(res.body[0]).not.toHaveProperty("companyId");
+    // outputSilence must stay a present field (not dropped by JSON.stringify
+    // via an undefined Map lookup miss) even though the map is keyed off a
+    // separate company-id-augmented array from the one used for the response rows.
+    expect(res.body[0]).toHaveProperty("outputSilence", null);
+    expect(mockHeartbeatService.buildRunOutputSilenceMap).toHaveBeenCalledWith(
+      "company-1",
+      expect.arrayContaining([expect.objectContaining({ id: "run-1", companyId: "company-1" })]),
+    );
+  });
+
   it("uses narrow run log metadata lookups for log polling", async () => {
     const res = await requestApp(
       await createApp(),
@@ -402,7 +462,18 @@ describe("agent live run routes", () => {
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(limit).toHaveBeenCalledWith(50);
     expect(res.body).toHaveLength(50);
-    expect(mockHeartbeatService.buildRunOutputSilence).toHaveBeenCalledTimes(50);
+    // Regression coverage for a production outage: this endpoint used to fan
+    // out one buildRunOutputSilence call (two DB queries each) per row via
+    // Promise.all, so a full page fired up to 100 concurrent queries against
+    // the shared connection pool and starved the /health readiness probe on
+    // the same pool, tripping kubelet's liveness-probe restart under load.
+    // It must now issue exactly one batched lookup regardless of row count.
+    expect(mockHeartbeatService.buildRunOutputSilence).not.toHaveBeenCalled();
+    expect(mockHeartbeatService.buildRunOutputSilenceMap).toHaveBeenCalledTimes(1);
+    expect(mockHeartbeatService.buildRunOutputSilenceMap).toHaveBeenCalledWith(
+      "company-1",
+      expect.arrayContaining(rows.slice(0, 50).map((row) => expect.objectContaining({ id: row.id }))),
+    );
   });
 
   it("treats explicit zero or invalid live run limit as the capped default", async () => {

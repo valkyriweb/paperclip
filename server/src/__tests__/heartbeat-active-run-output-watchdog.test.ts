@@ -1011,4 +1011,245 @@ describeEmbeddedPostgres("active-run output watchdog", () => {
     });
     expect(decision.createdByRunId).toBe(managerRunId);
   });
+
+  it("buildRunOutputSilenceMap matches per-run buildRunOutputSilence results for a batch of runs", async () => {
+    const now = new Date("2026-04-22T20:00:00.000Z");
+    const suspicious = await seedRunningRun({
+      now,
+      ageMs: ACTIVE_RUN_OUTPUT_SUSPICION_THRESHOLD_MS + 60_000,
+    });
+    const { companyId, managerId, coderId, issuePrefix } = suspicious;
+    const heartbeat = heartbeatService(db);
+    const recovery = recoveryService(db, { enqueueWakeup: vi.fn() });
+
+    // Second run in the same company: aged past the critical threshold, later snoozed
+    // so the batch exercises the "snoozed" branch alongside "suspicious" and "ok".
+    const criticalIssueId = randomUUID();
+    const criticalRunId = randomUUID();
+    const criticalStartedAt = new Date(now.getTime() - (ACTIVE_RUN_OUTPUT_CRITICAL_THRESHOLD_MS + 60_000));
+    await db.insert(issues).values({
+      id: criticalIssueId,
+      companyId,
+      title: "Second long running implementation",
+      status: "in_progress",
+      priority: "medium",
+      assigneeAgentId: coderId,
+      issueNumber: 2,
+      identifier: `${issuePrefix}-2`,
+      originKind: "manual",
+      updatedAt: criticalStartedAt,
+      createdAt: criticalStartedAt,
+    });
+    await db.insert(heartbeatRuns).values({
+      id: criticalRunId,
+      companyId,
+      agentId: coderId,
+      status: "running",
+      invocationSource: "assignment",
+      triggerDetail: "system",
+      startedAt: criticalStartedAt,
+      processStartedAt: criticalStartedAt,
+      lastOutputAt: null,
+      lastOutputSeq: 0,
+      lastOutputStream: null,
+      contextSnapshot: { issueId: criticalIssueId },
+      logBytes: 0,
+    });
+    await db.update(issues).set({ executionRunId: criticalRunId }).where(eq(issues.id, criticalIssueId));
+
+    // Third run in the same company: recent output, so it stays "ok".
+    const okIssueId = randomUUID();
+    const okRunId = randomUUID();
+    const okStartedAt = new Date(now.getTime() - (ACTIVE_RUN_OUTPUT_SUSPICION_THRESHOLD_MS + 60_000));
+    const okLastOutputAt = new Date(now.getTime() - 5 * 60 * 1000);
+    await db.insert(issues).values({
+      id: okIssueId,
+      companyId,
+      title: "Third noisy implementation",
+      status: "in_progress",
+      priority: "medium",
+      assigneeAgentId: coderId,
+      issueNumber: 3,
+      identifier: `${issuePrefix}-3`,
+      originKind: "manual",
+      updatedAt: okStartedAt,
+      createdAt: okStartedAt,
+    });
+    await db.insert(heartbeatRuns).values({
+      id: okRunId,
+      companyId,
+      agentId: coderId,
+      status: "running",
+      invocationSource: "assignment",
+      triggerDetail: "system",
+      startedAt: okStartedAt,
+      processStartedAt: okStartedAt,
+      lastOutputAt: okLastOutputAt,
+      lastOutputSeq: 3,
+      lastOutputStream: "stdout",
+      contextSnapshot: { issueId: okIssueId },
+      logBytes: 0,
+    });
+    await db.update(issues).set({ executionRunId: okRunId }).where(eq(issues.id, okIssueId));
+
+    const scan = await heartbeat.scanSilentActiveRuns({ now, companyId });
+    expect(scan.created).toBe(2);
+
+    const criticalEvaluationIssueId = await db
+      .select({ id: issues.id })
+      .from(issues)
+      .where(and(
+        eq(issues.companyId, companyId),
+        eq(issues.originKind, "stale_active_run_evaluation"),
+        eq(issues.originId, criticalRunId),
+      ))
+      .then((rows) => rows[0]?.id);
+    expect(criticalEvaluationIssueId).toBeTruthy();
+
+    const snoozedUntil = new Date(now.getTime() + 60 * 60 * 1000);
+    await recovery.recordWatchdogDecision({
+      runId: criticalRunId,
+      actor: { type: "agent", agentId: managerId },
+      decision: "snooze",
+      evaluationIssueId: criticalEvaluationIssueId,
+      reason: "Investigating separately",
+      snoozedUntil,
+    });
+
+    const runs = [
+      {
+        id: suspicious.runId,
+        companyId,
+        status: "running" as const,
+        lastOutputAt: null,
+        lastOutputSeq: 0,
+        lastOutputStream: null,
+        processStartedAt: new Date(now.getTime() - (ACTIVE_RUN_OUTPUT_SUSPICION_THRESHOLD_MS + 60_000)),
+        startedAt: new Date(now.getTime() - (ACTIVE_RUN_OUTPUT_SUSPICION_THRESHOLD_MS + 60_000)),
+        createdAt: new Date(now.getTime() - (ACTIVE_RUN_OUTPUT_SUSPICION_THRESHOLD_MS + 60_000)),
+      },
+      {
+        id: criticalRunId,
+        companyId,
+        status: "running" as const,
+        lastOutputAt: null,
+        lastOutputSeq: 0,
+        lastOutputStream: null,
+        processStartedAt: criticalStartedAt,
+        startedAt: criticalStartedAt,
+        createdAt: criticalStartedAt,
+      },
+      {
+        id: okRunId,
+        companyId,
+        status: "running" as const,
+        lastOutputAt: okLastOutputAt,
+        lastOutputSeq: 3,
+        lastOutputStream: "stdout" as const,
+        processStartedAt: okStartedAt,
+        startedAt: okStartedAt,
+        createdAt: okStartedAt,
+      },
+    ];
+
+    const batched = await recovery.buildRunOutputSilenceMap(companyId, runs, now);
+    expect(batched.size).toBe(3);
+
+    for (const run of runs) {
+      const singular = await recovery.buildRunOutputSilence(run, now);
+      expect(batched.get(run.id)).toEqual(singular);
+    }
+
+    expect(batched.get(suspicious.runId)?.level).toBe("suspicious");
+    expect(batched.get(criticalRunId)?.level).toBe("snoozed");
+    expect(batched.get(okRunId)?.level).toBe("ok");
+  });
+
+  it("resolves the same evaluation via buildRunOutputSilence and buildRunOutputSilenceMap when a run has multiple open stale-run evaluation issues", async () => {
+    const now = new Date("2026-04-22T20:00:00.000Z");
+    const { companyId, coderId, runId, issuePrefix } = await seedRunningRun({
+      now,
+      ageMs: ACTIVE_RUN_OUTPUT_SUSPICION_THRESHOLD_MS + 60_000,
+    });
+    const recovery = recoveryService(db, { enqueueWakeup: vi.fn() });
+
+    // `issues_active_stale_run_evaluation_uq` normally guarantees at most one open
+    // evaluation per run. Drop it for this test only, to reproduce the multi-row
+    // state the single-run and batch lookups must resolve identically regardless
+    // of scan order.
+    await db.execute(sql.raw(`DROP INDEX IF EXISTS issues_active_stale_run_evaluation_uq`));
+
+    const olderEvaluationId = randomUUID();
+    const newerEvaluationId = randomUUID();
+    try {
+      const olderUpdatedAt = new Date(now.getTime() - 30 * 60 * 1000);
+      await db.insert(issues).values({
+        id: olderEvaluationId,
+        companyId,
+        title: "Review silent active run (older)",
+        status: "todo",
+        priority: "medium",
+        assigneeAgentId: coderId,
+        issueNumber: 90,
+        identifier: `${issuePrefix}-90`,
+        originKind: "stale_active_run_evaluation",
+        originId: runId,
+        updatedAt: olderUpdatedAt,
+        createdAt: olderUpdatedAt,
+      });
+
+      const newerUpdatedAt = new Date(now.getTime() - 5 * 60 * 1000);
+      await db.insert(issues).values({
+        id: newerEvaluationId,
+        companyId,
+        title: "Review silent active run (newer)",
+        status: "in_progress",
+        priority: "high",
+        assigneeAgentId: coderId,
+        issueNumber: 91,
+        identifier: `${issuePrefix}-91`,
+        originKind: "stale_active_run_evaluation",
+        originId: runId,
+        updatedAt: newerUpdatedAt,
+        createdAt: newerUpdatedAt,
+      });
+
+      const run = {
+        id: runId,
+        companyId,
+        status: "running" as const,
+        lastOutputAt: null,
+        lastOutputSeq: 0,
+        lastOutputStream: null,
+        processStartedAt: new Date(now.getTime() - (ACTIVE_RUN_OUTPUT_SUSPICION_THRESHOLD_MS + 60_000)),
+        startedAt: new Date(now.getTime() - (ACTIVE_RUN_OUTPUT_SUSPICION_THRESHOLD_MS + 60_000)),
+        createdAt: new Date(now.getTime() - (ACTIVE_RUN_OUTPUT_SUSPICION_THRESHOLD_MS + 60_000)),
+      };
+
+      const singular = await recovery.buildRunOutputSilence(run, now);
+      const batched = await recovery.buildRunOutputSilenceMap(companyId, [run], now);
+
+      expect(singular.evaluationIssueId).toBe(newerEvaluationId);
+      expect(batched.get(run.id)).toEqual(singular);
+    } finally {
+      // This test intentionally left two open evaluation issues for the same
+      // run, which the dropped index normally forbids. Clear them before
+      // recreating the index, or CREATE UNIQUE INDEX fails on the existing
+      // violation.
+      await db.delete(issues).where(eq(issues.id, olderEvaluationId));
+      await db.delete(issues).where(eq(issues.id, newerEvaluationId));
+      // Restore the partial unique index so later tests in this file (and any
+      // appended after this one) still run under the real schema constraint.
+      await db.execute(
+        sql.raw(`
+          CREATE UNIQUE INDEX IF NOT EXISTS issues_active_stale_run_evaluation_uq
+            ON issues USING btree (company_id, origin_kind, origin_id)
+            WHERE origin_kind = 'stale_active_run_evaluation'
+              AND origin_id IS NOT NULL
+              AND hidden_at IS NULL
+              AND status NOT IN ('done', 'cancelled')
+        `),
+      );
+    }
+  });
 });

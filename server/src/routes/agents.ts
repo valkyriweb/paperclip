@@ -3651,17 +3651,19 @@ export function agentRoutes(
         .limit(targetRunCount - liveRuns.length);
 
       const rows = [...liveRuns, ...recentRuns];
-      res.json(await Promise.all(rows.map(async (run) => ({
+      const outputSilenceByRunId = await heartbeat.buildRunOutputSilenceMap(companyId, rows);
+      res.json(rows.map((run) => ({
         ...heartbeat.decorateActiveRunStatus(run),
-        outputSilence: await heartbeat.buildRunOutputSilence(run),
-      }))));
+        outputSilence: outputSilenceByRunId.get(run.id),
+      })));
       return;
     }
 
-    res.json(await Promise.all(liveRuns.map(async (run) => ({
+    const outputSilenceByRunId = await heartbeat.buildRunOutputSilenceMap(companyId, liveRuns);
+    res.json(liveRuns.map((run) => ({
       ...heartbeat.decorateActiveRunStatus(run),
-      outputSilence: await heartbeat.buildRunOutputSilence(run),
-    }))));
+      outputSilence: outputSilenceByRunId.get(run.id),
+    })));
   });
 
   router.get("/heartbeat-runs/:runId", async (req, res) => {
@@ -3867,10 +3869,12 @@ export function agentRoutes(
       )
       .orderBy(desc(heartbeatRuns.createdAt));
 
-    res.json(await Promise.all(liveRuns.map(async (run) => ({
+    const runsWithCompanyId = liveRuns.map((run) => ({ ...run, companyId: issue.companyId }));
+    const outputSilenceByRunId = await heartbeat.buildRunOutputSilenceMap(issue.companyId, runsWithCompanyId);
+    res.json(liveRuns.map((run) => ({
       ...heartbeat.decorateActiveRunStatus(run, { companyId: issue.companyId, issueId: issue.id }),
-      outputSilence: await heartbeat.buildRunOutputSilence({ ...run, companyId: issue.companyId }),
-    }))));
+      outputSilence: outputSilenceByRunId.get(run.id),
+    })));
   });
 
   router.get("/issues/:issueId/active-run", async (req, res) => {
