@@ -9975,6 +9975,19 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
     return recovery.buildRunOutputSilence(run, now);
   }
 
+  async function buildRunOutputSilenceMap(
+    companyId: string,
+    runs: Array<
+      Pick<
+        typeof heartbeatRuns.$inferSelect,
+        "id" | "companyId" | "status" | "lastOutputAt" | "lastOutputSeq" | "lastOutputStream" | "processStartedAt" | "startedAt" | "createdAt"
+      >
+    >,
+    now = new Date(),
+  ) {
+    return recovery.buildRunOutputSilenceMap(companyId, runs, now);
+  }
+
   async function buildIssueGraphLivenessAutoRecoveryPreview(opts?: { lookbackHours?: number; now?: Date }) {
     return recovery.buildIssueGraphLivenessAutoRecoveryPreview(opts);
   }
@@ -11368,16 +11381,31 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         !lastOutputFlushAt ||
         pendingOutputProgress.at.getTime() - lastOutputFlushAt.getTime() >= ACTIVE_RUN_OUTPUT_PROGRESS_FLUSH_INTERVAL_MS;
       if (!shouldFlush) return;
-      await db
-        .update(heartbeatRuns)
-        .set({
-          lastOutputAt: pendingOutputProgress.at,
-          lastOutputSeq: pendingOutputProgress.seq,
-          lastOutputStream: pendingOutputProgress.stream,
-          lastOutputBytes: pendingOutputProgress.bytes,
-          updatedAt: new Date(),
-        })
-        .where(eq(heartbeatRuns.id, run.id));
+      try {
+        await db
+          .update(heartbeatRuns)
+          .set({
+            lastOutputAt: pendingOutputProgress.at,
+            lastOutputSeq: pendingOutputProgress.seq,
+            lastOutputStream: pendingOutputProgress.stream,
+            lastOutputBytes: pendingOutputProgress.bytes,
+            updatedAt: new Date(),
+          })
+          .where(eq(heartbeatRuns.id, run.id));
+      } catch (flushErr) {
+        // Non-critical telemetry write. A transient DB error here (e.g. an
+        // HA failover dropping the connection) must not fail the run — every
+        // onLog invocation in the adapter log pipeline awaits this call with
+        // no enclosing catch, so an uncaught error here previously reached
+        // the run's outer catch and failed it as adapter_failed.
+        logger.warn({ err: flushErr, runId: run.id }, "failed to flush run output progress");
+        // Advance the throttle timestamp to the attempt time (not the pending
+        // progress's log time) so a failed non-forced flush doesn't retry on
+        // every subsequent log chunk — retries stay bounded to the flush
+        // interval. Forced flushes (opts.force) still bypass this throttle.
+        if (opts?.force !== true) lastOutputFlushAt = new Date();
+        return;
+      }
       lastOutputFlushAt = pendingOutputProgress.at;
       outputProgressState.pending = null;
     };
@@ -14867,6 +14895,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
     reconcileTaskWatchdogs,
 
     buildRunOutputSilence,
+    buildRunOutputSilenceMap,
 
     tickTimers: async (now = new Date()) => {
       const allAgents = await db

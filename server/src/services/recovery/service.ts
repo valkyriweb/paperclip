@@ -966,7 +966,13 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
     return startedAt ? Math.max(0, now.getTime() - startedAt.getTime()) : null;
   }
 
-  async function latestActiveOutputQuietUntilDecision(companyId: string, runId: string, now = new Date()) {
+  type ActiveOutputQuietUntilDecision = typeof heartbeatRunWatchdogDecisions.$inferSelect;
+
+  async function latestActiveOutputQuietUntilDecision(
+    companyId: string,
+    runId: string,
+    now = new Date(),
+  ): Promise<ActiveOutputQuietUntilDecision | null> {
     const [row] = await db
       .select()
       .from(heartbeatRunWatchdogDecisions)
@@ -983,7 +989,15 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
     return row ?? null;
   }
 
-  async function findOpenStaleRunEvaluation(companyId: string, runId: string) {
+  type OpenStaleRunEvaluation = Pick<
+    typeof issues.$inferSelect,
+    "id" | "identifier" | "status" | "priority" | "assigneeAgentId" | "updatedAt"
+  >;
+
+  async function findOpenStaleRunEvaluation(
+    companyId: string,
+    runId: string,
+  ): Promise<OpenStaleRunEvaluation | null> {
     const [row] = await db
       .select({
         id: issues.id,
@@ -1003,6 +1017,7 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
           notInArray(issues.status, ["done", "cancelled"]),
         ),
       )
+      .orderBy(desc(issues.updatedAt), desc(issues.id))
       .limit(1);
     return row ?? null;
   }
@@ -1063,6 +1078,20 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
       latestActiveOutputQuietUntilDecision(run.companyId, run.id, now),
       findOpenStaleRunEvaluation(run.companyId, run.id),
     ]);
+    return runOutputSilenceFromLookups(run, now, quietUntilDecision, evaluation);
+  }
+
+  type RunOutputSilenceRunInput = Pick<
+    typeof heartbeatRuns.$inferSelect,
+    "id" | "companyId" | "status" | "lastOutputAt" | "lastOutputSeq" | "lastOutputStream" | "processStartedAt" | "startedAt" | "createdAt"
+  >;
+
+  function runOutputSilenceFromLookups(
+    run: RunOutputSilenceRunInput,
+    now: Date,
+    quietUntilDecision: ActiveOutputQuietUntilDecision | null,
+    evaluation: OpenStaleRunEvaluation | null,
+  ): RunOutputSilenceSummary {
     const silenceStartedAt = silenceStartedAtForRun(run);
     const silenceAgeMs = run.status === "running" ? silenceAgeMsForRun(run, now) : null;
     const level = run.status !== "running"
@@ -1090,6 +1119,95 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
       evaluationIssueIdentifier: evaluation?.identifier ?? null,
       evaluationIssueAssigneeAgentId: evaluation?.assigneeAgentId ?? null,
     };
+  }
+
+  async function latestActiveOutputQuietUntilDecisionsForRuns(
+    companyId: string,
+    runIds: string[],
+    now: Date,
+  ): Promise<Map<string, ActiveOutputQuietUntilDecision>> {
+    const byRunId = new Map<string, ActiveOutputQuietUntilDecision>();
+    if (runIds.length === 0) return byRunId;
+    const rows = await db
+      .select()
+      .from(heartbeatRunWatchdogDecisions)
+      .where(
+        and(
+          eq(heartbeatRunWatchdogDecisions.companyId, companyId),
+          inArray(heartbeatRunWatchdogDecisions.runId, runIds),
+          inArray(heartbeatRunWatchdogDecisions.decision, ["snooze", "continue"]),
+          gt(heartbeatRunWatchdogDecisions.snoozedUntil, now),
+        ),
+      )
+      .orderBy(desc(heartbeatRunWatchdogDecisions.createdAt), desc(heartbeatRunWatchdogDecisions.id));
+    // Rows arrive newest-first across all runIds, so the first row seen for a
+    // given runId is that run's latest decision.
+    for (const row of rows) {
+      if (!byRunId.has(row.runId)) byRunId.set(row.runId, row);
+    }
+    return byRunId;
+  }
+
+  async function findOpenStaleRunEvaluationsForRuns(
+    companyId: string,
+    runIds: string[],
+  ): Promise<Map<string, OpenStaleRunEvaluation>> {
+    const byRunId = new Map<string, OpenStaleRunEvaluation>();
+    if (runIds.length === 0) return byRunId;
+    const rows = await db
+      .select({
+        id: issues.id,
+        identifier: issues.identifier,
+        status: issues.status,
+        priority: issues.priority,
+        assigneeAgentId: issues.assigneeAgentId,
+        updatedAt: issues.updatedAt,
+        originId: issues.originId,
+      })
+      .from(issues)
+      .where(
+        and(
+          eq(issues.companyId, companyId),
+          eq(issues.originKind, STALE_ACTIVE_RUN_EVALUATION_ORIGIN_KIND),
+          inArray(issues.originId, runIds),
+          isNull(issues.hiddenAt),
+          notInArray(issues.status, ["done", "cancelled"]),
+        ),
+      )
+      .orderBy(desc(issues.updatedAt), desc(issues.id));
+    // Rows arrive newest-first, so the first row seen for a given runId is the
+    // same one findOpenStaleRunEvaluation would return.
+    for (const row of rows) {
+      if (row.originId && !byRunId.has(row.originId)) byRunId.set(row.originId, row);
+    }
+    return byRunId;
+  }
+
+  // Batched counterpart to buildRunOutputSilence: a caller rendering a list of
+  // runs (e.g. the live-runs endpoints) previously fanned out two DB queries
+  // per run via Promise.all, which meant a 50-row response issued up to 100
+  // concurrent queries against the shared connection pool — starving the
+  // /health readiness probe on the same pool and tripping the liveness-probe
+  // restart under load. This runs exactly two queries total, regardless of
+  // how many runs are being rendered.
+  async function buildRunOutputSilenceMap(
+    companyId: string,
+    runs: RunOutputSilenceRunInput[],
+    now = new Date(),
+  ): Promise<Map<string, RunOutputSilenceSummary>> {
+    const runIds = runs.map((run) => run.id);
+    const [quietUntilDecisions, evaluations] = await Promise.all([
+      latestActiveOutputQuietUntilDecisionsForRuns(companyId, runIds, now),
+      findOpenStaleRunEvaluationsForRuns(companyId, runIds),
+    ]);
+    const result = new Map<string, RunOutputSilenceSummary>();
+    for (const run of runs) {
+      result.set(
+        run.id,
+        runOutputSilenceFromLookups(run, now, quietUntilDecisions.get(run.id) ?? null, evaluations.get(run.id) ?? null),
+      );
+    }
+    return result;
   }
 
   function redactWatchdogEvidenceText(value: string, currentUserRedactionOptions: Awaited<ReturnType<typeof getCurrentUserRedactionOptions>>) {
@@ -4590,6 +4708,7 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
 
   return {
     buildRunOutputSilence,
+    buildRunOutputSilenceMap,
     escalateStrandedRecoveryIssueInPlace,
     escalateStrandedAssignedIssue,
     recordWatchdogDecision,

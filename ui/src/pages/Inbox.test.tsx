@@ -7,6 +7,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Issue } from "@paperclipai/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CompanyJoinRequest } from "../api/access";
+import { queryKeys } from "../lib/queryKeys";
 
 const routerMock = vi.hoisted(() => ({
   location: { pathname: "/", search: "", hash: "" },
@@ -420,6 +421,74 @@ describe("Inbox toolbar", () => {
       expect(linkOf(rows[0]!)?.className).toContain("hover:bg-transparent");
     });
     expect(linkOf(rows[1]!)?.className).toContain("hover:bg-accent/50");
+
+    act(() => {
+      root.unmount();
+    });
+  });
+});
+
+describe("Inbox cross-tab cache invalidation", () => {
+  let container: HTMLDivElement;
+
+  beforeEach(() => {
+    resetInboxApiMocks();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    container.remove();
+  });
+
+  it("invalidates the Blocked tab's own query when an issue is dismissed from the Mine tab", async () => {
+    // Regression test: an issue can be both "touched by me" and blocked at
+    // the same time, so dismissing it from the Mine tab must also refresh
+    // the Blocked tab's own query cache. Before the fix, invalidateInboxIssueQueries()
+    // never touched queryKeys.issues.listBlockedAttention, so a since-archived
+    // issue kept showing on the Blocked tab in its stale pre-archive state
+    // until an unrelated refetch happened to occur.
+    routerMock.location.pathname = "/inbox/mine";
+    const issue = createIssue({
+      id: "issue-mine-1",
+      identifier: "PAP-2001",
+      title: "Dismiss me",
+      isUnreadForMe: false,
+    });
+    apiMocks.issuesList.mockResolvedValue([issue]);
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 0 } },
+    });
+    const blockedQueryKey = [...queryKeys.issues.listBlockedAttention("company-1"), "live-descendant-summary"];
+    // Simulate having visited the Blocked tab earlier in the session: its
+    // result is still warm in the cache even though BlockedInboxView isn't
+    // mounted right now (we're on the Mine tab).
+    queryClient.setQueryData(blockedQueryKey, []);
+
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <Inbox />
+        </QueryClientProvider>,
+      );
+    });
+
+    await vi.waitFor(() => {
+      expect(container.querySelectorAll("[data-inbox-item]").length).toBeGreaterThanOrEqual(1);
+    });
+
+    const dismissButton = container.querySelector<HTMLButtonElement>('button[aria-label="Dismiss from inbox"]');
+    expect(dismissButton).not.toBeNull();
+
+    await act(async () => {
+      dismissButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    await vi.waitFor(() => {
+      expect(queryClient.getQueryState(blockedQueryKey)?.isInvalidated).toBe(true);
+    });
 
     act(() => {
       root.unmount();
