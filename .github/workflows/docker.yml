@@ -115,11 +115,16 @@ jobs:
 
       - name: Create manifest list and push
         working-directory: /tmp/digests
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
         run: |
-          # shellcheck disable=SC2046 # word splitting is intended: both expansions produce separate args
-          docker buildx imagetools create \
-            $(jq -cr '.target."image".tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf '${{ env.IMAGE }}@sha256:%s ' *)
+          tags=()
+          while IFS= read -r tag; do
+            [ -n "$tag" ] && tags+=(-t "$tag")
+          done <<< "$TAGS"
+          digests=()
+          for digest in *; do digests+=("$IMAGE@sha256:$digest"); done
+          docker buildx imagetools create "${tags[@]}" "${digests[@]}"
 
       - name: Inspect image
         run: docker buildx imagetools inspect ${{ env.IMAGE }}:${{ steps.meta.outputs.version }}
