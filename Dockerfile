@@ -12,6 +12,27 @@ RUN usermod -u $USER_UID --non-unique node \
   && groupmod -g $USER_GID --non-unique node \
   && usermod -g $USER_GID -d /paperclip node
 
+# invoicegen: raise invoices from inside the pod. Upstream (github.com/raine/invoicegen)
+# only ships a linux-amd64 release binary — no linux-arm64 asset exists as of v0.1.2.
+# The paperclip pod runs linux/amd64 today, so we install the real binary there and,
+# on arm64, install a stub that fails loudly instead of silently shipping a broken
+# (or wrong-arch) binary. Revisit if the pod ever moves to arm64.
+FROM base AS invoicegen
+ARG TARGETARCH
+ARG INVOICEGEN_VERSION=v0.1.2
+ARG INVOICEGEN_LINUX_AMD64_SHA256=91af7b459bc4a000d594eb8db84fb7bcd0a624c243cd4955511e935980306cc8
+WORKDIR /tmp/invoicegen
+RUN set -eu; \
+  if [ "$TARGETARCH" = "amd64" ]; then \
+    curl -fsSL -o invoicegen.tar.gz "https://github.com/raine/invoicegen/releases/download/${INVOICEGEN_VERSION}/invoicegen-linux-amd64.tar.gz"; \
+    echo "${INVOICEGEN_LINUX_AMD64_SHA256}  invoicegen.tar.gz" | sha256sum -c -; \
+    tar -xzf invoicegen.tar.gz -C /usr/local/bin invoicegen; \
+    chmod +x /usr/local/bin/invoicegen; \
+  else \
+    printf '#!/bin/sh\necho "invoicegen: no linux-%s release from upstream (raine/invoicegen only ships linux-amd64); this image was built for %s" >&2\nexit 127\n' "$TARGETARCH" "$TARGETARCH" > /usr/local/bin/invoicegen; \
+    chmod +x /usr/local/bin/invoicegen; \
+  fi
+
 FROM base AS deps
 WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml .npmrc ./
@@ -60,6 +81,7 @@ ARG USER_UID=1000
 ARG USER_GID=1000
 WORKDIR /app
 COPY --chown=node:node --from=build /app /app
+COPY --from=invoicegen /usr/local/bin/invoicegen /usr/local/bin/invoicegen
 RUN npm install --global --omit=dev @anthropic-ai/claude-code@latest @openai/codex@latest opencode-ai @google/gemini-cli@latest \
   && mkdir -p /opt/otel/preload \
   && npm install --prefix /opt/otel --omit=dev \
