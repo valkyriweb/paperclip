@@ -14919,18 +14919,42 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         const elapsedMs = now.getTime() - baseline;
         if (elapsedMs < policy.intervalSec * 1000) continue;
 
-        const run = await enqueueWakeup(agent.id, {
-          source: "timer",
-          triggerDetail: "system",
-          reason: "heartbeat_timer",
-          requestedByActorType: "system",
-          requestedByActorId: "heartbeat_scheduler",
-          contextSnapshot: {
-            source: "scheduler",
-            reason: "interval_elapsed",
-            now: now.toISOString(),
-          },
-        });
+        // enqueueWakeup throws for per-agent gate failures (budget hard-stop, agent not
+        // invokable, inactive company). Those are expected, agent-local conditions: they must
+        // not abort the whole sweep, or a single over-budget agent silently starves every other
+        // agent's heartbeat and prevents tickDueIssueMonitors from running at all.
+        let run: Awaited<ReturnType<typeof enqueueWakeup>> = null;
+        try {
+          run = await enqueueWakeup(agent.id, {
+            source: "timer",
+            triggerDetail: "system",
+            reason: "heartbeat_timer",
+            requestedByActorType: "system",
+            requestedByActorId: "heartbeat_scheduler",
+            contextSnapshot: {
+              source: "scheduler",
+              reason: "interval_elapsed",
+              now: now.toISOString(),
+            },
+          });
+        } catch (err) {
+          skipped += 1;
+          // Only agent-local gate refusals are expected here. enqueueWakeup has already
+          // persisted a skipped agent_wakeup_requests row for those, so the outcome is
+          // durably recorded and debug is the right level.
+          //
+          // Anything else (a dropped connection during a Postgres failover, a bug) must stay
+          // loud: without this split a failover would throw for *every* agent, each one logged
+          // below the stdout transport's info level, and the sweep would return normally with
+          // the operator seeing nothing at all.
+          const expectedAgentGate = err instanceof HttpError && err.status >= 400 && err.status < 500;
+          if (expectedAgentGate) {
+            logger.debug({ err, agentId: agent.id }, "heartbeat timer skipped agent");
+          } else {
+            logger.error({ err, agentId: agent.id }, "heartbeat timer agent wakeup failed");
+          }
+          continue;
+        }
         if (run) enqueued += 1;
         else skipped += 1;
       }

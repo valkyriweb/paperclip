@@ -45,8 +45,19 @@ export type MigrationState =
       reason: "no-migration-journal-empty-db" | "no-migration-journal-non-empty-db" | "pending-migrations";
     };
 
+// postgres.js keeps pooled connections open forever by default. That interacts badly with
+// CloudNativePG failover: PostgreSQL's *smart* shutdown waits for every client session to
+// disconnect voluntarily, so idle pool connections hold the old primary open for the full
+// smartShutdownTimeout (measured: 180.9s) before CNPG escalates to a fast shutdown. Closing
+// idle connections turns that into a shutdown bounded by idle_timeout instead.
+const POOL_IDLE_TIMEOUT_SECONDS = 30;
+const POOL_MAX_LIFETIME_SECONDS = 30 * 60;
+
 export function createDb(url: string) {
-  const sql = postgres(url);
+  const sql = postgres(url, {
+    idle_timeout: POOL_IDLE_TIMEOUT_SECONDS,
+    max_lifetime: POOL_MAX_LIFETIME_SECONDS,
+  });
   return drizzlePg(sql, { schema });
 }
 
