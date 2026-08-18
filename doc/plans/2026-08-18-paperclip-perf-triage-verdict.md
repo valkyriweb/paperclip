@@ -299,16 +299,59 @@ What *is* still failing, right now, every 30 seconds:
 [14:16:53] ERROR: heartbeat timer tick failed
 ```
 
-98 occurrences in the pod's ~49-minute life. `server/src/index.ts:886` logs `{ err }` but
-**the error detail renders empty**, so the app's main scheduling loop has been failing
-continuously with no diagnosable cause in the log. `tickTimers()`
-(`server/src/services/heartbeat.ts:14802`) does a DB read, an `enqueueWakeup` per agent,
-then `tickDueIssueMonitors` — any of which can throw during a primary failover. This is the
-most likely current user-visible symptom and it is **application-level, not resource-level**.
+98 occurrences in the pod's ~49-minute life.
 
-Related, and worth a separate look: `agent_wakeup_requests` recorded **245,426 `skipped`**
-rows in 7 days (~35k/day, ~12 per 30-second tick) against 202 `completed`. That is a very
-high write rate for discarded work.
+> **Correction (added after the first version of this document).** The first draft said the
+> error payload "renders empty" and was therefore undiagnosable. **That was wrong, twice.**
+> The payload renders fine; I had only grepped the *stdout* stream, where `pino-pretty`
+> prints the message line and the `err:` block on following lines that my single-line grep
+> discarded. The app also writes a persistent `server.log` to the Longhorn volume that
+> survives restarts, and it had the full stack all along. I also briefly suspected a missing
+> pino `err` serializer; that was disproved by a repro against real `pino@9.14` +
+> `pino-pretty@13.1` — pino 9 applies it by default and output was byte-identical with and
+> without. Lesson recorded in friction: **read the file log before theorising about the
+> logger.**
+
+The actual error, from `/paperclip/instances/default/logs/server.log`:
+
+```
+[13:20:31] ERROR: heartbeat timer tick failed
+    err: {
+      "type": "HttpError",
+      "message": "Agent cannot start because its budget hard-stop is still exceeded.",
+      "stack":
+          Error: Agent cannot start because its budget hard-stop is still exceeded.
+              at conflict (/app/server/src/errors.ts:29:10)
+              at enqueueWakeup (/app/server/src/services/heartbeat.ts:13470:13)
+              at async Object.tickTimers (/app/server/src/services/heartbeat.ts:14922:21)
+```
+
+This is a **genuine application bug, unrelated to the cluster**, and it is the highest-value
+finding in this lane. `enqueueWakeup` writes a `skipped` row and then **throws** for
+per-agent gate failures (`budget.blocked`, `agent.not_invokable`, inactive company).
+`tickTimers()` iterated agents with **no per-agent guard**, so the throw escaped the loop.
+Consequences, every 30 seconds:
+
+- every agent ordered **after** the blocked one silently stopped receiving heartbeats;
+- `tickDueIssueMonitors` sits after the loop and therefore **never ran at all**.
+
+One agent sitting over its budget hard-stop was enough to degrade scheduling for the whole
+instance — and it does not self-clear, so this persists until someone raises the budget.
+This is almost certainly the real user-visible "Paperclip is unresponsive" symptom, and it
+is **application-level, not resource-level**.
+
+That also explains the number below, which the first draft flagged as merely "worth a
+separate look": `agent_wakeup_requests` recorded **245,426 `skipped`** rows in 7 days
+(~35k/day, ~12 per 30-second tick) against 202 `completed`. Those are the durably-recorded
+refusals from exactly this path.
+
+**Fixed** in this branch: per-agent `try/catch` in `tickTimers`, with a regression test
+(`server/src/__tests__/heartbeat-blocked-agent-isolation.test.ts`) that reproduces the
+production error without the fix and passes with it.
+
+One more incidental finding from reading that file: **`server.log` is 650 MB and
+unrotated**, on the Longhorn volume, written continuously. Worth rotating — it is a
+standing contributor to I/O on the very disk this report is about.
 
 ---
 
@@ -327,8 +370,9 @@ high write rate for discarded work.
    crashes. The counters moved **3→4 and 6→7 during this session**; the brief's "9 restarts"
    is now 11 and still climbing.
 5. **The timeouts.** Run-level timeouts stopped 2026-08-02. The live failure is
-   `heartbeat timer tick failed` every 30 s with an empty error payload, plus ~181-second
-   database blackouts during each failover.
+   `heartbeat timer tick failed` every 30 s — a budget hard-stop on one agent aborting the
+   entire scheduling sweep (now fixed with a regression test) — plus ~181-second database
+   blackouts during each failover.
 6. **etcd co-location.** Yes — Paperclip should move off this node, but that is the
    *smaller* half of the problem. See below.
 7. **Ranked verdict.** Above.

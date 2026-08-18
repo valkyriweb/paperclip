@@ -14821,18 +14821,31 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         const elapsedMs = now.getTime() - baseline;
         if (elapsedMs < policy.intervalSec * 1000) continue;
 
-        const run = await enqueueWakeup(agent.id, {
-          source: "timer",
-          triggerDetail: "system",
-          reason: "heartbeat_timer",
-          requestedByActorType: "system",
-          requestedByActorId: "heartbeat_scheduler",
-          contextSnapshot: {
-            source: "scheduler",
-            reason: "interval_elapsed",
-            now: now.toISOString(),
-          },
-        });
+        // enqueueWakeup throws for per-agent gate failures (budget hard-stop, agent not
+        // invokable, inactive company). Those are expected, agent-local conditions: they must
+        // not abort the whole sweep, or a single over-budget agent silently starves every other
+        // agent's heartbeat and prevents tickDueIssueMonitors from running at all.
+        let run: Awaited<ReturnType<typeof enqueueWakeup>> = null;
+        try {
+          run = await enqueueWakeup(agent.id, {
+            source: "timer",
+            triggerDetail: "system",
+            reason: "heartbeat_timer",
+            requestedByActorType: "system",
+            requestedByActorId: "heartbeat_scheduler",
+            contextSnapshot: {
+              source: "scheduler",
+              reason: "interval_elapsed",
+              now: now.toISOString(),
+            },
+          });
+        } catch (err) {
+          // enqueueWakeup has already persisted a skipped agent_wakeup_requests row for these
+          // gates, so the outcome is durably recorded; count it and move to the next agent.
+          skipped += 1;
+          logger.debug({ err, agentId: agent.id }, "heartbeat timer skipped agent");
+          continue;
+        }
         if (run) enqueued += 1;
         else skipped += 1;
       }
