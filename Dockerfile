@@ -12,24 +12,32 @@ RUN usermod -u $USER_UID --non-unique node \
   && groupmod -g $USER_GID --non-unique node \
   && usermod -g $USER_GID -d /paperclip node
 
-# invoicegen: raise invoices from inside the pod. Upstream (github.com/raine/invoicegen)
-# only ships a linux-amd64 release binary — no linux-arm64 asset exists as of v0.1.2.
+# invoicegen: raise invoices from inside the pod.
+#
+# Built from valkyriweb/invoicegen, a fork of upstream github.com/raine/invoicegen
+# pinned at v0.1.2. Upstream cannot render our invoices: it supports EUR/USD/GBP/JPY
+# only (no ZAR) and hardcodes `paper: "us-letter"` in its embedded Typst template,
+# neither of which is reachable from config. The fork adds ZAR and switches the
+# template to A4; it carries no other divergence.
+#
+# Only a linux-amd64 asset is published, matching upstream and matching the pod.
 # The paperclip pod runs linux/amd64 today, so we install the real binary there and,
 # on arm64, install a stub that fails loudly instead of silently shipping a broken
 # (or wrong-arch) binary. Revisit if the pod ever moves to arm64.
 FROM base AS invoicegen
 ARG TARGETARCH
-ARG INVOICEGEN_VERSION=v0.1.2
-ARG INVOICEGEN_LINUX_AMD64_SHA256=91af7b459bc4a000d594eb8db84fb7bcd0a624c243cd4955511e935980306cc8
+ARG INVOICEGEN_REPO=valkyriweb/invoicegen
+ARG INVOICEGEN_VERSION=v0.1.2-bermont.1
+ARG INVOICEGEN_LINUX_AMD64_SHA256=2e5d32a4efcc8f2c0ffc48e07528fbf155e1a997a3955cd40076c57046685f36
 WORKDIR /tmp/invoicegen
 RUN set -eu; \
   if [ "$TARGETARCH" = "amd64" ]; then \
-    curl -fsSL -o invoicegen.tar.gz "https://github.com/raine/invoicegen/releases/download/${INVOICEGEN_VERSION}/invoicegen-linux-amd64.tar.gz"; \
+    curl -fsSL -o invoicegen.tar.gz "https://github.com/${INVOICEGEN_REPO}/releases/download/${INVOICEGEN_VERSION}/invoicegen-linux-amd64.tar.gz"; \
     echo "${INVOICEGEN_LINUX_AMD64_SHA256}  invoicegen.tar.gz" | sha256sum -c -; \
     tar -xzf invoicegen.tar.gz -C /usr/local/bin invoicegen; \
     chmod +x /usr/local/bin/invoicegen; \
   else \
-    printf '#!/bin/sh\necho "invoicegen: no linux-%s release from upstream (raine/invoicegen only ships linux-amd64); this image was built for %s" >&2\nexit 127\n' "$TARGETARCH" "$TARGETARCH" > /usr/local/bin/invoicegen; \
+    printf '#!/bin/sh\necho "invoicegen: no linux-%s release available (only linux-amd64 is published); this image was built for %s" >&2\nexit 127\n' "$TARGETARCH" "$TARGETARCH" > /usr/local/bin/invoicegen; \
     chmod +x /usr/local/bin/invoicegen; \
   fi
 
@@ -111,7 +119,8 @@ RUN apt-get update \
   && chown node:node /paperclip
 
 COPY scripts/docker-entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+COPY scripts/invoicegen-config-bootstrap.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh /usr/local/bin/invoicegen-config-bootstrap.sh
 
 ENV NODE_ENV=production \
   HOME=/paperclip \
