@@ -14840,10 +14840,21 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
             },
           });
         } catch (err) {
-          // enqueueWakeup has already persisted a skipped agent_wakeup_requests row for these
-          // gates, so the outcome is durably recorded; count it and move to the next agent.
           skipped += 1;
-          logger.debug({ err, agentId: agent.id }, "heartbeat timer skipped agent");
+          // Only agent-local gate refusals are expected here. enqueueWakeup has already
+          // persisted a skipped agent_wakeup_requests row for those, so the outcome is
+          // durably recorded and debug is the right level.
+          //
+          // Anything else (a dropped connection during a Postgres failover, a bug) must stay
+          // loud: without this split a failover would throw for *every* agent, each one logged
+          // below the stdout transport's info level, and the sweep would return normally with
+          // the operator seeing nothing at all.
+          const expectedAgentGate = err instanceof HttpError && err.status >= 400 && err.status < 500;
+          if (expectedAgentGate) {
+            logger.debug({ err, agentId: agent.id }, "heartbeat timer skipped agent");
+          } else {
+            logger.error({ err, agentId: agent.id }, "heartbeat timer agent wakeup failed");
+          }
           continue;
         }
         if (run) enqueued += 1;
