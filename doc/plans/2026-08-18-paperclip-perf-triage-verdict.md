@@ -434,3 +434,77 @@ iostat sample, inflating load average to 98 and iowait to 67%. The corrected cle
 are load 24–60 and 49.6% iowait. I have flagged this inline rather than quietly dropping
 the bad sample, because the same trap will catch the next person who SSHes into a node that
 is already I/O-bound to diagnose why it is I/O-bound.
+
+---
+
+## Post-fix follow-up (2026-08-18, 22:10Z) — the palliative fixes were not sufficient
+
+Everything below was measured **after** all three infrastructure fixes were merged,
+reconciled, and confirmed live. It changes the disposition of this verdict, so it is
+recorded here rather than in a separate document.
+
+### What was landed
+
+| Change | Status | Effect on symptom |
+| --- | --- | --- |
+| paperclip #106 — heartbeat per-agent guard | merged, live on `sha-72418ff` | **Fixed.** See below. |
+| lue-kube #1461 — `server.log` cap | merged, smoke-tested | **Fixed.** 682 MB → 16 MB, inode preserved, volume 49%. |
+| lue-kube #1460 — `isolationCheck` 1000 → 5000 ms | merged, live | Restarts continued. |
+| lue-kube #1463 — probe `timeoutSeconds` 5 → 20 s, period 30 s | merged, live | Restarts continued. |
+
+### The heartbeat fix is confirmed working in production
+
+The old pod logged `heartbeat timer tick failed` every 30 s without interruption; the last
+occurrence is at **21:33:06**, on the old image. The replacement pod running `sha-72418ff`
+has logged **zero** occurrences since **21:40:55**, with `heartbeat timer agent wakeup
+failed` also at zero. One over-budget agent no longer aborts the whole sweep.
+
+### The Postgres restarts are NOT fixed, and the probe work cannot fix them
+
+`#1460` raised the isolation-check budget but left the kubelet probe at `timeoutSeconds: 5`.
+Because the isolation check runs *inside* the `/healthz` handler, this only changed the
+shape of the failure — a fast `statuscode: 500` became a probe timeout. `#1463` corrected
+that by giving the probe a 90 s budget (`timeout 20 × period 30 × failureThreshold 3`) with
+the handler's sequential worst case (6000 + 6000 ms) strictly inside it.
+
+Both instances took the new configuration and their restart counters reset. `paperclip-pg-1`
+then restarted again at **22:06:42Z** under the new budget, with this event:
+
+```
+Liveness probe failed: Get "https://10.42.4.94:8000/healthz": net/http: TLS handshake timeout
+```
+
+A TLS handshake that cannot complete within 20 seconds is not a timeout-tuning problem. The
+instance manager is not responding slowly, it is not being scheduled. Node state at the time:
+
+```
+load average: 34.96, 53.40, 47.26
+%Cpu(s): 6.4 us, 11.6 sy, 2.9 id, 75.6 wa
+D-state processes: 9
+sdh utilisation: 83.2%
+```
+
+2.9% idle with only 6.4% user: the node is blocked on disk, not busy with work. Note that
+`kubectl top node` reported a reassuring **CPU 48%, memory 63%, no pressure conditions** at
+the same moment — node-level pressure signals do not capture this failure mode, which is why
+the cluster looks healthy from the API while pods are being killed.
+
+### Corrected disposition
+
+The original verdict — *Paperclip is not resource-constrained; it is starved by a node that
+is I/O-saturated* — is unchanged and is now confirmed by a controlled experiment: the
+failure survived a 90-second probe budget.
+
+The probe changes should stay. They eliminate the *false-positive* failovers, in which a
+momentarily slow API caused a healthy primary to be declared isolated, and they remove a
+181 s smart-shutdown blackout. They are necessary. They are not sufficient, and no further
+tuning of them will help.
+
+**The remaining work is not a manifest change.** Paperclip must be moved off
+`lue-and-naddy-mbp-old`, which is also this cluster's etcd voter — the same disk contention
+drives both the etcd WAL fsync p99 (~32 ms vs the 10 ms threshold) and these probe failures.
+Until that move happens, the restarts will continue and should be expected.
+
+I record this explicitly because the merged-PR count on this lane (5) is a misleading
+progress signal: four of the five are green, correct, and reviewed, and the primary symptom
+they were aimed at is still occurring.
