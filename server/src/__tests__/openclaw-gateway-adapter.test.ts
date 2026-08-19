@@ -745,6 +745,66 @@ describe("openclaw gateway adapter execute", () => {
     expect(result.errorCode).toBe("openclaw_gateway_url_missing");
   });
 
+  it("records an unreachable gateway as a connect failure, not a run timeout", async () => {
+    // Bind and immediately close a port so the connect attempt is refused deterministically.
+    const probe = createServer();
+    await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
+    const port = (probe.address() as { port: number }).port;
+    await new Promise<void>((resolve) => probe.close(() => resolve()));
+
+    const logs: string[] = [];
+    const result = await execute(
+      buildContext(
+        {
+          url: `ws://127.0.0.1:${port}`,
+          connectTimeoutMs: 500,
+          connectMaxAttempts: 1,
+          disableDeviceAuth: true,
+        },
+        {
+          onLog: async (_stream, chunk) => {
+            logs.push(chunk);
+          },
+        },
+      ),
+    );
+
+    expect(result.exitCode).toBe(1);
+    // A transport failure must not be indistinguishable from a run overrun.
+    expect(result.timedOut).toBe(false);
+    expect(result.errorCode).toBe("openclaw_gateway_connect_timeout");
+    // connectMaxAttempts: 1 means no retry line was emitted.
+    expect(logs.join("")).not.toContain("retry 1/");
+  });
+
+  it("retries a connect failure within the configured attempt budget", async () => {
+    const probe = createServer();
+    await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
+    const port = (probe.address() as { port: number }).port;
+    await new Promise<void>((resolve) => probe.close(() => resolve()));
+
+    const logs: string[] = [];
+    const result = await execute(
+      buildContext(
+        {
+          url: `ws://127.0.0.1:${port}`,
+          connectTimeoutMs: 500,
+          connectMaxAttempts: 2,
+          connectRetryBaseDelayMs: 1,
+          disableDeviceAuth: true,
+        },
+        {
+          onLog: async (_stream, chunk) => {
+            logs.push(chunk);
+          },
+        },
+      ),
+    );
+
+    expect(result.errorCode).toBe("openclaw_gateway_connect_timeout");
+    expect(logs.join("")).toContain("retry 1/1");
+  });
+
   it("returns adapter-managed runtime services from gateway result meta", async () => {
     const gateway = await createMockGatewayServer({
       waitPayload: {

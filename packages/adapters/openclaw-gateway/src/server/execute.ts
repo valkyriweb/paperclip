@@ -119,6 +119,93 @@ function parseOptionalPositiveInteger(value: unknown): number | null {
   return null;
 }
 
+export const DEFAULT_CONNECT_TIMEOUT_MS = 15_000;
+export const DEFAULT_CONNECT_MAX_ATTEMPTS = 3;
+export const DEFAULT_CONNECT_RETRY_BASE_DELAY_MS = 2_000;
+
+/**
+ * Resolve the websocket connect / run-submission timeout.
+ *
+ * Previously this was `Math.min(timeoutMs, 15_000)`: a hard cap that no operator could
+ * raise, so an operator who fixed run-duration timeouts by raising `timeoutSec` still
+ * had a 15s ceiling on connect and submission. `connectTimeoutMs` is now an explicit
+ * config key; the 15s value survives only as the default.
+ */
+export function resolveConnectTimeoutMs(config: Record<string, unknown>, timeoutMs: number): number {
+  const explicit = parseOptionalPositiveInteger(config.connectTimeoutMs);
+  if (explicit !== null) return explicit;
+  if (timeoutMs > 0) return Math.min(timeoutMs, DEFAULT_CONNECT_TIMEOUT_MS);
+  return 10_000;
+}
+
+export type GatewayFailurePhase = "connect" | "run" | "other";
+
+export type GatewayFailureClassification = {
+  phase: GatewayFailurePhase;
+  timedOut: boolean;
+  retryable: boolean;
+  errorCode: "openclaw_gateway_connect_timeout" | "openclaw_gateway_timeout" | "openclaw_gateway_request_failed";
+};
+
+/**
+ * Separate transport failures (gateway unreachable / restarting) from run overruns
+ * (the agent genuinely ran past its budget). Historically both landed in
+ * `heartbeat_runs.status = 'timed_out'`, which made a 15s connect blip and a 900s run
+ * overrun indistinguishable for four months.
+ */
+export function classifyGatewayFailure(message: string): GatewayFailureClassification {
+  const lower = message.toLowerCase();
+
+  // Run-phase: the agent was accepted and we waited on it.
+  const runOverrun =
+    lower.includes("run timed out after") ||
+    lower.includes("agent.wait");
+  if (runOverrun) {
+    return { phase: "run", timedOut: true, retryable: false, errorCode: "openclaw_gateway_timeout" };
+  }
+
+  const connectTimeout =
+    lower.includes("websocket open timeout") ||
+    lower.includes("connect challenge timeout") ||
+    lower.includes("gateway request timeout (connect)") ||
+    lower.includes("gateway request timeout (agent)");
+  if (connectTimeout) {
+    return {
+      phase: "connect",
+      timedOut: false,
+      retryable: true,
+      errorCode: "openclaw_gateway_connect_timeout",
+    };
+  }
+
+  const connectTransport =
+    lower.includes("econnrefused") ||
+    lower.includes("econnreset") ||
+    lower.includes("socket hang up") ||
+    lower.includes("gateway closed before open") ||
+    lower.includes("gateway not connected");
+  if (connectTransport) {
+    return {
+      phase: "connect",
+      timedOut: false,
+      retryable: true,
+      errorCode: "openclaw_gateway_connect_timeout",
+    };
+  }
+
+  if (lower.includes("timeout")) {
+    return { phase: "other", timedOut: true, retryable: false, errorCode: "openclaw_gateway_timeout" };
+  }
+
+  return { phase: "other", timedOut: false, retryable: false, errorCode: "openclaw_gateway_request_failed" };
+}
+
+/** Bounded exponential-ish backoff for connect retries (2s, 4s, 8s... capped at 30s). */
+export function connectRetryDelayMs(attempt: number, baseDelayMs = DEFAULT_CONNECT_RETRY_BASE_DELAY_MS): number {
+  const delay = baseDelayMs * 2 ** Math.max(0, attempt - 1);
+  return Math.min(delay, 30_000);
+}
+
 function parseBoolean(value: unknown, fallback = false): boolean {
   if (typeof value === "boolean") return value;
   if (typeof value === "string") {
@@ -1272,7 +1359,10 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 
   const timeoutSec = Math.max(0, Math.floor(asNumber(ctx.config.timeoutSec, 120)));
   const timeoutMs = timeoutSec > 0 ? timeoutSec * 1000 : 0;
-  const connectTimeoutMs = timeoutMs > 0 ? Math.min(timeoutMs, 15_000) : 10_000;
+  const connectTimeoutMs = resolveConnectTimeoutMs(parseObject(ctx.config), timeoutMs);
+  const connectMaxAttempts = parseOptionalPositiveInteger(ctx.config.connectMaxAttempts) ?? DEFAULT_CONNECT_MAX_ATTEMPTS;
+  const connectRetryBaseDelayMs =
+    parseOptionalPositiveInteger(ctx.config.connectRetryBaseDelayMs) ?? DEFAULT_CONNECT_RETRY_BASE_DELAY_MS;
   const waitTimeoutMs = parseOptionalPositiveInteger(ctx.config.waitTimeoutMs) ?? (timeoutMs > 0 ? timeoutMs : 30_000);
   const waitKeepaliveMs = Math.max(
     1_000,
@@ -1370,7 +1460,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   let autoPairAttempted = false;
   let latestResultPayload: unknown = null;
   let retryCount = 0;
-  const MAX_RETRIES = 2;
+  const maxConnectRetries = Math.max(0, connectMaxAttempts - 1);
 
   while (true) {
     const trackedRunIds = new Set<string>([ctx.runId]);
@@ -1671,7 +1761,8 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const lower = message.toLowerCase();
-      const timedOut = lower.includes("timeout");
+      const classification = classifyGatewayFailure(message);
+      const timedOut = classification.timedOut;
       const pairingRequired = lower.includes("pairing required");
 
       if (
@@ -1710,20 +1801,16 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         );
       }
 
-      // Retry transient errors (connection refused, reset, socket hang up)
-      const isTransient =
-        !pairingRequired &&
-        (lower.includes("econnrefused") ||
-          lower.includes("econnreset") ||
-          lower.includes("socket hang up") ||
-          (timedOut && !lower.includes("agent.wait")));
+      // Retry connect/transport failures (gateway restarting, refused, reset, hang up,
+      // connect or submission timeout). Run overruns are never retried.
+      const isTransient = !pairingRequired && classification.retryable;
 
-      if (isTransient && retryCount < MAX_RETRIES) {
+      if (isTransient && retryCount < maxConnectRetries) {
         retryCount++;
-        const backoffMs = retryCount * 2000;
+        const backoffMs = connectRetryDelayMs(retryCount, connectRetryBaseDelayMs);
         await ctx.onLog(
           "stdout",
-          `[openclaw-gateway] transient error, retry ${retryCount}/${MAX_RETRIES} after ${backoffMs}ms: ${message}\n`,
+          `[openclaw-gateway] transient ${classification.phase} error, retry ${retryCount}/${maxConnectRetries} after ${backoffMs}ms: ${message}\n`,
         );
         await new Promise((r) => setTimeout(r, backoffMs));
         continue;
@@ -1740,11 +1827,9 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         signal: null,
         timedOut,
         errorMessage: detailedMessage,
-        errorCode: timedOut
-          ? "openclaw_gateway_timeout"
-          : pairingRequired
-            ? "openclaw_gateway_pairing_required"
-            : "openclaw_gateway_request_failed",
+        errorCode: pairingRequired
+          ? "openclaw_gateway_pairing_required"
+          : classification.errorCode,
         resultJson: asRecord(latestResultPayload),
       };
     } finally {

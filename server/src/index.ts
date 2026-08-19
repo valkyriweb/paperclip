@@ -4,6 +4,7 @@
 // instrumentationReady before opening DB connections or constructing the
 // HTTP server, so trace coverage does not depend on incidental timing.
 import { instrumentationReady, shutdownInstrumentation } from "./instrumentation.js";
+import { describeError } from "./lib/describe-error.js";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { resolve } from "node:path";
@@ -883,7 +884,11 @@ export async function startServer(): Promise<StartedServer> {
           }
         })
         .catch((err) => {
-          logger.error({ err }, "heartbeat timer tick failed");
+          const detail = describeError(err);
+          logger.error(
+            { err, error: detail, errorMessage: detail.message },
+            `heartbeat timer tick failed: ${detail.message}`,
+          );
         });
 
       void routines
