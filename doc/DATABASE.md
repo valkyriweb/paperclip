@@ -143,6 +143,23 @@ The database mode is controlled by `DATABASE_URL`:
 
 Your Drizzle schema (`packages/db/src/schema/`) stays the same regardless of mode.
 
+## Connection pool timeouts
+
+The application pool (`createDb()`) closes idle and long-lived connections so a
+database-side *smart* shutdown (failover, maintenance, CloudNativePG switchover) does not
+have to wait on Paperclip. Without these bounds, postgres.js keeps idle sessions open
+forever and a smart shutdown blocks for its full timeout before escalating — measured as a
+~181s primary outage for what should be a ~2s failover.
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `PAPERCLIP_DB_IDLE_TIMEOUT_SEC` | `10` | Close a pooled connection after this many seconds idle. `0` disables (previous behaviour). |
+| `PAPERCLIP_DB_MAX_LIFETIME_SEC` | `1800` | Recycle a connection after this many seconds, even if busy. `0` disables. |
+
+Defaults are sized for the measured workload (bursty 30s heartbeat ticks, 0–2 concurrent
+queries against a default pool of 10): a warm connection survives within a tick's work,
+and the pool fully drains within ~10s of quiescence.
+
 ## Resource membership tables
 
 Paperclip stores current-user sidebar membership state in:

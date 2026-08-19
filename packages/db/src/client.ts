@@ -45,19 +45,48 @@ export type MigrationState =
       reason: "no-migration-journal-empty-db" | "no-migration-journal-non-empty-db" | "pending-migrations";
     };
 
-// postgres.js keeps pooled connections open forever by default. That interacts badly with
-// CloudNativePG failover: PostgreSQL's *smart* shutdown waits for every client session to
-// disconnect voluntarily, so idle pool connections hold the old primary open for the full
-// smartShutdownTimeout (measured: 180.9s) before CNPG escalates to a fast shutdown. Closing
-// idle connections turns that into a shutdown bounded by idle_timeout instead.
-const POOL_IDLE_TIMEOUT_SECONDS = 30;
-const POOL_MAX_LIFETIME_SECONDS = 30 * 60;
+/**
+ * Idle/lifetime bounds for the application connection pool.
+ *
+ * postgres.js defaults `idle_timeout` to `null`, so an idle pooled connection is never
+ * closed. That interacts badly with CloudNativePG failover: PostgreSQL's *smart* shutdown
+ * waits for every client session to disconnect voluntarily, so idle pool connections hold
+ * the old primary open for the full `smartShutdownTimeout` (measured: 180.9s, with 9 idle
+ * `postgres.js` sessions) before CNPG escalates to a fast shutdown. Closing idle
+ * connections bounds that wait by `idle_timeout` instead.
+ *
+ * Defaults match the measured workload (bursty: heartbeat timers tick every 30s, 0-2
+ * active connections against a default pool of 10).
+ *
+ * Note on `max_lifetime`: postgres.js already bounds it by default, to a *per-connection*
+ * random 30-60 minutes (`60 * (30 + Math.random() * 30)`). Pinning a single fixed value
+ * trades that jitter for determinism, which means a pool opened at startup expires
+ * together. Kept at the landed 30 minutes, but exposed as an env override so an operator
+ * seeing herd reconnects can lengthen it or set 0 to fall back to postgres.js's jitter.
+ */
+export const DEFAULT_DB_IDLE_TIMEOUT_SEC = 30;
+export const DEFAULT_DB_MAX_LIFETIME_SEC = 30 * 60;
+
+export type DbPoolTimeouts = { idle_timeout: number; max_lifetime: number };
+
+function parsePositiveIntEnv(value: string | undefined, fallback: number): number {
+  if (value === undefined) return fallback;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return fallback;
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+  return Math.floor(parsed);
+}
+
+export function resolveDbPoolTimeouts(env: NodeJS.ProcessEnv = process.env): DbPoolTimeouts {
+  return {
+    idle_timeout: parsePositiveIntEnv(env.PAPERCLIP_DB_IDLE_TIMEOUT_SEC, DEFAULT_DB_IDLE_TIMEOUT_SEC),
+    max_lifetime: parsePositiveIntEnv(env.PAPERCLIP_DB_MAX_LIFETIME_SEC, DEFAULT_DB_MAX_LIFETIME_SEC),
+  };
+}
 
 export function createDb(url: string) {
-  const sql = postgres(url, {
-    idle_timeout: POOL_IDLE_TIMEOUT_SECONDS,
-    max_lifetime: POOL_MAX_LIFETIME_SECONDS,
-  });
+  const sql = postgres(url, resolveDbPoolTimeouts());
   return drizzlePg(sql, { schema });
 }
 
