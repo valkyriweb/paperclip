@@ -7,6 +7,7 @@ import {
   resolveConnectTimeoutMs,
   MIN_PROTOCOL_VERSION,
   PROTOCOL_VERSION,
+  resolveClaimedApiKeyPath,
   resolveSessionKey,
 } from "./execute.js";
 
@@ -192,5 +193,28 @@ describe("connectRetryDelayMs", () => {
     expect(connectRetryDelayMs(2)).toBe(4_000);
     expect(connectRetryDelayMs(3)).toBe(8_000);
     expect(connectRetryDelayMs(10)).toBe(30_000);
+
+describe("resolveClaimedApiKeyPath", () => {
+  const DEFAULT_PATH = "~/.openclaw/workspace/paperclip-claimed-api-key.json";
+
+  it("returns the configured per-agent path when set", () => {
+    expect(
+      resolveClaimedApiKeyPath("~/.openclaw/workspace/paperclip-keys/happy.json"),
+    ).toBe("~/.openclaw/workspace/paperclip-keys/happy.json");
+  });
+
+  it("falls back to the shared default when value is empty", () => {
+    expect(resolveClaimedApiKeyPath("")).toBe(DEFAULT_PATH);
+    expect(resolveClaimedApiKeyPath("   ")).toBe(DEFAULT_PATH);
+  });
+
+  it("falls back to the shared default when value is missing", () => {
+    expect(resolveClaimedApiKeyPath(undefined)).toBe(DEFAULT_PATH);
+    expect(resolveClaimedApiKeyPath(null)).toBe(DEFAULT_PATH);
+  });
+
+  it("falls back to the shared default when value is not a string", () => {
+    expect(resolveClaimedApiKeyPath(42)).toBe(DEFAULT_PATH);
+    expect(resolveClaimedApiKeyPath({})).toBe(DEFAULT_PATH);
   });
 });

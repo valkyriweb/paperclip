@@ -12,6 +12,19 @@ const BROWSER_CHANNEL =
   process.env.PAPERCLIP_E2E_BROWSER_CHANNEL?.trim() ||
   process.env.PAPERCLIP_PLAYWRIGHT_CHANNEL?.trim() ||
   undefined;
+const PAPERCLIP_INSTANCE_ID = "playwright-e2e";
+const PAPERCLIP_CONFIG = path.join(PAPERCLIP_HOME, "instances", PAPERCLIP_INSTANCE_ID, "config.json");
+const PAPERCLIP_AGENT_JWT_SECRET = process.env.PAPERCLIP_AGENT_JWT_SECRET ?? "playwright-e2e-agent-jwt-secret";
+const PAPERCLIP_DECISION_SIGNING_SECRET =
+  process.env.PAPERCLIP_DECISION_SIGNING_SECRET ?? "playwright-e2e-decision-signing-secret";
+const PAPERCLIP_TOOL_ACTION_SIGNING_SECRET =
+  process.env.PAPERCLIP_TOOL_ACTION_SIGNING_SECRET ?? "playwright-e2e-tool-action-signing-secret";
+
+process.env.PAPERCLIP_HOME = PAPERCLIP_HOME;
+process.env.PAPERCLIP_CONFIG = PAPERCLIP_CONFIG;
+process.env.PAPERCLIP_AGENT_JWT_SECRET = PAPERCLIP_AGENT_JWT_SECRET;
+process.env.PAPERCLIP_DECISION_SIGNING_SECRET = PAPERCLIP_DECISION_SIGNING_SECRET;
+process.env.PAPERCLIP_TOOL_ACTION_SIGNING_SECRET = PAPERCLIP_TOOL_ACTION_SIGNING_SECRET;
 
 export default defineConfig({
   testDir: ".",
@@ -54,9 +67,14 @@ export default defineConfig({
     stderr: "pipe",
     env: {
       ...process.env,
+      NODE_ENV: "test",
       PORT: String(PORT),
       PAPERCLIP_HOME,
-      PAPERCLIP_INSTANCE_ID: "playwright-e2e",
+      PAPERCLIP_INSTANCE_ID,
+      PAPERCLIP_CONFIG,
+      PAPERCLIP_AGENT_JWT_SECRET,
+      PAPERCLIP_DECISION_SIGNING_SECRET,
+      PAPERCLIP_TOOL_ACTION_SIGNING_SECRET,
       PAPERCLIP_BIND: "loopback",
       PAPERCLIP_DEPLOYMENT_MODE: "local_trusted",
       PAPERCLIP_DEPLOYMENT_EXPOSURE: "private",

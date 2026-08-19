@@ -3,6 +3,7 @@ import request from "supertest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { afterAll, afterEach, beforeAll } from "vitest";
 import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
 import {
   createDb,
   companies,
@@ -373,7 +374,8 @@ describe("cost routes", () => {
       .patch("/api/agents/agent-1/budgets")
       .send({ budgetMonthlyCents: 2500 });
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("Agent not found");
     expect(mockAgentService.update).not.toHaveBeenCalled();
   });
 
@@ -656,6 +658,58 @@ describeEmbeddedPostgres("cost and finance aggregate overflow handling", () => {
     expect(summary.spendCents).toBe(0);
   });
 
+  it("persists unpriced token usage without inflating monthly spend", async () => {
+    const companyId = randomUUID();
+    const agentId = randomUUID();
+    const runId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "CLI Agent",
+      role: "engineer",
+      status: "active",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    });
+    await db.insert(heartbeatRuns).values({
+      id: runId,
+      companyId,
+      agentId,
+      status: "completed",
+      startedAt: new Date(),
+      finishedAt: new Date(),
+    });
+
+    const event = await costs.createEvent(companyId, {
+      heartbeatRunId: runId,
+      agentId,
+      provider: "openai",
+      biller: "chatgpt",
+      billingType: "subscription_included",
+      costStatus: "unpriced",
+      model: "gpt-5.6-terra",
+      inputTokens: 2_732_577,
+      cachedInputTokens: 2_632_998,
+      outputTokens: 32_644,
+      costCents: 0,
+      occurredAt: new Date("2026-07-13T14:22:54.000Z"),
+    });
+
+    expect(event.costStatus).toBe("unpriced");
+    expect(event.inputTokens).toBe(2_732_577);
+    const [agent] = await db.select().from(agents).where(eq(agents.id, agentId));
+    expect(agent?.spentMonthlyCents).toBe(0);
+  });
+
   it("aggregates cost event sums above int32 without raising Postgres integer overflow", async () => {
     const companyId = randomUUID();
     const agentId = randomUUID();
@@ -737,6 +791,7 @@ describeEmbeddedPostgres("cost and finance aggregate overflow handling", () => {
     const rootIssueId = randomUUID();
     const childIssueId = randomUUID();
     const grandchildIssueId = randomUUID();
+    const harnessIssueId = randomUUID();
     const siblingIssueId = randomUUID();
 
     await db.insert(companies).values({
@@ -785,6 +840,18 @@ describeEmbeddedPostgres("cost and finance aggregate overflow handling", () => {
         priority: "medium",
         issueNumber: 3,
         identifier: "TST-3",
+      },
+      {
+        id: harnessIssueId,
+        companyId,
+        parentId: rootIssueId,
+        title: "Hidden skill test harness",
+        status: "done",
+        priority: "medium",
+        issueNumber: 5,
+        identifier: "TST-5",
+        workMode: "skill_test",
+        harnessKind: "skill_test",
       },
       {
         id: siblingIssueId,
@@ -876,6 +943,7 @@ describeEmbeddedPostgres("cost and finance aggregate overflow handling", () => {
     const rootIssueId = randomUUID();
     const childIssueId = randomUUID();
     const grandchildIssueId = randomUUID();
+    const harnessIssueId = randomUUID();
     const siblingIssueId = randomUUID();
 
     await db.insert(companies).values({
@@ -934,11 +1002,24 @@ describeEmbeddedPostgres("cost and finance aggregate overflow handling", () => {
         issueNumber: 4,
         identifier: "TST-4",
       },
+      {
+        id: harnessIssueId,
+        companyId,
+        parentId: rootIssueId,
+        title: "Harness child",
+        status: "done",
+        priority: "medium",
+        workMode: "skill_test",
+        harnessKind: "skill_test",
+        issueNumber: 5,
+        identifier: "TST-5",
+      },
     ]);
 
     const linkedViaContextRunId = randomUUID();
     const linkedViaActivityRunId = randomUUID();
     const grandchildRunId = randomUUID();
+    const harnessRunId = randomUUID();
     const siblingRunId = randomUUID();
     const livePartialRunId = randomUUID();
 
@@ -974,6 +1055,17 @@ describeEmbeddedPostgres("cost and finance aggregate overflow handling", () => {
         startedAt: new Date("2026-04-10T00:10:00.000Z"),
         finishedAt: new Date("2026-04-10T00:10:30.000Z"),
         contextSnapshot: { issueId: grandchildIssueId },
+      },
+      // 45s harness run under root - should be excluded from visible issue tree rollups
+      {
+        id: harnessRunId,
+        companyId,
+        agentId,
+        invocationSource: "on_demand",
+        status: "completed",
+        startedAt: new Date("2026-04-10T00:15:00.000Z"),
+        finishedAt: new Date("2026-04-10T00:15:45.000Z"),
+        contextSnapshot: { issueId: harnessIssueId },
       },
       // sibling run NOT under root – should be excluded
       {
