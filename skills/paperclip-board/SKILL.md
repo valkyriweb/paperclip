@@ -1,12 +1,10 @@
 ---
 name: paperclip-board
 description: >
-  Manage a Paperclip company as a board member via chat. Covers onboarding
-  (company creation, CEO setup, hiring plans), agent management, approvals,
-  task monitoring, cost oversight, and work product review. "Use when the
-  user wants to interact with their Paperclip control plane" — e.g. "what's
-  on the board?", "hire a designer", "approve pending requests", "how much
-  have the agents spent this month?".
+  Manage a Paperclip company as a board member via chat: onboarding, agent
+  management, approvals, task monitoring, cost oversight, and work product
+  review. Use when the user wants to interact with their Paperclip control
+  plane — e.g. "what's on the board?" or "approve pending requests".
 ---
 
 # Paperclip Board Skill

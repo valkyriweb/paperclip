@@ -14,6 +14,7 @@ const dialogState = vi.hoisted(() => ({
 }));
 
 const dialogContentState = vi.hoisted(() => ({
+  onEscapeKeyDown: null as null | ((event: KeyboardEvent) => void),
   onPointerDownOutside: null as null | ((event: {
     detail: { originalEvent: { target: EventTarget | null } };
     preventDefault: () => void;
@@ -208,14 +209,15 @@ vi.mock("@/components/ui/dialog", () => ({
   DialogContent: ({
     children,
     showCloseButton: _showCloseButton,
-    onEscapeKeyDown: _onEscapeKeyDown,
+    onEscapeKeyDown,
     onPointerDownOutside,
     ...props
   }: ComponentProps<"div"> & {
     showCloseButton?: boolean;
-    onEscapeKeyDown?: (event: unknown) => void;
+    onEscapeKeyDown?: (event: KeyboardEvent) => void;
     onPointerDownOutside?: (event: unknown) => void;
   }) => {
+    dialogContentState.onEscapeKeyDown = onEscapeKeyDown ?? null;
     dialogContentState.onPointerDownOutside = onPointerDownOutside as typeof dialogContentState.onPointerDownOutside;
     return <div {...props}>{children}</div>;
   },
@@ -330,6 +332,7 @@ describe("NewIssueDialog", () => {
     dialogState.newIssueOpen = true;
     dialogState.newIssueDefaults = {};
     dialogState.closeNewIssue.mockReset();
+    dialogContentState.onEscapeKeyDown = null;
     dialogContentState.onPointerDownOutside = null;
     toastState.pushToast.mockReset();
     mockIssuesApi.create.mockReset();
@@ -794,6 +797,29 @@ describe("NewIssueDialog", () => {
     act(() => root.unmount());
   });
 
+  it("shows the create-task loading state only in the submit button", async () => {
+    mockIssuesApi.create.mockReturnValue(new Promise(() => undefined));
+    dialogState.newIssueDefaults = { title: "Pending task" };
+
+    const { root } = renderDialog(container);
+    await flush();
+
+    const submitButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("Create Task"));
+    expect(submitButton).not.toBeUndefined();
+
+    await act(async () => {
+      submitButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flush();
+
+    expect(submitButton?.textContent).toContain("Creating...");
+    expect(submitButton?.getAttribute("aria-busy")).toBe("true");
+    expect(container.textContent).not.toContain("Creating issue");
+
+    act(() => root.unmount());
+  });
+
   it("submits Chinese, Japanese, and Hindi issue text without normalization", async () => {
     const title = "验证中文任务";
     const description = [
@@ -923,7 +949,7 @@ describe("NewIssueDialog", () => {
     await act(async () => {
       modeChip()?.dispatchEvent(new KeyboardEvent("keydown", {
         bubbles: true,
-        code: "Period",
+        code: "",
         key: ".",
         metaKey: true,
       }));
@@ -949,6 +975,76 @@ describe("NewIssueDialog", () => {
       }));
     });
     expect(modeChip()?.getAttribute("data-issue-work-mode-chip")).toBe("standard");
+
+    act(() => root.unmount());
+  });
+
+  it("cycles work modes when iOS reports cmd-period as Escape", async () => {
+    const { root } = renderDialog(container);
+    await flush();
+
+    const modeChip = () => container.querySelector("[data-issue-work-mode-chip]");
+    expect(modeChip()?.getAttribute("data-issue-work-mode-chip")).toBe("standard");
+    expect(dialogContentState.onEscapeKeyDown).not.toBeNull();
+
+    const commandPeriodAsEscape = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "Escape",
+      metaKey: true,
+    });
+    await act(async () => {
+      dialogContentState.onEscapeKeyDown?.(commandPeriodAsEscape);
+    });
+
+    expect(commandPeriodAsEscape.defaultPrevented).toBe(true);
+    expect(modeChip()?.getAttribute("data-issue-work-mode-chip")).toBe("planning");
+    expect(dialogState.closeNewIssue).not.toHaveBeenCalled();
+
+    const plainEscape = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "Escape",
+    });
+    await act(async () => {
+      dialogContentState.onEscapeKeyDown?.(plainEscape);
+    });
+
+    expect(plainEscape.defaultPrevented).toBe(false);
+    expect(modeChip()?.getAttribute("data-issue-work-mode-chip")).toBe("planning");
+
+    const controlEscape = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      ctrlKey: true,
+      key: "Escape",
+    });
+    await act(async () => {
+      dialogContentState.onEscapeKeyDown?.(controlEscape);
+    });
+
+    expect(controlEscape.defaultPrevented).toBe(false);
+    expect(modeChip()?.getAttribute("data-issue-work-mode-chip")).toBe("planning");
+
+    act(() => root.unmount());
+  });
+
+  it("cycles work modes with ctrl-period", async () => {
+    const { root } = renderDialog(container);
+    await flush();
+
+    const modeChip = () => container.querySelector("[data-issue-work-mode-chip]");
+    expect(modeChip()?.getAttribute("data-issue-work-mode-chip")).toBe("standard");
+
+    await act(async () => {
+      modeChip()?.dispatchEvent(new KeyboardEvent("keydown", {
+        bubbles: true,
+        code: "Period",
+        key: ".",
+        ctrlKey: true,
+      }));
+    });
+    expect(modeChip()?.getAttribute("data-issue-work-mode-chip")).toBe("planning");
 
     act(() => root.unmount());
   });
@@ -995,9 +1091,9 @@ describe("NewIssueDialog", () => {
     await flush();
 
     const dialogContent = Array.from(container.querySelectorAll("div")).find((element) =>
-      typeof element.className === "string" && element.className.includes("max-h-[var(--new-issue-dialog-height)]"),
+      typeof element.className === "string" && element.className.includes("max-h-(--new-issue-dialog-height)"),
     );
-    expect(dialogContent?.className).toContain("h-[var(--new-issue-dialog-height)]");
+    expect(dialogContent?.className).toContain("h-(--new-issue-dialog-height)");
     expect(dialogContent?.className).toContain("overflow-hidden");
     expect(dialogContent?.getAttribute("style")).toContain("env(safe-area-inset-top)");
     expect(dialogContent?.getAttribute("style")).toContain("env(safe-area-inset-bottom)");
@@ -1015,24 +1111,49 @@ describe("NewIssueDialog", () => {
     act(() => root.unmount());
   });
 
-  it("keeps priority under the mobile overflow menu", async () => {
+  it("hides the priority chip and mobile priority option (PAP-411)", async () => {
     const { root } = renderDialog(container);
     await flush();
 
+    // PAP-411: priority UI is hidden behind SHOW_TASK_PRIORITY_UI (off). Neither the
+    // desktop priority chip nor the mobile overflow priority option should render.
     const priorityChip = container.querySelector('[data-testid="new-issue-priority-chip"]');
-    expect(priorityChip?.className).toContain("hidden");
-    expect(priorityChip?.className).toContain("sm:inline-flex");
+    expect(priorityChip).toBeNull();
 
     const highPriorityOption = container.querySelector('[data-testid="new-issue-more-priority-high"]');
-    expect(highPriorityOption?.textContent).toContain("High");
+    expect(highPriorityOption).toBeNull();
+
+    act(() => root.unmount());
+  });
+
+  it("still submits the default priority when the priority UI is hidden (PAP-411)", async () => {
+    dialogState.newIssueDefaults = {
+      title: "Priority default persists",
+    };
+
+    const { root } = renderDialog(container);
+    await flush();
+
+    const submitButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("Create Task"));
+    expect(submitButton).not.toBeUndefined();
+    await vi.waitFor(() => {
+      expect(submitButton?.hasAttribute("disabled")).toBe(false);
+    });
 
     await act(async () => {
-      highPriorityOption?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      submitButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     await flush();
 
-    const selectedHighPriorityOption = container.querySelector('[data-testid="new-issue-more-priority-high"]');
-    expect(selectedHighPriorityOption?.className).toContain("bg-accent");
+    // PAP-411: the priority control is hidden, but the data-model default must survive.
+    expect(mockIssuesApi.create).toHaveBeenCalledWith(
+      "company-1",
+      expect.objectContaining({
+        title: "Priority default persists",
+        priority: "medium",
+      }),
+    );
 
     act(() => root.unmount());
   });

@@ -63,7 +63,7 @@ export interface RunLogStore {
   begin(input: { companyId: string; agentId: string; runId: string }): Promise<RunLogHandle>;
   append(
     handle: RunLogHandle,
-    event: { stream: "stdout" | "stderr" | "system"; chunk: string; ts: string },
+    event: { stream: "stdout" | "stderr" | "system"; chunk: string; ts: string; seq?: number },
   ): Promise<number>;
   finalize(handle: RunLogHandle): Promise<RunLogFinalizeSummary>;
   read(handle: RunLogHandle, opts?: RunLogReadOptions): Promise<RunLogReadResult>;
@@ -452,6 +452,10 @@ export function createLocalFileRunLogStore(
         ts: event.ts,
         stream: event.stream,
         chunk: event.chunk,
+        // Monotonic per-run sequence so readers can dedupe and order records
+        // even when several identical chunks share the same millisecond ts
+        // (common for ACP-style token deltas).
+        ...(typeof event.seq === "number" && Number.isFinite(event.seq) ? { seq: event.seq } : {}),
       });
       const persisted = `${line}\n`;
       const persistedBytes = Buffer.byteLength(persisted, "utf8");
@@ -578,3 +582,9 @@ export function getRunLogStore() {
   });
   return cachedStore;
 }
+
+// Upstream compat (v2026.817.0): upstream's durable store mirrors in-flight
+// logs to S3 and flushes them on graceful shutdown. The fork store instead
+// cold-archives finalized logs via run-log-archiver, so there is nothing to
+// flush; keep the export as a no-op so shared shutdown wiring compiles.
+export async function flushInFlightRunLogMirrors(): Promise<void> {}

@@ -5,6 +5,7 @@ import { activityLog, agents, companies, costEvents, heartbeatRuns, issues, proj
 import { notFound, unprocessable } from "../errors.js";
 import { budgetService, type BudgetServiceHooks } from "./budgets.js";
 import { resolveCostEventCostCents } from "./model-costs.js";
+import { visibleIssueCondition } from "./issue-visibility.js";
 
 export interface CostDateRange {
   from?: Date;
@@ -184,6 +185,7 @@ export function costService(db: Db, budgetHooks: BudgetServiceHooks = {}) {
             WHERE ${issues.companyId} = ${companyId}
               AND ${issues.parentId} = ${issueId}
               AND ${issues.hiddenAt} IS NULL
+              AND ${issues.harnessKind} IS NULL
           `
         : sql`
             SELECT ${issues.id}
@@ -191,6 +193,7 @@ export function costService(db: Db, budgetHooks: BudgetServiceHooks = {}) {
             WHERE ${issues.companyId} = ${companyId}
               AND ${issues.id} = ${issueId}
               AND ${issues.hiddenAt} IS NULL
+              AND ${issues.harnessKind} IS NULL
           `;
 
       const cteSeedText = options.excludeRoot
@@ -200,6 +203,7 @@ export function costService(db: Db, budgetHooks: BudgetServiceHooks = {}) {
             WHERE ${issues.companyId} = ${companyId}
               AND ${issues.parentId} = ${issueId}
               AND ${issues.hiddenAt} IS NULL
+              AND ${issues.harnessKind} IS NULL
           `
         : sql`
             SELECT (${issues.id})::text AS id
@@ -207,6 +211,7 @@ export function costService(db: Db, budgetHooks: BudgetServiceHooks = {}) {
             WHERE ${issues.companyId} = ${companyId}
               AND ${issues.id} = ${issueId}
               AND ${issues.hiddenAt} IS NULL
+              AND ${issues.harnessKind} IS NULL
           `;
 
       const issueTreeCondition = sql<boolean>`
@@ -219,6 +224,7 @@ export function costService(db: Db, budgetHooks: BudgetServiceHooks = {}) {
             JOIN issue_tree ON ${childIssues.parentId} = issue_tree.id
             WHERE ${childIssues.companyId} = ${companyId}
               AND ${childIssues.hiddenAt} IS NULL
+              AND ${childIssues.harnessKind} IS NULL
           )
           SELECT id FROM issue_tree
         )
@@ -233,6 +239,7 @@ export function costService(db: Db, budgetHooks: BudgetServiceHooks = {}) {
           JOIN issue_tree ON (${childIssues.parentId})::text = issue_tree.id
           WHERE ${childIssues.companyId} = ${companyId}
             AND ${childIssues.hiddenAt} IS NULL
+            AND ${childIssues.harnessKind} IS NULL
         )
         SELECT
           count(distinct ${heartbeatRuns.id})::int AS "runCount",
@@ -276,7 +283,7 @@ export function costService(db: Db, budgetHooks: BudgetServiceHooks = {}) {
           .where(
             and(
               eq(issues.companyId, companyId),
-              isNull(issues.hiddenAt),
+              visibleIssueCondition(),
               issueTreeCondition,
             ),
           ),
