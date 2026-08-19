@@ -1,4 +1,7 @@
 import { createHash } from "node:crypto";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type { AdapterModel } from "@paperclipai/adapter-utils";
 import { asString, runChildProcess } from "@paperclipai/adapter-utils/server-utils";
 
@@ -6,6 +9,22 @@ const MODELS_CACHE_TTL_MS = 5 * 60_000;
 const MODELS_CACHE_STALE_TTL_MS = 24 * 60 * 60_000;
 const MODELS_CACHE_MAX_ENTRIES = 64;
 const MODEL_DISCOVERY_TIMEOUT_SEC = 60;
+const MODELS_DISCOVERY_TIMEOUT_COOLDOWN_MS = 5 * 60_000;
+
+/**
+ * Raised when `pi --list-models` could not be run to completion (timeout, spawn
+ * failure, non-zero exit). It means model availability is *unknown*, which is
+ * different from a completed discovery that did not list the configured model.
+ */
+export class PiModelDiscoveryUnavailableError extends Error {
+  readonly timedOut: boolean;
+
+  constructor(message: string, options?: { timedOut?: boolean }) {
+    super(message);
+    this.name = "PiModelDiscoveryUnavailableError";
+    this.timedOut = options?.timedOut ?? false;
+  }
+}
 
 function firstNonEmptyLine(text: string): string {
   return (
@@ -83,6 +102,10 @@ type DiscoveryCacheEntry = {
 
 const discoveryCache = new Map<string, DiscoveryCacheEntry>();
 const discoveryRequests = new Map<string, Promise<AdapterModel[]>>();
+// A discovery that timed out costs MODEL_DISCOVERY_TIMEOUT_SEC of run wall clock.
+// Remember it briefly so back-to-back runs on a contended host fail fast instead
+// of each paying the full timeout again.
+const discoveryTimeoutUntil = new Map<string, number>();
 const VOLATILE_ENV_KEY_EXACT = new Set([
   "PAPERCLIP_AGENT_ID",
   "PAPERCLIP_COMPANY_ID",
@@ -161,11 +184,15 @@ async function runPiModelDiscovery(
   );
 
   if (result.timedOut) {
-    throw new Error("`pi --list-models` timed out.");
+    throw new PiModelDiscoveryUnavailableError("`pi --list-models` timed out.", {
+      timedOut: true,
+    });
   }
   if ((result.exitCode ?? 1) !== 0) {
     const detail = firstNonEmptyLine(result.stderr) || firstNonEmptyLine(result.stdout);
-    throw new Error(detail ? `\`pi --list-models\` failed: ${detail}` : "`pi --list-models` failed.");
+    throw new PiModelDiscoveryUnavailableError(
+      detail ? `\`pi --list-models\` failed: ${detail}` : "`pi --list-models` failed.",
+    );
   }
 
   // Current Pi writes model rows to stdout; older releases wrote them to stderr.
@@ -212,11 +239,24 @@ export async function discoverPiModelsCached(input: {
   const cached = discoveryCache.get(key);
   if (cached && cached.expiresAt > now) return cached.models;
 
+  const cooldownUntil = discoveryTimeoutUntil.get(key);
+  if (cooldownUntil !== undefined) {
+    if (cooldownUntil > now) {
+      if (cached && cached.staleUntil > now) return cached.models;
+      throw new PiModelDiscoveryUnavailableError(
+        "`pi --list-models` timed out recently; skipping discovery.",
+        { timedOut: true },
+      );
+    }
+    discoveryTimeoutUntil.delete(key);
+  }
+
   let request = discoveryRequests.get(key);
   if (!request) {
     request = runPiModelDiscovery(command, cwd, runtimeEnv)
       .then((models) => {
         const refreshedAt = Date.now();
+        discoveryTimeoutUntil.delete(key);
         cacheDiscovery(key, {
           expiresAt: refreshedAt + MODELS_CACHE_TTL_MS,
           staleUntil: refreshedAt + MODELS_CACHE_STALE_TTL_MS,
@@ -224,7 +264,10 @@ export async function discoverPiModelsCached(input: {
         });
         return models;
       })
-      .catch((error) => {
+      .catch((error: unknown) => {
+        if (error instanceof PiModelDiscoveryUnavailableError && error.timedOut) {
+          discoveryTimeoutUntil.set(key, Date.now() + MODELS_DISCOVERY_TIMEOUT_COOLDOWN_MS);
+        }
         const stale = discoveryCache.get(key);
         if (!stale || stale.staleUntil <= Date.now()) throw error;
         console.warn("[paperclip] Pi model refresh failed; using cached models.");
@@ -239,6 +282,54 @@ export async function discoverPiModelsCached(input: {
   return request;
 }
 
+/**
+ * Fast path for the model preflight: Pi resolves custom providers/models from
+ * `$PI_CODING_AGENT_DIR/models.json` (falling back to `$HOME/.pi/agent`), and
+ * paperclip deployments declare their providers there. When the configured
+ * model is listed in that file we can answer the preflight without spawning
+ * `pi --list-models` at all — a full Pi CLI boot that costs ~15s on a cold
+ * volume and is the top agent-error source when it overruns its 60s cap.
+ * Returns null when the file is absent/unreadable/unparseable or does not
+ * mention the model (e.g. built-in providers), so callers fall back to spawn
+ * discovery.
+ */
+export async function readPiModelsFromAgentConfig(
+  runtimeEnv: Record<string, string>,
+): Promise<AdapterModel[] | null> {
+  const agentDir =
+    runtimeEnv.PI_CODING_AGENT_DIR?.trim() ||
+    path.join(runtimeEnv.HOME?.trim() || os.homedir(), ".pi", "agent");
+  let raw: string;
+  try {
+    raw = await fs.readFile(path.join(agentDir, "models.json"), "utf8");
+  } catch {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw) as { providers?: Record<string, { models?: unknown }> };
+    if (!parsed || typeof parsed !== "object" || !parsed.providers) return null;
+    const models: AdapterModel[] = [];
+    for (const [provider, config] of Object.entries(parsed.providers)) {
+      if (!config || typeof config !== "object" || !Array.isArray(config.models)) continue;
+      for (const entry of config.models) {
+        const id =
+          typeof entry === "string"
+            ? entry
+            : typeof (entry as { id?: unknown })?.id === "string"
+              ? (entry as { id: string }).id
+              : "";
+        if (!id.trim()) continue;
+        const full = `${provider}/${id.trim()}`;
+        models.push({ id: full, label: full });
+      }
+    }
+    if (models.length === 0) return null;
+    return sortModels(dedupeModels(models));
+  } catch {
+    return null;
+  }
+}
+
 export async function ensurePiModelConfiguredAndAvailable(input: {
   model?: unknown;
   command?: unknown;
@@ -250,11 +341,31 @@ export async function ensurePiModelConfiguredAndAvailable(input: {
     throw new Error("Pi requires `adapterConfig.model` in provider/model format.");
   }
 
-  const models = await discoverPiModelsCached({
-    command: input.command,
-    cwd: input.cwd,
-    env: input.env,
-  });
+  // Answer from the static Pi agent config when it already lists the model;
+  // no child process needed.
+  const fileEnv = normalizeEnv({ ...process.env, ...normalizeEnv(input.env) });
+  const fileModels = await readPiModelsFromAgentConfig(fileEnv);
+  if (fileModels?.some((entry) => entry.id === model)) return fileModels;
+
+  let models: AdapterModel[];
+  try {
+    models = await discoverPiModelsCached({
+      command: input.command,
+      cwd: input.cwd,
+      env: input.env,
+    });
+  } catch (error) {
+    if (!(error instanceof PiModelDiscoveryUnavailableError) || !error.timedOut) throw error;
+    // Model discovery is a preflight check, not the run itself. When the check
+    // cannot be completed (the child process timed out) we do
+    // not know that the model is bad, so failing the run here turns a slow node
+    // into a failed agent run. Warn and let the run proceed; a genuinely bad
+    // model still fails with the adapter's own error.
+    console.warn(
+      `[paperclip] Pi model discovery unavailable (${error.message}); skipping model preflight for ${model}.`,
+    );
+    return [];
+  }
 
   if (models.length === 0) {
     throw new Error("Pi returned no models. Run `pi --list-models` and verify provider auth.");
@@ -281,6 +392,7 @@ export async function listPiModels(): Promise<AdapterModel[]> {
 export function resetPiModelsCacheForTests() {
   discoveryCache.clear();
   discoveryRequests.clear();
+  discoveryTimeoutUntil.clear();
 }
 
 export function piModelsCacheSizeForTests() {

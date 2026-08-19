@@ -63,8 +63,132 @@ describe("pi models", () => {
     await expect(
       ensurePiModelConfiguredAndAvailable({
         model: "xai/grok-4",
+        env: { PI_CODING_AGENT_DIR: "/nonexistent-pi-agent-dir" },
       }),
     ).rejects.toThrow();
+  });
+
+  it("answers the preflight from the agent-config models.json without spawning pi", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "paperclip-pi-agent-config-"));
+    try {
+      const runChildProcess = vi.spyOn(serverUtils, "runChildProcess");
+      await writeFile(
+        path.join(directory, "models.json"),
+        JSON.stringify({
+          providers: { clawrouter: { models: [{ id: "claude-opus-5-200k" }, "claude-sonnet-5" ] } },
+        }),
+      );
+
+      await expect(
+        ensurePiModelConfiguredAndAvailable({
+          model: "clawrouter/claude-sonnet-5",
+          command: "pi",
+          env: { PI_CODING_AGENT_DIR: directory },
+        }),
+      ).resolves.toEqual([
+        { id: "clawrouter/claude-opus-5-200k", label: "clawrouter/claude-opus-5-200k" },
+        { id: "clawrouter/claude-sonnet-5", label: "clawrouter/claude-sonnet-5" },
+      ]);
+      expect(runChildProcess).not.toHaveBeenCalled();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to spawn discovery when models.json does not list the model", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "paperclip-pi-agent-config-"));
+    try {
+      await writeFile(
+        path.join(directory, "models.json"),
+        JSON.stringify({ providers: { clawrouter: { models: ["claude-sonnet-5"] } } }),
+      );
+      const runChildProcess = vi.spyOn(serverUtils, "runChildProcess").mockResolvedValue({
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        stdout: "provider  model\nbridge  claude-opus-4-8\n",
+        stderr: "",
+        pid: null,
+        startedAt: new Date().toISOString(),
+      });
+
+      await expect(
+        ensurePiModelConfiguredAndAvailable({
+          model: "bridge/claude-opus-4-8",
+          command: "pi",
+          cwd: "/tmp",
+          env: { PI_CODING_AGENT_DIR: directory },
+        }),
+      ).resolves.toEqual([{ id: "bridge/claude-opus-4-8", label: "bridge/claude-opus-4-8" }]);
+      expect(runChildProcess).toHaveBeenCalledTimes(1);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("skips the model preflight when discovery times out", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(serverUtils, "runChildProcess").mockResolvedValue({
+      exitCode: null,
+      signal: "SIGKILL",
+      timedOut: true,
+      stdout: "",
+      stderr: "",
+      pid: null,
+      startedAt: new Date().toISOString(),
+    });
+
+    await expect(
+      ensurePiModelConfiguredAndAvailable({
+        model: "xai/grok-4",
+        command: "pi",
+        cwd: "/tmp",
+        env: { PI_CODING_AGENT_DIR: "/nonexistent-pi-agent-dir" },
+      }),
+    ).resolves.toEqual([]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("Pi model discovery unavailable"));
+  });
+
+  it("still rejects a configured model that a completed discovery does not list", async () => {
+    vi.spyOn(serverUtils, "runChildProcess").mockResolvedValue({
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      stdout: "provider  model\nbridge  claude-opus-4-8\n",
+      stderr: "",
+      pid: null,
+      startedAt: new Date().toISOString(),
+    });
+
+    await expect(
+      ensurePiModelConfiguredAndAvailable({
+        model: "xai/grok-4",
+        command: "pi",
+        cwd: "/tmp",
+        env: { PI_CODING_AGENT_DIR: "/nonexistent-pi-agent-dir" },
+      }),
+    ).rejects.toThrow("Configured Pi model is unavailable");
+  });
+
+  it("does not re-run discovery for every run while a timeout cooldown is active", async () => {
+    const runChildProcess = vi.spyOn(serverUtils, "runChildProcess").mockResolvedValue({
+      exitCode: null,
+      signal: "SIGKILL",
+      timedOut: true,
+      stdout: "",
+      stderr: "",
+      pid: null,
+      startedAt: new Date().toISOString(),
+    });
+
+    await expect(discoverPiModelsCached({ command: "pi", cwd: "/tmp" })).rejects.toThrow(
+      "timed out",
+    );
+    await expect(discoverPiModelsCached({ command: "pi", cwd: "/tmp" })).rejects.toThrow(
+      "timed out",
+    );
+
+    expect(runChildProcess).toHaveBeenCalledTimes(1);
   });
 
   it("coalesces concurrent refreshes for the same workspace", async () => {
