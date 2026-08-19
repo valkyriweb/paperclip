@@ -67,6 +67,61 @@ describe("pi models", () => {
     ).rejects.toThrow();
   });
 
+  it("skips the model preflight when discovery times out", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(serverUtils, "runChildProcess").mockResolvedValue({
+      exitCode: null,
+      signal: "SIGKILL",
+      timedOut: true,
+      stdout: "",
+      stderr: "",
+      pid: null,
+      startedAt: new Date().toISOString(),
+    });
+
+    await expect(
+      ensurePiModelConfiguredAndAvailable({ model: "xai/grok-4", command: "pi", cwd: "/tmp" }),
+    ).resolves.toEqual([]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("Pi model discovery unavailable"));
+  });
+
+  it("still rejects a configured model that a completed discovery does not list", async () => {
+    vi.spyOn(serverUtils, "runChildProcess").mockResolvedValue({
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      stdout: "provider  model\nbridge  claude-opus-4-8\n",
+      stderr: "",
+      pid: null,
+      startedAt: new Date().toISOString(),
+    });
+
+    await expect(
+      ensurePiModelConfiguredAndAvailable({ model: "xai/grok-4", command: "pi", cwd: "/tmp" }),
+    ).rejects.toThrow("Configured Pi model is unavailable");
+  });
+
+  it("does not re-run discovery for every run while a timeout cooldown is active", async () => {
+    const runChildProcess = vi.spyOn(serverUtils, "runChildProcess").mockResolvedValue({
+      exitCode: null,
+      signal: "SIGKILL",
+      timedOut: true,
+      stdout: "",
+      stderr: "",
+      pid: null,
+      startedAt: new Date().toISOString(),
+    });
+
+    await expect(discoverPiModelsCached({ command: "pi", cwd: "/tmp" })).rejects.toThrow(
+      "timed out",
+    );
+    await expect(discoverPiModelsCached({ command: "pi", cwd: "/tmp" })).rejects.toThrow(
+      "timed out",
+    );
+
+    expect(runChildProcess).toHaveBeenCalledTimes(1);
+  });
+
   it("coalesces concurrent refreshes for the same workspace", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "paperclip-pi-models-"));
     try {
