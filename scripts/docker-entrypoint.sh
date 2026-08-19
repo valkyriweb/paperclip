@@ -15,7 +15,9 @@ if [ "$(id -u)" -ne 0 ]; then
     if [ "$(id -u)" -ne "$PUID" ] || [ "$(id -g)" -ne "$PGID" ]; then
         echo "docker-entrypoint.sh: running unprivileged as $(id -u):$(id -g); cannot remap to requested ${PUID}:${PGID}" >&2
     fi
-    invoicegen-config-bootstrap.sh || true
+    if command -v invoicegen-config-bootstrap.sh >/dev/null 2>&1; then
+        invoicegen-config-bootstrap.sh || true
+    fi
     exec "$@"
 fi
 
@@ -43,6 +45,8 @@ fi
 # After any UID/GID remap, so the fetched config lands owned by the final node
 # user. Self-disables without OP_SERVICE_ACCOUNT_TOKEN, and must never keep the
 # container from starting.
-invoicegen-config-bootstrap.sh || true
+if command -v invoicegen-config-bootstrap.sh >/dev/null 2>&1; then
+    invoicegen-config-bootstrap.sh || true
+fi
 
 exec gosu node "$@"
