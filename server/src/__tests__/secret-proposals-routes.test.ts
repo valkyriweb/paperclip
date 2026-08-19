@@ -9,6 +9,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import {
   activityLog,
   agents,
+  agentWakeupRequests,
   companies,
   companySecretBindings,
   companySecretProposals,
@@ -61,6 +62,9 @@ describeEmbeddedPostgres("secret proposal routes", () => {
     await db.delete(companySecretProviderConfigs);
     await db.delete(issues);
     await db.delete(heartbeatRuns);
+    // Fork: failed assignment wakeups are durably recorded (see
+    // issue-assignment-wakeup.ts), so clear them before deleting agents.
+    await db.delete(agentWakeupRequests);
     await db.delete(agents);
     await db.delete(companies);
   });

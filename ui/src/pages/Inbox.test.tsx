@@ -954,7 +954,7 @@ describe("Inbox cross-tab cache invalidation", () => {
       expect(container.querySelectorAll("[data-inbox-item]").length).toBeGreaterThanOrEqual(1);
     });
 
-    const dismissButton = container.querySelector<HTMLButtonElement>('button[aria-label="Dismiss from inbox"]');
+    const dismissButton = container.querySelector<HTMLButtonElement>('button[aria-label="Archive"]');
     expect(dismissButton).not.toBeNull();
 
     await act(async () => {

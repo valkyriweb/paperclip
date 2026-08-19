@@ -1,11 +1,10 @@
 ---
 name: para-memory-files
 description: >
-  File-based memory system using Tiago Forte's PARA method. "Use when storing,
-  retrieving, updating, or organizing knowledge across sessions" — e.g.
-  "remember this", "what do we know about <person/company>?", "write today's
-  notes", "run weekly synthesis". Covers the knowledge graph in PARA folders,
-  daily notes, tacit knowledge, memory decay, and recall via qmd.
+  File-based memory system using Tiago Forte's PARA method. Use when storing,
+  retrieving, or organizing knowledge across sessions — e.g. "remember this",
+  "what do we know about X?", "write today's notes", "run weekly synthesis".
+  Covers PARA folders, daily notes, memory decay, and recall via qmd.
 ---
 
 # PARA Memory Files
