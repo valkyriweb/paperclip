@@ -1213,6 +1213,7 @@ export async function startServer(): Promise<StartedServer> {
           await Promise.all(result.enqueued.map(async ({ cardId, generatingIssue }) => {
             try {
               await queueIssueAssignmentWakeup({
+                db,
                 heartbeat,
                 issue: generatingIssue,
                 reason: "status_card_update_assigned",

@@ -193,6 +193,8 @@ describe("connectRetryDelayMs", () => {
     expect(connectRetryDelayMs(2)).toBe(4_000);
     expect(connectRetryDelayMs(3)).toBe(8_000);
     expect(connectRetryDelayMs(10)).toBe(30_000);
+  });
+});
 
 describe("resolveClaimedApiKeyPath", () => {
   const DEFAULT_PATH = "~/.openclaw/workspace/paperclip-claimed-api-key.json";

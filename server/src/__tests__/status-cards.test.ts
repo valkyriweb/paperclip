@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import {
   activityLog,
   agents,
+  agentWakeupRequests,
   companies,
   costEvents,
   createDb,
@@ -92,6 +93,9 @@ describeEmbeddedPostgres("status card routes", () => {
     await db.delete(activityLog);
     await db.delete(heartbeatRuns);
     await db.delete(instanceSettings);
+    // Fork: failed assignment wakeups are durably recorded (see
+    // issue-assignment-wakeup.ts), so clear them before deleting agents.
+    await db.delete(agentWakeupRequests);
     await db.delete(agents);
     await db.delete(companies);
   });

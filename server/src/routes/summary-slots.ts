@@ -134,6 +134,7 @@ export function summarySlotRoutes(db: Db) {
       });
       if (!result.alreadyGenerating) {
         await queueIssueAssignmentWakeup({
+          db,
           heartbeat,
           issue: {
             id: result.generatingIssue.id,

@@ -224,6 +224,7 @@ export function secretRoutes(db: Db, deps: SecretRoutesDeps = {}) {
         );
       }
       await queueIssueAssignmentWakeup({
+        db,
         heartbeat,
         issue,
         reason: "secret_proposal_resolved",

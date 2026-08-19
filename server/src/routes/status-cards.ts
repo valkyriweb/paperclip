@@ -90,6 +90,7 @@ export function statusCardRoutes(db: Db, opts: { heartbeat?: IssueAssignmentWake
     if (!result.alreadyGenerating) {
       try {
         await queueIssueAssignmentWakeup({
+          db,
           heartbeat,
           issue: result.generatingIssue,
           reason: "status_card_compile_assigned",
@@ -121,6 +122,7 @@ export function statusCardRoutes(db: Db, opts: { heartbeat?: IssueAssignmentWake
     if (result.enqueued && result.generatingIssue && !result.alreadyGenerating) {
       try {
         await queueIssueAssignmentWakeup({
+          db,
           heartbeat,
           issue: result.generatingIssue,
           reason: "status_card_update_assigned",
