@@ -408,6 +408,30 @@ export function OpenClawGatewayConfigFields({
         />
       </Field>
 
+      <Field label="Connect timeout (ms)">
+        <DraftInput
+          value={
+            isCreate
+              ? values!.connectTimeoutMs != null
+                ? String(values!.connectTimeoutMs)
+                : ""
+              : eff("adapterConfig", "connectTimeoutMs", String(config.connectTimeoutMs ?? "15000"))
+          }
+          onCommit={(v) => {
+            const parsed = Number.parseInt(v.trim(), 10);
+            const next = Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+            if (isCreate) {
+              set!({ connectTimeoutMs: next });
+            } else {
+              mark("adapterConfig", "connectTimeoutMs", next);
+            }
+          }}
+          immediate
+          className={inputClass}
+          placeholder="15000"
+        />
+      </Field>
+
       <Field label="Disable device auth">
         <label className="flex items-center gap-2 text-sm">
           <input

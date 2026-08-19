@@ -68,6 +68,17 @@ For local adapters, set:
 - `cwd` (working directory)
 - `timeoutSec` (max runtime per heartbeat)
 - `graceSec` (time before force-kill after timeout/cancel)
+
+For the `openclaw_gateway` adapter, transport limits are configured separately from run
+duration:
+
+- `connectTimeoutMs` (default `15000`): websocket open, connect challenge and run
+  submission. Raising `timeoutSec` does **not** raise this.
+- `connectMaxAttempts` (default `3`) and `connectRetryBaseDelayMs` (default `2000`):
+  bounded retry with exponential backoff (2s, 4s, 8s… capped at 30s) for connect/transport
+  failures such as a gateway pod restart. Run overruns are never retried.
+- Connect/transport failures are recorded with `errorCode = openclaw_gateway_connect_timeout`
+  and status `failed`; only genuine run overruns are recorded as `timed_out`.
 - optional env vars and extra CLI args
 - use **Test environment** in agent configuration to run adapter-specific diagnostics before saving
 

@@ -35,6 +35,7 @@ export const defaultCreateValues: CreateConfigValues = {
   sessionKey: "",
   timeoutSec: undefined,
   waitTimeoutMs: undefined,
+  connectTimeoutMs: undefined,
   disableDeviceAuth: undefined,
   autoPairOnFirstConnect: undefined,
   devicePrivateKeyPem: "",

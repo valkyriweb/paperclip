@@ -28,6 +28,7 @@ export function buildOpenClawGatewayConfig(v: CreateConfigValues): Record<string
   // Timeout fields
   if (typeof v.timeoutSec === "number") ac.timeoutSec = v.timeoutSec;
   if (typeof v.waitTimeoutMs === "number") ac.waitTimeoutMs = v.waitTimeoutMs;
+  if (typeof v.connectTimeoutMs === "number") ac.connectTimeoutMs = v.connectTimeoutMs;
   
   // Device auth fields
   if (typeof v.disableDeviceAuth === "boolean") ac.disableDeviceAuth = v.disableDeviceAuth;

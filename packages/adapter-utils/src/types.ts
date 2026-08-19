@@ -525,6 +525,7 @@ export interface CreateConfigValues {
   sessionKey?: string;
   timeoutSec?: number;
   waitTimeoutMs?: number;
+  connectTimeoutMs?: number;
   disableDeviceAuth?: boolean;
   autoPairOnFirstConnect?: boolean;
   devicePrivateKeyPem?: string;
