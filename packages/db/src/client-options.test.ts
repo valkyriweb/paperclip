@@ -1,10 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { databaseClientOptionsFromEnv, postgresJsOptions } from "./client.js";
+import {
+  DEFAULT_DB_IDLE_TIMEOUT_SEC,
+  DEFAULT_DB_MAX_LIFETIME_SEC,
+  databaseClientOptionsFromEnv,
+  postgresJsOptions,
+} from "./client.js";
+
+// Fork: when nothing is set, idle/lifetime bounds default on instead of
+// preserving the driver's never-close behaviour (CNPG smart-shutdown fix).
+const FORK_DEFAULTS = {
+  idleTimeoutSeconds: DEFAULT_DB_IDLE_TIMEOUT_SEC,
+  maxLifetimeSeconds: DEFAULT_DB_MAX_LIFETIME_SEC,
+};
 
 describe("databaseClientOptionsFromEnv", () => {
-  it("returns no options when nothing is set, preserving driver defaults", () => {
-    expect(databaseClientOptionsFromEnv({})).toEqual({});
-    expect(postgresJsOptions(databaseClientOptionsFromEnv({}))).toEqual({});
+  it("returns only fork pool bounds when nothing is set", () => {
+    expect(databaseClientOptionsFromEnv({})).toEqual(FORK_DEFAULTS);
+    expect(postgresJsOptions(databaseClientOptionsFromEnv({}))).toEqual({
+      idle_timeout: DEFAULT_DB_IDLE_TIMEOUT_SEC,
+      max_lifetime: DEFAULT_DB_MAX_LIFETIME_SEC,
+    });
   });
 
   it("ignores empty values", () => {
@@ -13,14 +28,14 @@ describe("databaseClientOptionsFromEnv", () => {
         DATABASE_PREPARED_STATEMENTS: "",
         DATABASE_POOL_MAX: "",
       }),
-    ).toEqual({});
+    ).toEqual(FORK_DEFAULTS);
   });
 
   it("parses prepared-statement toggles", () => {
-    expect(databaseClientOptionsFromEnv({ DATABASE_PREPARED_STATEMENTS: "false" })).toEqual({ prepare: false });
-    expect(databaseClientOptionsFromEnv({ DATABASE_PREPARED_STATEMENTS: "0" })).toEqual({ prepare: false });
-    expect(databaseClientOptionsFromEnv({ DATABASE_PREPARED_STATEMENTS: "true" })).toEqual({ prepare: true });
-    expect(databaseClientOptionsFromEnv({ DATABASE_PREPARED_STATEMENTS: "TRUE" })).toEqual({ prepare: true });
+    expect(databaseClientOptionsFromEnv({ DATABASE_PREPARED_STATEMENTS: "false" })).toEqual({ prepare: false, ...FORK_DEFAULTS });
+    expect(databaseClientOptionsFromEnv({ DATABASE_PREPARED_STATEMENTS: "0" })).toEqual({ prepare: false, ...FORK_DEFAULTS });
+    expect(databaseClientOptionsFromEnv({ DATABASE_PREPARED_STATEMENTS: "true" })).toEqual({ prepare: true, ...FORK_DEFAULTS });
+    expect(databaseClientOptionsFromEnv({ DATABASE_PREPARED_STATEMENTS: "TRUE" })).toEqual({ prepare: true, ...FORK_DEFAULTS });
   });
 
   it("parses pool and timeout settings", () => {
@@ -30,7 +45,12 @@ describe("databaseClientOptionsFromEnv", () => {
         DATABASE_IDLE_TIMEOUT_SECONDS: "60",
         DATABASE_CONNECT_TIMEOUT_SECONDS: "10",
       }),
-    ).toEqual({ maxConnections: 25, idleTimeoutSeconds: 60, connectTimeoutSeconds: 10 });
+    ).toEqual({
+      maxConnections: 25,
+      idleTimeoutSeconds: 60,
+      connectTimeoutSeconds: 10,
+      maxLifetimeSeconds: DEFAULT_DB_MAX_LIFETIME_SEC,
+    });
   });
 
   it("rejects malformed values instead of silently ignoring them", () => {

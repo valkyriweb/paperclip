@@ -34,7 +34,11 @@ d("heartbeat context_snapshot expression index migration", () => {
       "EXPLAIN SELECT id FROM heartbeat_runs WHERE company_id = '00000000-0000-0000-0000-000000000001' AND context_snapshot ->> 'issueId' = 'x' ORDER BY created_at DESC, id DESC LIMIT 1",
     );
     const planText = plan.map((r) => Object.values(r)[0]).join("\n");
-    expect(planText).toContain("heartbeat_runs_company_ctx_issue_created_idx");
+    // Fork: 0212 ships a superset index (adds `id DESC`) on the same
+    // expression; the planner may pick either.
+    expect(planText).toMatch(
+      /heartbeat_runs_company_(ctx_issue_created|issue_created)_idx/,
+    );
 
     const taskPlan = await sql.unsafe(
       "EXPLAIN SELECT id FROM heartbeat_runs WHERE company_id = '00000000-0000-0000-0000-000000000001' AND context_snapshot ->> 'taskId' = 'x' ORDER BY created_at DESC, id DESC LIMIT 1",
