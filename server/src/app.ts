@@ -249,6 +249,8 @@ export async function createApp(
     };
     databaseBackupService?: InstanceDatabaseBackupService;
     databaseBackupHealth?: InspectDatabaseBackupHealthOptions;
+    /** Dedicated single-connection DB client for the health probe (see healthRoutes). */
+    healthProbeDb?: Pick<Db, "execute">;
     deploymentMode: DeploymentMode;
     deploymentExposure: DeploymentExposure;
     allowedHostnames: string[];
@@ -364,6 +366,7 @@ export async function createApp(
       authReady: opts.authReady,
       companyDeletionEnabled: opts.companyDeletionEnabled,
       databaseBackupHealth: opts.databaseBackupHealth,
+      probeDb: opts.healthProbeDb,
     }),
   );
   api.use(openApiRoutes());

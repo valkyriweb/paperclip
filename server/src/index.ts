@@ -34,6 +34,7 @@ import detectPort from "detect-port";
 import { createApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { logger } from "./middleware/logger.js";
+import { startEventLoopLagMonitor } from "./services/event-loop-lag.js";
 import {
   getManagedInstanceConfig,
   type ManagedInstanceConfig,
@@ -343,6 +344,7 @@ export async function startServer(): Promise<StartedServer> {
   let migrationSummary: MigrationSummary = "skipped";
   let activeDatabaseConnectionString: string;
   let resolvedEmbeddedPostgresPort: number | null = null;
+  let healthProbeDb: ReturnType<typeof createDb> | undefined;
   let startupDbInfo:
     | { mode: "external-postgres"; connectionString: string }
     | { mode: "embedded-postgres"; dataDir: string; port: number };
@@ -352,6 +354,16 @@ export async function startServer(): Promise<StartedServer> {
     migrationSummary = await ensureMigrations(migrationUrl, "PostgreSQL");
   
     db = createDb(config.databaseUrl);
+    // Dedicated single-connection client for the health probe so main-pool
+    // starvation (one long maintenance statement wedging every pooled
+    // connection) does not fail readiness and 503 the whole app.
+    healthProbeDb = createDb(config.databaseUrl, {
+      maxConnections: 1,
+      connectTimeoutSeconds: 5,
+      idleTimeoutSeconds: 30,
+      maxLifetimeSeconds: 30 * 60,
+      statementTimeoutMs: 5_000,
+    });
     pluginMigrationDb = config.databaseMigrationUrl ? createDb(config.databaseMigrationUrl) : db;
     logger.info("Using external PostgreSQL via DATABASE_URL/config");
     activeDatabaseConnectionString = config.databaseUrl;
@@ -739,8 +751,11 @@ export async function startServer(): Promise<StartedServer> {
   // document parsed fail-closed above (`plugins.autoInstall`). Absent env means
   // self-hosted: createApp falls back to its built-in kubernetes-only default.
   const managedPluginAutoInstall = managedConfig?.plugins.autoInstall ?? null;
+  startEventLoopLagMonitor();
+
   const app = await createApp(db as any, {
     uiMode,
+    healthProbeDb: healthProbeDb as any,
     serverPort: listenPort,
     storageService,
     feedbackExportService: feedback,

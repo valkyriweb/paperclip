@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_DB_IDLE_TIMEOUT_SEC,
+  DEFAULT_DB_IDLE_IN_TX_TIMEOUT_MS,
   DEFAULT_DB_MAX_LIFETIME_SEC,
+  DEFAULT_DB_STATEMENT_TIMEOUT_MS,
   databaseClientOptionsFromEnv,
   postgresJsOptions,
 } from "./client.js";
@@ -52,5 +54,31 @@ describe("fork pool timeout defaults", () => {
 
   it("prefers upstream DATABASE_IDLE_TIMEOUT_SECONDS over the fork default", () => {
     expect(driverOptionsFromEnv({ DATABASE_IDLE_TIMEOUT_SECONDS: "45" }).idle_timeout).toBe(45);
+  });
+});
+
+describe("fork session guard defaults", () => {
+  it("applies statement and idle-in-transaction timeouts by default", () => {
+    expect(driverOptionsFromEnv({}).connection).toEqual({
+      statement_timeout: DEFAULT_DB_STATEMENT_TIMEOUT_MS,
+      idle_in_transaction_session_timeout: DEFAULT_DB_IDLE_IN_TX_TIMEOUT_MS,
+    });
+    expect(DEFAULT_DB_STATEMENT_TIMEOUT_MS).toBeGreaterThan(0);
+    expect(DEFAULT_DB_IDLE_IN_TX_TIMEOUT_MS).toBeGreaterThan(0);
+  });
+
+  it("honours env overrides and allows 0 to disable either guard", () => {
+    expect(
+      driverOptionsFromEnv({
+        PAPERCLIP_DB_STATEMENT_TIMEOUT_MS: "10000",
+        PAPERCLIP_DB_IDLE_IN_TX_TIMEOUT_MS: "20000",
+      }).connection,
+    ).toEqual({ statement_timeout: 10000, idle_in_transaction_session_timeout: 20000 });
+    expect(
+      driverOptionsFromEnv({
+        PAPERCLIP_DB_STATEMENT_TIMEOUT_MS: "0",
+        PAPERCLIP_DB_IDLE_IN_TX_TIMEOUT_MS: "0",
+      }),
+    ).not.toHaveProperty("connection");
   });
 });

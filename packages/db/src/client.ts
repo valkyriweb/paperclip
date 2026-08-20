@@ -60,6 +60,22 @@ export type MigrationState =
 export const DEFAULT_DB_IDLE_TIMEOUT_SEC = 30;
 export const DEFAULT_DB_MAX_LIFETIME_SEC = 30 * 60;
 
+/**
+ * Fork defaults for server-side session guards on the main pool.
+ *
+ * A single runaway maintenance statement (measured: a long unindexed DELETE)
+ * can hold pool connections until every other query queues behind it, the
+ * health probe times out, readiness drops the pod, and the whole app 503s.
+ * Bounding statements and idle-in-transaction sessions at the application
+ * pool level ends such runaways instead of letting them starve the pool.
+ * Migrations, backups, and other utility clients use their own connections
+ * (`createUtilitySql`) and are not affected.
+ * `PAPERCLIP_DB_STATEMENT_TIMEOUT_MS` / `PAPERCLIP_DB_IDLE_IN_TX_TIMEOUT_MS`
+ * override; `0` disables.
+ */
+export const DEFAULT_DB_STATEMENT_TIMEOUT_MS = 5 * 60 * 1000;
+export const DEFAULT_DB_IDLE_IN_TX_TIMEOUT_MS = 2 * 60 * 1000;
+
 function parseNonNegativeIntEnv(value: string | undefined, fallback: number): number {
   if (value === undefined) return fallback;
   const trimmed = value.trim();
@@ -86,6 +102,10 @@ export interface DatabaseClientOptions {
   connectTimeoutSeconds?: number;
   /** postgres.js `max_lifetime` in seconds; 0 restores the driver's jittered default. */
   maxLifetimeSeconds?: number;
+  /** Server-side `statement_timeout` in ms for pool sessions; 0 disables. */
+  statementTimeoutMs?: number;
+  /** Server-side `idle_in_transaction_session_timeout` in ms for pool sessions; 0 disables. */
+  idleInTransactionTimeoutMs?: number;
 }
 
 function envBoolean(env: NodeJS.ProcessEnv, name: string): boolean | undefined {
@@ -128,6 +148,14 @@ export function databaseClientOptionsFromEnv(env: NodeJS.ProcessEnv = process.en
     options.idleTimeoutSeconds = parseNonNegativeIntEnv(env.PAPERCLIP_DB_IDLE_TIMEOUT_SEC, DEFAULT_DB_IDLE_TIMEOUT_SEC);
   }
   options.maxLifetimeSeconds = parseNonNegativeIntEnv(env.PAPERCLIP_DB_MAX_LIFETIME_SEC, DEFAULT_DB_MAX_LIFETIME_SEC);
+  options.statementTimeoutMs = parseNonNegativeIntEnv(
+    env.PAPERCLIP_DB_STATEMENT_TIMEOUT_MS,
+    DEFAULT_DB_STATEMENT_TIMEOUT_MS,
+  );
+  options.idleInTransactionTimeoutMs = parseNonNegativeIntEnv(
+    env.PAPERCLIP_DB_IDLE_IN_TX_TIMEOUT_MS,
+    DEFAULT_DB_IDLE_IN_TX_TIMEOUT_MS,
+  );
   return options;
 }
 
@@ -140,6 +168,14 @@ export function postgresJsOptions(options: DatabaseClientOptions): Record<string
   if (options.maxLifetimeSeconds !== undefined && options.maxLifetimeSeconds > 0) {
     driverOptions.max_lifetime = options.maxLifetimeSeconds;
   }
+  const connection: Record<string, unknown> = {};
+  if (options.statementTimeoutMs !== undefined && options.statementTimeoutMs > 0) {
+    connection.statement_timeout = options.statementTimeoutMs;
+  }
+  if (options.idleInTransactionTimeoutMs !== undefined && options.idleInTransactionTimeoutMs > 0) {
+    connection.idle_in_transaction_session_timeout = options.idleInTransactionTimeoutMs;
+  }
+  if (Object.keys(connection).length > 0) driverOptions.connection = connection;
   return driverOptions;
 }
 

@@ -18,6 +18,7 @@ import {
   type DatabaseBackupHealthWarning,
   type InspectDatabaseBackupHealthOptions,
 } from "../services/database-backup-health.js";
+import { getEventLoopLagSnapshot } from "../services/event-loop-lag.js";
 import { instanceSettingsService } from "../services/instance-settings.js";
 import { serverVersion } from "../version.js";
 
@@ -30,6 +31,13 @@ function shouldExposeFullHealthDetails(
 }
 
 const HEALTH_DB_PROBE_TIMEOUT_MS = 3000;
+
+// After a probe failure, keep reporting ready (200 "degraded") for this long
+// past the last successful probe. A slow-but-alive database (e.g. the main
+// pool starved by one long maintenance statement) should not immediately drop
+// the sole pod from the load balancer and turn a slowdown into a full outage;
+// only a persistently failing probe hard-fails readiness.
+const HEALTH_DB_DEGRADED_GRACE_MS = 60_000;
 
 // Bounds the readiness probe's DB round-trip so pool starvation (e.g. every
 // connection wedged in a nested-transaction deadlock) fails fast with a
@@ -105,6 +113,12 @@ export function healthRoutes(
     serverInfo?: ServerInfoSnapshot;
     databaseBackupHealth?: InspectDatabaseBackupHealthOptions;
     runtimeEnv?: CloudInstanceEnv;
+    /**
+     * Dedicated single-connection client for the DB probe. With it, main-pool
+     * starvation no longer equals probe failure: the probe answers from its
+     * own connection while the pool is saturated.
+     */
+    probeDb?: Pick<Db, "execute">;
   } = {
     deploymentMode: "local_trusted",
     deploymentExposure: "private",
@@ -113,6 +127,7 @@ export function healthRoutes(
   },
 ) {
   const router = Router();
+  let lastDbProbeSuccessAt: number | null = null;
 
   router.post("/dev-server/restart", async (req, res) => {
     const actorType = "actor" in req ? req.actor?.type : null;
@@ -192,16 +207,39 @@ export function healthRoutes(
     }
 
     try {
-      await withTimeout(db.execute(sql`SELECT 1`), HEALTH_DB_PROBE_TIMEOUT_MS, "Health check database probe");
+      const probeDb = opts.probeDb ?? db;
+      await withTimeout(probeDb.execute(sql`SELECT 1`), HEALTH_DB_PROBE_TIMEOUT_MS, "Health check database probe");
+      lastDbProbeSuccessAt = Date.now();
     } catch (error) {
-      logger.warn({ err: error }, "Health check database probe failed");
+      const withinGrace =
+        lastDbProbeSuccessAt !== null && Date.now() - lastDbProbeSuccessAt <= HEALTH_DB_DEGRADED_GRACE_MS;
+      logger.warn(
+        { err: error, withinGrace, eventLoopLag: getEventLoopLagSnapshot() },
+        withinGrace
+          ? "Health check database probe failed; reporting degraded within grace window"
+          : "Health check database probe failed",
+      );
+      if (withinGrace) {
+        // Degrade instead of hard-failing readiness: skip every further DB
+        // query on this path (they would hang on the same starved pool).
+        res.json({
+          status: "degraded",
+          version: serverVersion,
+          serverVersion,
+          commit,
+          warning: "database_slow",
+          ...(exposeFullDetails ? { serverInfo, eventLoopLag: getEventLoopLagSnapshot() } : {}),
+          ...(cloud ? { cloud } : {}),
+        });
+        return;
+      }
       res.status(503).json({
         status: "unhealthy",
         version: serverVersion,
         serverVersion,
         commit,
         error: "database_unreachable",
-        ...(exposeFullDetails ? { serverInfo } : {}),
+        ...(exposeFullDetails ? { serverInfo, eventLoopLag: getEventLoopLagSnapshot() } : {}),
         ...(cloud ? { cloud } : {}),
       });
       return;
@@ -295,6 +333,7 @@ export function healthRoutes(
         companyDeletionEnabled: opts.companyDeletionEnabled,
       },
       serverInfo,
+      eventLoopLag: getEventLoopLagSnapshot(),
       ...(databaseBackup ? { databaseBackup } : {}),
       ...(warnings ? { warnings } : {}),
       ...(devServer ? { devServer } : {}),
