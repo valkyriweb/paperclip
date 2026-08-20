@@ -149,8 +149,63 @@ describe("GET /health", () => {
       commit: testServerInfo.git.fullSha,
       error: "database_unreachable",
       serverInfo: testServerInfo,
+      eventLoopLag: res.body.eventLoopLag,
     });
+    expect(res.body.eventLoopLag).toMatchObject({ worstMaxMs: expect.any(Number) });
   });
+
+  it("stays ready under main-pool starvation when the dedicated probe connection answers", async () => {
+    // Simulated pool pressure: every main-pool query hangs (all connections
+    // held by a long maintenance statement). The dedicated probe client still
+    // answers, so health must stay 200 instead of timing out into a 503.
+    const starvedDb = {
+      execute: vi.fn(() => new Promise(() => {})),
+    } as unknown as Db;
+    const probeDb = {
+      execute: vi.fn().mockResolvedValue([{ "?column?": 1 }]),
+    } as unknown as Db;
+    const app = express();
+    app.use(
+      "/health",
+      healthRoutes(starvedDb, {
+        deploymentMode: "local_trusted",
+        deploymentExposure: "private",
+        authReady: true,
+        companyDeletionEnabled: true,
+        serverInfo: testServerInfo,
+        probeDb,
+      }),
+    );
+
+    const started = Date.now();
+    const res = await request(app).get("/health");
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("ok");
+    expect(probeDb.execute).toHaveBeenCalledTimes(1);
+    expect(starvedDb.execute).not.toHaveBeenCalled();
+    // Responsive: no waiting out the probe timeout.
+    expect(Date.now() - started).toBeLessThan(2500);
+  });
+
+  it("degrades instead of hard-failing when the probe was recently healthy", async () => {
+    let healthy = true;
+    const db = {
+      execute: vi.fn(() => (healthy ? Promise.resolve([{ "?column?": 1 }]) : new Promise(() => {}))),
+    } as unknown as Db;
+    const app = createApp(db);
+
+    const ok = await request(app).get("/health");
+    expect(ok.status).toBe(200);
+
+    healthy = false;
+    const degraded = await request(app).get("/health");
+    expect(degraded.status).toBe(200);
+    expect(degraded.body).toMatchObject({
+      status: "degraded",
+      warning: "database_slow",
+    });
+  }, 15_000);
 
   it("returns safe server info fallbacks when git metadata is unavailable", async () => {
     const app = createApp(undefined, {

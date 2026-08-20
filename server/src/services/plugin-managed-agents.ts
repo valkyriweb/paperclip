@@ -326,7 +326,7 @@ export function pluginManagedAgentService(
     companyId: string,
     agent: Agent,
     declaration: PluginManagedAgentDeclaration,
-    materializeOptions: { replaceExisting: boolean },
+    materializeOptions: { replaceExisting: boolean; allowPendingApprovalConfigUpdate?: boolean },
   ): Promise<Agent> {
     const variables = await optionsForInstructionVariables(companyId);
     const declared = declaredInstructionFiles(declaration, variables);
@@ -347,6 +347,7 @@ export function pluginManagedAgentService(
       recordRevision: {
         source: `plugin:${optionsForRevisionSource()}:managed-agent-instructions`,
       },
+      allowPendingApprovalConfigUpdate: materializeOptions.allowPendingApprovalConfigUpdate,
     });
     return (updated as Agent | null) ?? { ...agent, adapterConfig: materialized.adapterConfig };
   }
@@ -423,7 +424,16 @@ export function pluginManagedAgentService(
       spentMonthlyCents: 0,
       lastHeartbeatAt: null,
     }) as Agent;
-    created = await materializeDeclaredInstructions(companyId, created, declaration, { replaceExisting: true });
+    // Bootstrap materialization is part of the declared creation itself, not a
+    // post-approval config change. On requireBoardApprovalForNewAgents companies
+    // the agent is created directly in pending_approval, so without this flag
+    // the adapterConfig update would trip the pending-approval config freeze,
+    // abort before approvalSvc.create, and strand an orphan pending agent with
+    // no approval row.
+    created = await materializeDeclaredInstructions(companyId, created, declaration, {
+      replaceExisting: true,
+      allowPendingApprovalConfigUpdate: requiresApproval,
+    });
 
     let approvalId: string | null = null;
     if (requiresApproval) {

@@ -461,6 +461,137 @@ describeEmbeddedPostgres("heartbeat issue graph liveness escalation", () => {
     });
   });
 
+  it("holds resolved dependency wakes for paused agents instead of retrying every sweep", async () => {
+    const { agentId, blockedIssueId } =
+      await seedResolvedDependencyBackstopFixture({ workspaceState: "none" });
+    await db.update(agents).set({ status: "paused" }).where(eq(agents.id, agentId));
+
+    const heartbeat = heartbeatService(db);
+    const first = await heartbeat.reconcileIssueGraphLiveness();
+    const second = await heartbeat.reconcileIssueGraphLiveness();
+    for (const result of [first, second]) {
+      expect(result.dependencyWakesHealed).toBe(0);
+      expect(result.dependencyWakeHoldSkipped).toBe(1);
+      expect(result.dependencyWakeEnqueueFailed).toBe(0);
+    }
+    const wakes = await db.select().from(agentWakeupRequests).where(eq(agentWakeupRequests.agentId, agentId));
+    expect(wakes).toHaveLength(0);
+
+    await db.update(agents).set({ status: "idle" }).where(eq(agents.id, agentId));
+    const afterResume = await heartbeat.reconcileIssueGraphLiveness();
+    expect(afterResume.dependencyWakesHealed).toBe(1);
+    expect(afterResume.dependencyWakeIssueIds).toEqual([blockedIssueId]);
+  });
+
+  it("holds resolved dependency wakes for wakeOnDemand-disabled agents instead of retrying every sweep", async () => {
+    const { agentId, blockedIssueId } =
+      await seedResolvedDependencyBackstopFixture({ workspaceState: "none" });
+    await db
+      .update(agents)
+      .set({ runtimeConfig: { heartbeat: { wakeOnDemand: false, maxConcurrentRuns: 1 } } })
+      .where(eq(agents.id, agentId));
+
+    const heartbeat = heartbeatService(db);
+    const first = await heartbeat.reconcileIssueGraphLiveness();
+    const second = await heartbeat.reconcileIssueGraphLiveness();
+    for (const result of [first, second]) {
+      expect(result.dependencyWakesHealed).toBe(0);
+      expect(result.dependencyWakeHoldSkipped).toBe(1);
+      expect(result.dependencyWakeEnqueueFailed).toBe(0);
+    }
+    // The hold is upstream of enqueueWakeup, so no skipped
+    // heartbeat.wakeOnDemand.disabled rows accumulate.
+    const wakes = await db.select().from(agentWakeupRequests).where(eq(agentWakeupRequests.agentId, agentId));
+    expect(wakes).toHaveLength(0);
+
+    await db
+      .update(agents)
+      .set({ runtimeConfig: { heartbeat: { wakeOnDemand: true, maxConcurrentRuns: 1 } } })
+      .where(eq(agents.id, agentId));
+    const afterEnable = await heartbeat.reconcileIssueGraphLiveness();
+    expect(afterEnable.dependencyWakesHealed).toBe(1);
+    expect(afterEnable.dependencyWakeIssueIds).toEqual([blockedIssueId]);
+  });
+
+  it("holds assigned-todo dispatch for wakeOnDemand-disabled agents without writing skipped wake requests", async () => {
+    const { agentId, blockedIssueId, blockerIssueId } =
+      await seedResolvedDependencyBackstopFixture({ workspaceState: "none" });
+    // Make the blocked issue an unblocked assigned todo so the stranded-assigned
+    // sweep takes the initial assignment dispatch path (source=assignment).
+    await db.update(issues).set({ status: "todo" }).where(eq(issues.id, blockedIssueId));
+    await db.update(issues).set({ status: "done" }).where(eq(issues.id, blockerIssueId));
+    await db
+      .update(agents)
+      .set({ runtimeConfig: { heartbeat: { wakeOnDemand: false, maxConcurrentRuns: 1 } } })
+      .where(eq(agents.id, agentId));
+
+    const heartbeat = heartbeatService(db);
+    const first = await heartbeat.reconcileStrandedAssignedIssues();
+    const second = await heartbeat.reconcileStrandedAssignedIssues();
+    for (const result of [first, second]) {
+      expect(result.assignmentDispatched).toBe(0);
+    }
+    const wakes = await db.select().from(agentWakeupRequests).where(eq(agentWakeupRequests.agentId, agentId));
+    expect(wakes).toHaveLength(0);
+
+    await db
+      .update(agents)
+      .set({ runtimeConfig: { heartbeat: { wakeOnDemand: true, maxConcurrentRuns: 1 } } })
+      .where(eq(agents.id, agentId));
+    const afterEnable = await heartbeat.reconcileStrandedAssignedIssues();
+    expect(afterEnable.assignmentDispatched).toBe(1);
+  });
+
+  it("holds resolved dependency wakes for budget-stopped agents instead of retrying every sweep", async () => {
+    const { companyId, agentId, blockedIssueId } =
+      await seedResolvedDependencyBackstopFixture({ workspaceState: "none" });
+    await db.insert(budgetPolicies).values({
+      companyId,
+      scopeType: "agent",
+      scopeId: agentId,
+      metric: "billed_cents",
+      windowKind: "calendar_month_utc",
+      amount: 1,
+      hardStopEnabled: true,
+      isActive: true,
+    });
+    await db.insert(costEvents).values({
+      companyId,
+      agentId,
+      issueId: blockedIssueId,
+      provider: "test",
+      biller: "test",
+      billingType: "tokens",
+      model: "test-model",
+      costCents: 1,
+      occurredAt: new Date(),
+    });
+
+    const heartbeat = heartbeatService(db);
+    const first = await heartbeat.reconcileIssueGraphLiveness();
+    const second = await heartbeat.reconcileIssueGraphLiveness();
+
+    for (const result of [first, second]) {
+      expect(result.dependencyWakesHealed).toBe(0);
+      expect(result.dependencyWakeHoldSkipped).toBe(1);
+      expect(result.dependencyWakeEnqueueFailed).toBe(0);
+    }
+
+    // No wake-request rows at all: budget hold skips before enqueueWakeup, so
+    // repeated sweeps do not accumulate skipped budget.blocked requests.
+    const wakes = await db
+      .select()
+      .from(agentWakeupRequests)
+      .where(eq(agentWakeupRequests.agentId, agentId));
+    expect(wakes).toHaveLength(0);
+
+    // Once the budget block clears, the next sweep heals normally.
+    await db.delete(budgetPolicies).where(eq(budgetPolicies.companyId, companyId));
+    const afterClear = await heartbeat.reconcileIssueGraphLiveness();
+    expect(afterClear.dependencyWakesHealed).toBe(1);
+    expect(afterClear.dependencyWakeIssueIds).toEqual([blockedIssueId]);
+  });
+
   it("keeps resolved dependency wake reconciliation active when liveness auto recovery is disabled", async () => {
     const { companyId, agentId, blockedIssueId, blockerIssueId } =
       await seedResolvedDependencyBackstopFixture({ workspaceState: "none" });
@@ -716,7 +847,7 @@ describeEmbeddedPostgres("heartbeat issue graph liveness escalation", () => {
     );
   });
 
-  it("counts null dependency wake returns as deferred instead of enqueue failures", async () => {
+  it("holds wakeOnDemand-disabled agents upstream instead of deferring through skipped wake rows", async () => {
     await enableAutoRecovery();
     const { companyId, agentId } =
       await seedResolvedDependencyBackstopFixture({ workspaceState: "none" });
@@ -730,21 +861,16 @@ describeEmbeddedPostgres("heartbeat issue graph liveness escalation", () => {
     const result = await heartbeatService(db).reconcileIssueGraphLiveness();
 
     expect(result.dependencyWakesHealed).toBe(0);
-    expect(result.dependencyWakeDeferredOrFailed).toBe(1);
+    expect(result.dependencyWakeHoldSkipped).toBe(1);
+    expect(result.dependencyWakeDeferredOrFailed).toBe(0);
     expect(result.dependencyWakeEnqueueFailed).toBe(0);
 
-    const skippedWake = await db
-      .select({
-        status: agentWakeupRequests.status,
-        reason: agentWakeupRequests.reason,
-      })
+    // Hold happens before enqueueWakeup: no skipped wake-request row is written.
+    const wakes = await db
+      .select()
       .from(agentWakeupRequests)
-      .where(and(eq(agentWakeupRequests.companyId, companyId), eq(agentWakeupRequests.agentId, agentId)))
-      .then((rows) => rows[0] ?? null);
-    expect(skippedWake).toMatchObject({
-      status: "skipped",
-      reason: "heartbeat.wakeOnDemand.disabled",
-    });
+      .where(and(eq(agentWakeupRequests.companyId, companyId), eq(agentWakeupRequests.agentId, agentId)));
+    expect(wakes).toHaveLength(0);
   });
 
   it("does not create recovery issues outside the configured lookback window", async () => {

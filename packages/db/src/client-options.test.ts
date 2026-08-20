@@ -1,16 +1,21 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_DB_IDLE_TIMEOUT_SEC,
+  DEFAULT_DB_IDLE_IN_TX_TIMEOUT_MS,
   DEFAULT_DB_MAX_LIFETIME_SEC,
+  DEFAULT_DB_STATEMENT_TIMEOUT_MS,
   databaseClientOptionsFromEnv,
   postgresJsOptions,
 } from "./client.js";
 
-// Fork: when nothing is set, idle/lifetime bounds default on instead of
-// preserving the driver's never-close behaviour (CNPG smart-shutdown fix).
+// Fork: when nothing is set, idle/lifetime bounds and session guards default
+// on instead of preserving the driver's unbounded behaviour (CNPG
+// smart-shutdown fix; pool-starvation-503 fix).
 const FORK_DEFAULTS = {
   idleTimeoutSeconds: DEFAULT_DB_IDLE_TIMEOUT_SEC,
   maxLifetimeSeconds: DEFAULT_DB_MAX_LIFETIME_SEC,
+  statementTimeoutMs: DEFAULT_DB_STATEMENT_TIMEOUT_MS,
+  idleInTransactionTimeoutMs: DEFAULT_DB_IDLE_IN_TX_TIMEOUT_MS,
 };
 
 describe("databaseClientOptionsFromEnv", () => {
@@ -19,6 +24,10 @@ describe("databaseClientOptionsFromEnv", () => {
     expect(postgresJsOptions(databaseClientOptionsFromEnv({}))).toEqual({
       idle_timeout: DEFAULT_DB_IDLE_TIMEOUT_SEC,
       max_lifetime: DEFAULT_DB_MAX_LIFETIME_SEC,
+      connection: {
+        statement_timeout: DEFAULT_DB_STATEMENT_TIMEOUT_MS,
+        idle_in_transaction_session_timeout: DEFAULT_DB_IDLE_IN_TX_TIMEOUT_MS,
+      },
     });
   });
 
@@ -50,6 +59,8 @@ describe("databaseClientOptionsFromEnv", () => {
       idleTimeoutSeconds: 60,
       connectTimeoutSeconds: 10,
       maxLifetimeSeconds: DEFAULT_DB_MAX_LIFETIME_SEC,
+      statementTimeoutMs: DEFAULT_DB_STATEMENT_TIMEOUT_MS,
+      idleInTransactionTimeoutMs: DEFAULT_DB_IDLE_IN_TX_TIMEOUT_MS,
     });
   });
 

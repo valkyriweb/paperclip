@@ -32,6 +32,15 @@ const sharedOpts = {
 export const logger = pino({
   level: "debug",
   redact: [...HTTP_LOG_REDACT_PATHS],
+  // Serialize errors with the full cause chain so wrapped errors (e.g.
+  // Drizzle's "Failed query" DrizzleQueryError) keep the underlying
+  // stack, code, and driver detail instead of collapsing to the outer
+  // message string. Covers both the conventional `err` key and the
+  // `error` key some call sites use.
+  serializers: {
+    err: pino.stdSerializers.errWithCause,
+    error: pino.stdSerializers.errWithCause,
+  },
 }, pino.transport({
   targets: [
     {
