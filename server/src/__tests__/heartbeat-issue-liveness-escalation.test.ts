@@ -461,6 +461,56 @@ describeEmbeddedPostgres("heartbeat issue graph liveness escalation", () => {
     });
   });
 
+  it("holds resolved dependency wakes for budget-stopped agents instead of retrying every sweep", async () => {
+    const { companyId, agentId, blockedIssueId } =
+      await seedResolvedDependencyBackstopFixture({ workspaceState: "none" });
+    await db.insert(budgetPolicies).values({
+      companyId,
+      scopeType: "agent",
+      scopeId: agentId,
+      metric: "billed_cents",
+      windowKind: "calendar_month_utc",
+      amount: 1,
+      hardStopEnabled: true,
+      isActive: true,
+    });
+    await db.insert(costEvents).values({
+      companyId,
+      agentId,
+      issueId: blockedIssueId,
+      provider: "test",
+      biller: "test",
+      billingType: "tokens",
+      model: "test-model",
+      costCents: 1,
+      occurredAt: new Date(),
+    });
+
+    const heartbeat = heartbeatService(db);
+    const first = await heartbeat.reconcileIssueGraphLiveness();
+    const second = await heartbeat.reconcileIssueGraphLiveness();
+
+    for (const result of [first, second]) {
+      expect(result.dependencyWakesHealed).toBe(0);
+      expect(result.dependencyWakeBudgetHoldSkipped).toBe(1);
+      expect(result.dependencyWakeEnqueueFailed).toBe(0);
+    }
+
+    // No wake-request rows at all: budget hold skips before enqueueWakeup, so
+    // repeated sweeps do not accumulate skipped budget.blocked requests.
+    const wakes = await db
+      .select()
+      .from(agentWakeupRequests)
+      .where(eq(agentWakeupRequests.agentId, agentId));
+    expect(wakes).toHaveLength(0);
+
+    // Once the budget block clears, the next sweep heals normally.
+    await db.delete(budgetPolicies).where(eq(budgetPolicies.companyId, companyId));
+    const afterClear = await heartbeat.reconcileIssueGraphLiveness();
+    expect(afterClear.dependencyWakesHealed).toBe(1);
+    expect(afterClear.dependencyWakeIssueIds).toEqual([blockedIssueId]);
+  });
+
   it("keeps resolved dependency wake reconciliation active when liveness auto recovery is disabled", async () => {
     const { companyId, agentId, blockedIssueId, blockerIssueId } =
       await seedResolvedDependencyBackstopFixture({ workspaceState: "none" });

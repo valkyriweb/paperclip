@@ -5351,6 +5351,7 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
       livePathSkipped: 0,
       interactionSkipped: 0,
       pauseHoldSkipped: 0,
+      budgetHoldSkipped: 0,
       notReadySkipped: 0,
       candidateLimitSkipped: 0,
       deferredOrFailed: 0,
@@ -5506,6 +5507,19 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
           continue;
         }
 
+        // Budget hard-stop is a hold, not a transient failure: enqueueWakeup
+        // would refuse (409 budget.blocked) anyway, and retrying every sweep
+        // produced a skipped wake-request storm for budget-stopped agents.
+        // Skip here; the backstop re-scans, so the wake is enqueued on the
+        // first sweep after the budget block clears.
+        const budgetBlock = await budgets.getInvocationBlock(companyId, agentId, {
+          issueId: candidate.id,
+        });
+        if (budgetBlock) {
+          result.budgetHoldSkipped += 1;
+          continue;
+        }
+
         try {
           const wake = await deps.enqueueWakeup(agentId, {
             source: "automation",
@@ -5641,6 +5655,7 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
       dependencyWakeLivePathSkipped: 0,
       dependencyWakeInteractionSkipped: 0,
       dependencyWakePauseHoldSkipped: 0,
+      dependencyWakeBudgetHoldSkipped: 0,
       dependencyWakeNotReadySkipped: 0,
       dependencyWakeCandidateLimitSkipped: 0,
       dependencyWakeDeferredOrFailed: 0,
@@ -5660,6 +5675,7 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
     result.dependencyWakeLivePathSkipped = dependencyWakeBackstop.livePathSkipped;
     result.dependencyWakeInteractionSkipped = dependencyWakeBackstop.interactionSkipped;
     result.dependencyWakePauseHoldSkipped = dependencyWakeBackstop.pauseHoldSkipped;
+    result.dependencyWakeBudgetHoldSkipped = dependencyWakeBackstop.budgetHoldSkipped;
     result.dependencyWakeNotReadySkipped = dependencyWakeBackstop.notReadySkipped;
     result.dependencyWakeCandidateLimitSkipped = dependencyWakeBackstop.candidateLimitSkipped;
     result.dependencyWakeDeferredOrFailed = dependencyWakeBackstop.deferredOrFailed;
