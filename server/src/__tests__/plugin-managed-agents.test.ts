@@ -362,4 +362,54 @@ describeEmbeddedPostgres("plugin-managed agents", () => {
       managedResourceKey: "wiki-maintainer",
     });
   });
+
+  it("bootstraps declared instructions on board-approval companies without tripping the pending-approval config freeze", async () => {
+    const previousHome = process.env.PAPERCLIP_HOME;
+    const previousInstance = process.env.PAPERCLIP_INSTANCE_ID;
+    const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-managed-agent-home-"));
+    process.env.PAPERCLIP_HOME = tempHome;
+    process.env.PAPERCLIP_INSTANCE_ID = "test";
+    try {
+      const pluginManifest = manifest();
+      pluginManifest.agents![0] = {
+        ...pluginManifest.agents![0]!,
+        adapterType: "claude_local",
+        adapterConfig: {},
+        instructions: {
+          entryFile: "AGENTS.md",
+          content: "# Managed Agent\n\nYou are the managed test agent.\n",
+        },
+      };
+      const { companyId, services } = await seedCompanyAndPlugin({
+        requireApproval: true,
+        manifest: pluginManifest,
+      });
+
+      // Before the fix this threw 409 pending_approval_agent_config_frozen from
+      // materializeDeclaredInstructions, stranding a pending_approval agent
+      // with no approval row.
+      const created = await services.agents.managedReconcile({ companyId, agentKey: "wiki-maintainer" });
+
+      expect(created.status).toBe("created");
+      expect(created.agent?.status).toBe("pending_approval");
+      expect(created.approvalId).toBeTruthy();
+      const instructionsFilePath = created.agent?.adapterConfig.instructionsFilePath;
+      expect(typeof instructionsFilePath).toBe("string");
+      const content = await fs.readFile(instructionsFilePath as string, "utf8");
+      expect(content).toContain("You are the managed test agent.");
+
+      const [approval] = await db.select().from(approvals).where(eq(approvals.id, created.approvalId!));
+      expect(approval).toMatchObject({ type: "hire_agent", status: "pending" });
+      // Approval payload captures the materialized adapterConfig, so approving
+      // reproduces the bootstrapped configuration.
+      expect((approval?.payload as { adapterConfig?: { instructionsFilePath?: string } }).adapterConfig)
+        .toMatchObject({ instructionsFilePath });
+    } finally {
+      if (previousHome === undefined) delete process.env.PAPERCLIP_HOME;
+      else process.env.PAPERCLIP_HOME = previousHome;
+      if (previousInstance === undefined) delete process.env.PAPERCLIP_INSTANCE_ID;
+      else process.env.PAPERCLIP_INSTANCE_ID = previousInstance;
+      await fs.rm(tempHome, { recursive: true, force: true });
+    }
+  });
 });
