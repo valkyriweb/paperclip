@@ -38,6 +38,7 @@ import { redactCurrentUserText } from "../../log-redaction.js";
 import { redactSensitiveText } from "../../redaction.js";
 import { logActivity } from "../activity-log.js";
 import { budgetService } from "../budgets.js";
+import { parseHeartbeatPolicy } from "../heartbeat-policy.js";
 import { instanceSettingsService } from "../instance-settings.js";
 import { issueRecoveryActionService } from "../issue-recovery-actions.js";
 import { issueTreeControlService } from "../issue-tree-control.js";
@@ -784,6 +785,33 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
     return (await evaluateAgentInvokabilityFromDb(db, agent)).invokable;
   }
 
+  type AgentWakeHoldReason = "not_invokable" | "wake_on_demand_disabled" | "budget_blocked";
+
+  /**
+   * Non-runnable agent states are holds, not transient failures: enqueueWakeup
+   * would refuse (budget hard-stop, paused/not-invokable agent) or skip
+   * (heartbeat.wakeOnDemand disabled) anyway, and re-attempting on every
+   * recovery sweep persisted a skipped agent_wakeup_requests row each time — an
+   * unbounded wake-request storm while the state lasted. Backstops re-scan, so
+   * held wakes resume on the first sweep after the agent state changes.
+   */
+  async function getAgentWakeHold(
+    agentId: string,
+    context: { companyId: string; issueId?: string | null; projectId?: string | null },
+  ): Promise<AgentWakeHoldReason | null> {
+    const agent = await getAgent(agentId);
+    if (!agent || agent.companyId !== context.companyId || !(await isAgentInvokable(agent))) {
+      return "not_invokable";
+    }
+    if (!parseHeartbeatPolicy(agent).wakeOnDemand) return "wake_on_demand_disabled";
+    const budgetBlock = await budgets.getInvocationBlock(context.companyId, agentId, {
+      issueId: context.issueId ?? null,
+      projectId: context.projectId ?? null,
+    });
+    if (budgetBlock) return "budget_blocked";
+    return null;
+  }
+
   async function getLatestIssueRun(companyId: string, issueId: string): Promise<LatestIssueRun> {
     return db
       .select({
@@ -1131,6 +1159,21 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
     retryOfRunId?: string | null;
     extraContext?: Record<string, unknown>;
   }) {
+    const issue = await db
+      .select({ companyId: issues.companyId, projectId: issues.projectId })
+      .from(issues)
+      .where(eq(issues.id, input.issueId))
+      .then((rows) => rows[0] ?? null);
+    if (
+      issue &&
+      (await getAgentWakeHold(input.agentId, {
+        companyId: issue.companyId,
+        issueId: input.issueId,
+        projectId: issue.projectId,
+      }))
+    ) {
+      return null;
+    }
     const queued = await deps.enqueueWakeup(input.agentId, {
       source: "automation",
       triggerDetail: "system",
@@ -1169,6 +1212,15 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
   }
 
   async function enqueueInitialAssignedTodoDispatch(issue: typeof issues.$inferSelect, agentId: string) {
+    if (
+      await getAgentWakeHold(agentId, {
+        companyId: issue.companyId,
+        issueId: issue.id,
+        projectId: issue.projectId,
+      })
+    ) {
+      return null;
+    }
     return deps.enqueueWakeup(agentId, {
       source: "assignment",
       triggerDetail: "system",
@@ -5351,7 +5403,7 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
       livePathSkipped: 0,
       interactionSkipped: 0,
       pauseHoldSkipped: 0,
-      budgetHoldSkipped: 0,
+      wakeHoldSkipped: 0,
       notReadySkipped: 0,
       candidateLimitSkipped: 0,
       deferredOrFailed: 0,
@@ -5507,16 +5559,11 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
           continue;
         }
 
-        // Budget hard-stop is a hold, not a transient failure: enqueueWakeup
-        // would refuse (409 budget.blocked) anyway, and retrying every sweep
-        // produced a skipped wake-request storm for budget-stopped agents.
-        // Skip here; the backstop re-scans, so the wake is enqueued on the
-        // first sweep after the budget block clears.
-        const budgetBlock = await budgets.getInvocationBlock(companyId, agentId, {
-          issueId: candidate.id,
-        });
-        if (budgetBlock) {
-          result.budgetHoldSkipped += 1;
+        // Any non-runnable agent state (paused/not-invokable, wakeOnDemand
+        // disabled, budget hard-stop) is a hold: skip before enqueueWakeup so
+        // repeated sweeps do not persist skipped wake-request rows.
+        if (await getAgentWakeHold(agentId, { companyId, issueId: candidate.id })) {
+          result.wakeHoldSkipped += 1;
           continue;
         }
 
@@ -5655,7 +5702,7 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
       dependencyWakeLivePathSkipped: 0,
       dependencyWakeInteractionSkipped: 0,
       dependencyWakePauseHoldSkipped: 0,
-      dependencyWakeBudgetHoldSkipped: 0,
+      dependencyWakeHoldSkipped: 0,
       dependencyWakeNotReadySkipped: 0,
       dependencyWakeCandidateLimitSkipped: 0,
       dependencyWakeDeferredOrFailed: 0,
@@ -5675,7 +5722,7 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
     result.dependencyWakeLivePathSkipped = dependencyWakeBackstop.livePathSkipped;
     result.dependencyWakeInteractionSkipped = dependencyWakeBackstop.interactionSkipped;
     result.dependencyWakePauseHoldSkipped = dependencyWakeBackstop.pauseHoldSkipped;
-    result.dependencyWakeBudgetHoldSkipped = dependencyWakeBackstop.budgetHoldSkipped;
+    result.dependencyWakeHoldSkipped = dependencyWakeBackstop.wakeHoldSkipped;
     result.dependencyWakeNotReadySkipped = dependencyWakeBackstop.notReadySkipped;
     result.dependencyWakeCandidateLimitSkipped = dependencyWakeBackstop.candidateLimitSkipped;
     result.dependencyWakeDeferredOrFailed = dependencyWakeBackstop.deferredOrFailed;
