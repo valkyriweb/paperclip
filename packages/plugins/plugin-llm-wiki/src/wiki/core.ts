@@ -1329,17 +1329,28 @@ function fallbackDefaultSpace(input: { companyId: string; wikiId: string }): Wik
   };
 }
 
+function isUniqueViolation(err: unknown): boolean {
+  let current: unknown = err;
+  for (let depth = 0; current && typeof current === "object" && depth < 5; depth += 1) {
+    if ((current as { code?: unknown }).code === "23505") return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
 export async function ensureDefaultSpace(ctx: PluginContext, input: { companyId: string; wikiId?: string | null }): Promise<WikiSpace> {
   const wikiId = normalizeWikiId(input.wikiId);
   const id = stableSpaceId({ companyId: input.companyId, wikiId, slug: DEFAULT_SPACE_SLUG });
-  await ctx.db.execute(
-    `INSERT INTO ${spaceTable(ctx)} AS wiki_spaces
-       (id, company_id, wiki_id, slug, display_name, space_type, folder_mode, root_folder_key, path_prefix, access_scope, status, settings)
-     VALUES ($1, $2, $3, 'default', 'default', 'local_folder', 'managed_subfolder', $4, NULL, 'shared', 'active', '{}'::jsonb)
-     ON CONFLICT (company_id, wiki_id, slug)
-     DO UPDATE SET updated_at = wiki_spaces.updated_at`,
-    [id, input.companyId, wikiId, WIKI_ROOT_FOLDER_KEY],
-  );
+  try {
+    await insertDefaultSpace(ctx, { id, companyId: input.companyId, wikiId });
+  } catch (err) {
+    // Concurrent callers compute the same deterministic stable space id, so the
+    // loser of an insert race hits a 23505 on wiki_spaces_pkey — the
+    // ON CONFLICT (company_id, wiki_id, slug) arm does not cover the primary
+    // key. The row exists (or is being committed) either way, so treat the
+    // unique violation as success and fall through to the select.
+    if (!isUniqueViolation(err)) throw err;
+  }
   const rows = await ctx.db.query<WikiSpaceRow>(
     `SELECT id, company_id, wiki_id, slug, display_name, space_type, folder_mode, root_folder_key,
             path_prefix, configured_root_path, access_scope, owner_user_id, owner_agent_id, team_key,
@@ -1350,6 +1361,20 @@ export async function ensureDefaultSpace(ctx: PluginContext, input: { companyId:
     [input.companyId, wikiId],
   );
   return rows[0] ? wikiSpaceFromRow(rows[0]) : fallbackDefaultSpace({ companyId: input.companyId, wikiId });
+}
+
+async function insertDefaultSpace(
+  ctx: PluginContext,
+  input: { id: string; companyId: string; wikiId: string },
+): Promise<void> {
+  await ctx.db.execute(
+    `INSERT INTO ${spaceTable(ctx)} AS wiki_spaces
+       (id, company_id, wiki_id, slug, display_name, space_type, folder_mode, root_folder_key, path_prefix, access_scope, status, settings)
+     VALUES ($1, $2, $3, 'default', 'default', 'local_folder', 'managed_subfolder', $4, NULL, 'shared', 'active', '{}'::jsonb)
+     ON CONFLICT (company_id, wiki_id, slug)
+     DO UPDATE SET updated_at = wiki_spaces.updated_at`,
+    [input.id, input.companyId, input.wikiId, WIKI_ROOT_FOLDER_KEY],
+  );
 }
 
 export async function resolveSpace(ctx: PluginContext, input: SpaceInput): Promise<WikiSpace> {
