@@ -25,6 +25,10 @@ const mockPino = vi.hoisted(() => {
     child: vi.fn(),
   }));
   (fn as any).transport = mockTransport;
+  (fn as any).stdSerializers = {
+    err: vi.fn(),
+    errWithCause: vi.fn(),
+  };
   return fn;
 });
 
