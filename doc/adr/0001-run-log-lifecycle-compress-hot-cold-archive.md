@@ -18,8 +18,12 @@ problem, not a retention one, so retention alone frees nothing today.
 The dominant lever is compression: streaming-delta ndjson is hugely repetitive and
 gzips ~**88x** (a 198 MB run-log → ~2 MB; the existing restic R2 job already sees
 ~78x). Steps 1 and 2 of this work shipped compress-on-complete and a per-run size
-cap. This ADR covers step 3: what happens to those (now tiny) compressed logs over
-time, and how one tenant is prevented from starving the shared volume.
+cap. The `pi_local` adapter also removes the cumulative `partial` and `message`
+assistant snapshots from each persisted `message_update`. It retains the event type and incremental
+delta used by live transcript rendering. This prevents every small provider delta
+from copying the full encrypted reasoning and tool-call state into the run log.
+This ADR covers step 3: what happens to those compressed logs over time, and how
+one tenant is prevented from starving the shared volume.
 
 ## Decision
 

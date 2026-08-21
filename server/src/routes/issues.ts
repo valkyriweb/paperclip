@@ -8655,10 +8655,6 @@ export function issueRoutes(
       }
     }
 
-    const runToCancelForCancelledStatus = shouldCancelActiveRunForCancelledStatus
-      ? await resolveActiveIssueRun(existing)
-      : null;
-
     if (hiddenAtRaw !== undefined) {
       updateFields.hiddenAt = hiddenAtRaw ? new Date(hiddenAtRaw) : null;
     }
@@ -9025,13 +9021,21 @@ export function issueRoutes(
     }
 
     let cancelledStatusRunId: string | null = null;
-    if (runToCancelForCancelledStatus) {
+    let cancelledStatusRunIds: string[] = [];
+    let cancelledStatusWakeupIds: string[] = [];
+    if (shouldCancelActiveRunForCancelledStatus) {
       try {
-        const cancelled = await heartbeat.cancelRun(runToCancelForCancelledStatus.id);
-        if (cancelled) {
-          cancelledStatusRunId = cancelled.id;
+        const cancelled = await heartbeat.cancelIssueInvocations(
+          existing.companyId,
+          existing.id,
+          "Cancelled because issue reached terminal status",
+        );
+        cancelledStatusRunIds = cancelled.runIds;
+        cancelledStatusWakeupIds = cancelled.wakeupIds;
+        cancelledStatusRunId = cancelledStatusRunIds[0] ?? null;
+        for (const runId of cancelledStatusRunIds) {
           await logActivity(db, {
-            companyId: cancelled.companyId,
+            companyId: existing.companyId,
             actorType: actor.actorType,
             actorId: actor.actorId,
             agentId: actor.agentId,
@@ -9039,13 +9043,32 @@ export function issueRoutes(
             agentApiKeyId: actor.agentApiKeyId,
             action: "heartbeat.cancelled",
             entityType: "heartbeat_run",
-            entityId: cancelled.id,
+            entityId: runId,
             issueId: existing.id,
-            details: { agentId: cancelled.agentId, source: "issue_status_cancelled", issueId: existing.id },
+            details: { source: "issue_status_cancelled", issueId: existing.id },
+          });
+        }
+        if (cancelledStatusWakeupIds.length > 0) {
+          await logActivity(db, {
+            companyId: existing.companyId,
+            actorType: actor.actorType,
+            actorId: actor.actorId,
+            agentId: actor.agentId,
+            runId: actor.runId,
+            agentApiKeyId: actor.agentApiKeyId,
+            action: "heartbeat.wakeups_cancelled",
+            entityType: "issue",
+            entityId: existing.id,
+            issueId: existing.id,
+            details: {
+              source: "issue_status_cancelled",
+              issueId: existing.id,
+              wakeupIds: cancelledStatusWakeupIds,
+            },
           });
         }
       } catch (err) {
-        logger.warn({ err, issueId: existing.id, runId: runToCancelForCancelledStatus.id }, "failed to cancel run for cancelled issue");
+        logger.warn({ err, issueId: existing.id }, "failed to cancel invocations for cancelled issue");
         await logActivity(db, {
           companyId: existing.companyId,
           actorType: actor.actorType,
@@ -9054,8 +9077,8 @@ export function issueRoutes(
           runId: actor.runId,
           agentApiKeyId: actor.agentApiKeyId,
           action: "heartbeat.cancel_failed",
-          entityType: "heartbeat_run",
-          entityId: runToCancelForCancelledStatus.id,
+          entityType: "issue",
+          entityId: existing.id,
           issueId: existing.id,
           details: { source: "issue_status_cancelled", issueId: existing.id },
         });
@@ -9185,6 +9208,8 @@ export function issueRoutes(
           : {}),
         ...(interruptedRunId ? { interruptedRunId } : {}),
         ...(cancelledStatusRunId ? { cancelledStatusRunId } : {}),
+        ...(cancelledStatusRunIds.length > 0 ? { cancelledStatusRunIds } : {}),
+        ...(cancelledStatusWakeupIds.length > 0 ? { cancelledStatusWakeupIds } : {}),
         ...(workspaceChange ? { workspaceChange } : {}),
         _previous: hasFieldChanges ? previous : undefined,
         ...summarizeIssueReferenceActivityDetails(

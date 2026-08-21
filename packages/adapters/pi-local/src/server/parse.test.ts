@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { isPiTransientUpstreamError, parsePiJsonl, isPiUnknownSessionError } from "./parse.js";
+import {
+  compactPiJsonlForRunLog,
+  isPiTransientUpstreamError,
+  parsePiJsonl,
+  isPiUnknownSessionError,
+} from "./parse.js";
 
 describe("parsePiJsonl", () => {
   it("parses agent lifecycle and messages", () => {
@@ -280,6 +285,59 @@ describe("isPiTransientUpstreamError", () => {
       }),
     ).toBe(false);
     expect(isPiTransientUpstreamError({ errorMessage: "Invalid request_error: Unknown parameter 'foo'." })).toBe(false);
+  });
+});
+
+describe("compactPiJsonlForRunLog", () => {
+  it("removes cumulative partial state from streaming message updates", () => {
+    const line = JSON.stringify({
+      type: "message_update",
+      assistantMessageEvent: {
+        type: "toolcall_delta",
+        delta: "}",
+        partial: {
+          role: "assistant",
+          content: [{ type: "thinking", thinkingSignature: "encrypted".repeat(10_000) }],
+        },
+      },
+      message: {
+        role: "assistant",
+        content: [{ type: "thinking", thinkingSignature: "encrypted".repeat(10_000) }],
+      },
+      api: "openai-responses",
+      model: "gpt-5.6-sol",
+    });
+
+    const compacted = compactPiJsonlForRunLog(line);
+    expect(compacted.length).toBeLessThan(500);
+    expect(JSON.parse(compacted)).toEqual({
+      type: "message_update",
+      assistantMessageEvent: {
+        type: "toolcall_delta",
+        delta: "}",
+      },
+      api: "openai-responses",
+      model: "gpt-5.6-sol",
+    });
+  });
+
+  it("removes a top-level cumulative message even when partial is absent", () => {
+    const line = JSON.stringify({
+      type: "message_update",
+      assistantMessageEvent: { type: "text_delta", delta: "next" },
+      message: { role: "assistant", content: [{ type: "text", text: "all text so far" }] },
+    });
+
+    expect(JSON.parse(compactPiJsonlForRunLog(line))).toEqual({
+      type: "message_update",
+      assistantMessageEvent: { type: "text_delta", delta: "next" },
+    });
+  });
+
+  it("leaves non-streaming and malformed lines unchanged", () => {
+    const lifecycle = JSON.stringify({ type: "tool_execution_start", toolName: "bash" });
+    expect(compactPiJsonlForRunLog(lifecycle)).toBe(lifecycle);
+    expect(compactPiJsonlForRunLog("not json")).toBe("not json");
   });
 });
 

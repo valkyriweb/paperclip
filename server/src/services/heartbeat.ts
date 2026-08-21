@@ -15313,6 +15313,18 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         .then((rows) => rows[0] ?? null);
       if (runningWithSession) run = runningWithSession;
 
+      // A board cancellation can race with workspace/config preparation after this
+      // run was claimed. Re-check after preparation before performing more setup;
+      // a second gate immediately before adapter execution closes the remaining window.
+      const executionStartRun = await getRun(run.id);
+      if (!executionStartRun || isHeartbeatRunTerminalStatus(executionStartRun.status)) {
+        logger.info(
+          { runId: run.id, status: executionStartRun?.status ?? "missing" },
+          "execution-start aborted: run already terminal",
+        );
+        return;
+      }
+
       // Pause Durability: flip to "running" ONLY if the agent is still invokable.
       // Atomic conditional UPDATE is the sole gate (no read-then-write); 0 rows => abort.
       const runningAgent = await db
@@ -15812,6 +15824,16 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         if (managedMcpConfig) {
           adapterContext.paperclipManagedMcp = managedMcpConfig;
         }
+
+        const adapterStartRun = await getRun(run.id);
+        if (!adapterStartRun || isHeartbeatRunTerminalStatus(adapterStartRun.status)) {
+          logger.info(
+            { runId: run.id, status: adapterStartRun?.status ?? "missing" },
+            "adapter invocation aborted: run already terminal",
+          );
+          return;
+        }
+
         adapterResult = await adapter.execute({
           runId: run.id,
           agent,
@@ -18800,6 +18822,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
     resultJson?: Record<string, unknown>;
     eventMessage?: string;
     eventPayload?: Record<string, unknown>;
+    startNextQueuedRun?: boolean;
   };
 
   async function cancelRunInternal(runId: string, reason = "Cancelled by control plane", options: CancelRunOptions = {}) {
@@ -18864,8 +18887,71 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
     await finalizeAgentStatus(run.agentId, "cancelled", undefined, {
       wasFirstHeartbeat: timerClaimWasFirstHeartbeat(run),
     });
-    await startNextQueuedRunForAgent(run.agentId);
+    if (options.startNextQueuedRun !== false) {
+      await startNextQueuedRunForAgent(run.agentId);
+    }
     return cancelled;
+  }
+
+  async function cancelIssueInvocationsInternal(companyId: string, issueId: string, reason: string) {
+    const now = new Date();
+    const pendingWakeupIds = await db
+      .select({ id: agentWakeupRequests.id })
+      .from(agentWakeupRequests)
+      .where(
+        and(
+          eq(agentWakeupRequests.companyId, companyId),
+          inArray(agentWakeupRequests.status, ["queued", "deferred_issue_execution"]),
+          isNull(agentWakeupRequests.runId),
+          sql`coalesce(${agentWakeupRequests.payload} ->> 'issueId', ${agentWakeupRequests.payload} ->> 'sourceIssueId', ${agentWakeupRequests.payload} ->> 'taskId') = ${issueId}`,
+        ),
+      )
+      .then((rows) => rows.map((row) => row.id));
+
+    if (pendingWakeupIds.length > 0) {
+      await db
+        .update(agentWakeupRequests)
+        .set({
+          status: "cancelled",
+          finishedAt: now,
+          error: reason,
+          updatedAt: now,
+        })
+        .where(inArray(agentWakeupRequests.id, pendingWakeupIds));
+    }
+
+    const runRows = await db
+      .select({ id: heartbeatRuns.id, agentId: heartbeatRuns.agentId })
+      .from(heartbeatRuns)
+      .where(
+        and(
+          eq(heartbeatRuns.companyId, companyId),
+          inArray(heartbeatRuns.status, [...CANCELLABLE_HEARTBEAT_RUN_STATUSES]),
+          sql`coalesce(${heartbeatRuns.contextSnapshot} ->> 'issueId', ${heartbeatRuns.contextSnapshot} ->> 'taskId') = ${issueId}`,
+        ),
+      );
+
+    const cancelledRunIds: string[] = [];
+    const affectedAgentIds = new Set<string>();
+    for (const row of runRows) {
+      const cancelled = await cancelRunInternal(row.id, reason, {
+        errorCode: "issue_cancelled",
+        eventMessage: "run cancelled because issue reached terminal status",
+        eventPayload: { issueId, source: "issue_status_cancelled" },
+        startNextQueuedRun: false,
+      });
+      if (cancelled?.status === "cancelled") cancelledRunIds.push(cancelled.id);
+      affectedAgentIds.add(row.agentId);
+    }
+
+    for (const agentId of affectedAgentIds) {
+      await startNextQueuedRunForAgent(agentId);
+    }
+
+    return {
+      runIds: cancelledRunIds,
+      wakeupIds: pendingWakeupIds,
+    };
   }
 
   async function cancelActiveForAgentInternal(agentId: string, reason = "Cancelled due to agent pause", errorCode = "cancelled") {
@@ -19401,6 +19487,9 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
     },
 
     cancelRun: (runId: string, reason?: string, options?: CancelRunOptions) => cancelRunInternal(runId, reason, options),
+
+    cancelIssueInvocations: (companyId: string, issueId: string, reason: string) =>
+      cancelIssueInvocationsInternal(companyId, issueId, reason),
 
     /**
      * Pause-only. Emits errorCode "agent_paused" unconditionally; its sole caller is the
