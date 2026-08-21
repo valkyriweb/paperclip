@@ -1281,6 +1281,21 @@ describeEmbeddedPostgres("heartbeat stale queued-run invalidation", () => {
       .update(heartbeatRuns)
       .set({ status: "running", startedAt: new Date() })
       .where(eq(heartbeatRuns.id, claimedRecovery.runId));
+    const scheduledRetry = await seedQueuedRun({
+      companyId,
+      agentId: recoveryAgentId,
+      issueId,
+      wakeReason: "issue_continuation_needed",
+    });
+    await db
+      .update(heartbeatRuns)
+      .set({
+        status: "scheduled_retry",
+        scheduledRetryReason: "issue_continuation_needed",
+        scheduledRetryAttempt: 1,
+        scheduledRetryAt: new Date(Date.now() + 60_000),
+      })
+      .where(eq(heartbeatRuns.id, scheduledRetry.runId));
     await db.insert(agentWakeupRequests).values({
       id: randomUUID(),
       companyId,
@@ -1298,7 +1313,7 @@ describeEmbeddedPostgres("heartbeat stale queued-run invalidation", () => {
       "Cancelled because the issue reached terminal status",
     );
 
-    expect(result.runIds.sort()).toEqual([queued.runId, claimedRecovery.runId].sort());
+    expect(result.runIds.sort()).toEqual([queued.runId, claimedRecovery.runId, scheduledRetry.runId].sort());
     expect(result.wakeupIds).toHaveLength(1);
     const runs = await db
       .select({ id: heartbeatRuns.id, status: heartbeatRuns.status, errorCode: heartbeatRuns.errorCode })
@@ -1306,6 +1321,7 @@ describeEmbeddedPostgres("heartbeat stale queued-run invalidation", () => {
     expect(runs).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: queued.runId, status: "cancelled", errorCode: "issue_cancelled" }),
       expect.objectContaining({ id: claimedRecovery.runId, status: "cancelled", errorCode: "issue_cancelled" }),
+      expect.objectContaining({ id: scheduledRetry.runId, status: "cancelled", errorCode: "issue_cancelled" }),
     ]));
     const wakeups = await db
       .select({ status: agentWakeupRequests.status })
