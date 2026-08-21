@@ -321,6 +321,19 @@ describe("compactPiJsonlForRunLog", () => {
     });
   });
 
+  it("removes a top-level cumulative message even when partial is absent", () => {
+    const line = JSON.stringify({
+      type: "message_update",
+      assistantMessageEvent: { type: "text_delta", delta: "next" },
+      message: { role: "assistant", content: [{ type: "text", text: "all text so far" }] },
+    });
+
+    expect(JSON.parse(compactPiJsonlForRunLog(line))).toEqual({
+      type: "message_update",
+      assistantMessageEvent: { type: "text_delta", delta: "next" },
+    });
+  });
+
   it("leaves non-streaming and malformed lines unchanged", () => {
     const lifecycle = JSON.stringify({ type: "tool_execution_start", toolName: "bash" });
     expect(compactPiJsonlForRunLog(lifecycle)).toBe(lifecycle);
