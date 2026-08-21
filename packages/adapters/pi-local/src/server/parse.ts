@@ -19,6 +19,21 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
+export function compactPiJsonlForRunLog(line: string): string {
+  const event = parseJson(line);
+  if (!event || asString(event.type, "") !== "message_update") return line;
+
+  const assistantEvent = asRecord(event.assistantMessageEvent);
+  if (!assistantEvent || !("partial" in assistantEvent)) return line;
+
+  const compactAssistantEvent = { ...assistantEvent };
+  delete compactAssistantEvent.partial;
+  const compactEvent = { ...event };
+  delete compactEvent.message;
+  compactEvent.assistantMessageEvent = compactAssistantEvent;
+  return JSON.stringify(compactEvent);
+}
+
 function extractTextContent(content: string | Array<{ type: string; text?: string }>): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";

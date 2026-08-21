@@ -96,6 +96,12 @@ The work is complete and terminal.
 
 The work will not continue and is terminal.
 
+Entering `cancelled` cancels every queued, scheduled, or running invocation whose
+run context targets the issue, including recovery-owner runs, and cancels pending
+issue-scoped wake requests that have not created a run. A run that was claimed
+while the terminal update was in flight re-checks its persisted run state before
+adapter execution and must not spawn a late process after cancellation.
+
 ## 4. Agent-Owned vs User-Owned Execution
 
 The execution model differs depending on assignee type.

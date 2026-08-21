@@ -47,7 +47,12 @@ import {
   runChildProcess,
 } from "@paperclipai/adapter-utils/server-utils";
 import { shellQuote } from "@paperclipai/adapter-utils/ssh";
-import { isPiTransientUpstreamError, isPiUnknownSessionError, parsePiJsonl } from "./parse.js";
+import {
+  compactPiJsonlForRunLog,
+  isPiTransientUpstreamError,
+  isPiUnknownSessionError,
+  parsePiJsonl,
+} from "./parse.js";
 import { ensurePiModelConfiguredAndAvailable } from "./models.js";
 import { preparePiRuntimeConfig } from "./runtime-config.js";
 import { SANDBOX_INSTALL_COMMAND } from "../index.js";
@@ -732,7 +737,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         // Emit complete lines
         for (const line of lines) {
           if (line) {
-            await onLog(stream, line + "\n");
+            await onLog(stream, compactPiJsonlForRunLog(line) + "\n");
           }
         }
       };
@@ -750,7 +755,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 
       // Flush any remaining buffer content
       if (stdoutBuffer) {
-        await onLog("stdout", stdoutBuffer);
+        await onLog("stdout", compactPiJsonlForRunLog(stdoutBuffer));
       }
 
       return {

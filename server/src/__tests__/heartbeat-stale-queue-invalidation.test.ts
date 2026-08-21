@@ -1239,6 +1239,81 @@ describeEmbeddedPostgres("heartbeat stale queued-run invalidation", () => {
     expect(countExecuteCallsForRun(runId)).toBe(0);
   });
 
+  it("cancels every queued, claimed, and pending recovery invocation when an issue is cancelled", async () => {
+    const { companyId, agentId } = await seedCompanyAndAgent({ agentName: "IssueOwner" });
+    const recoveryAgentId = randomUUID();
+    await db.insert(agents).values({
+      id: recoveryAgentId,
+      companyId,
+      name: "RecoveryOwner",
+      role: "manager",
+      status: "active",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: { heartbeat: { wakeOnDemand: true, maxConcurrentRuns: 1 } },
+      permissions: {},
+    });
+
+    const issueId = randomUUID();
+    await db.insert(issues).values({
+      id: issueId,
+      companyId,
+      title: "Cancelled task with queued recovery",
+      status: "cancelled",
+      priority: "medium",
+      assigneeAgentId: agentId,
+    });
+
+    const queued = await seedQueuedRun({
+      companyId,
+      agentId,
+      issueId,
+      wakeReason: "issue_continuation_needed",
+      invocationSource: "automation",
+    });
+    const claimedRecovery = await seedQueuedRun({
+      companyId,
+      agentId: recoveryAgentId,
+      issueId,
+      wakeReason: "source_scoped_recovery_action",
+    });
+    await db
+      .update(heartbeatRuns)
+      .set({ status: "running", startedAt: new Date() })
+      .where(eq(heartbeatRuns.id, claimedRecovery.runId));
+    await db.insert(agentWakeupRequests).values({
+      id: randomUUID(),
+      companyId,
+      agentId: recoveryAgentId,
+      source: "assignment",
+      triggerDetail: "system",
+      reason: "source_scoped_recovery_action",
+      payload: { issueId, sourceIssueId: issueId },
+      status: "queued",
+    });
+
+    const result = await heartbeat.cancelIssueInvocations(
+      companyId,
+      issueId,
+      "Cancelled because the issue reached terminal status",
+    );
+
+    expect(result.runIds.sort()).toEqual([queued.runId, claimedRecovery.runId].sort());
+    expect(result.wakeupIds).toHaveLength(1);
+    const runs = await db
+      .select({ id: heartbeatRuns.id, status: heartbeatRuns.status, errorCode: heartbeatRuns.errorCode })
+      .from(heartbeatRuns);
+    expect(runs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: queued.runId, status: "cancelled", errorCode: "issue_cancelled" }),
+      expect.objectContaining({ id: claimedRecovery.runId, status: "cancelled", errorCode: "issue_cancelled" }),
+    ]));
+    const wakeups = await db
+      .select({ status: agentWakeupRequests.status })
+      .from(agentWakeupRequests);
+    expect(wakeups.every((row) => row.status === "cancelled")).toBe(true);
+    expect(mockAdapterExecute).not.toHaveBeenCalled();
+  });
+
   it("cancels queued max-turn continuations when the issue is no longer in_progress before the run starts", async () => {
     const { companyId, agentId } = await seedCompanyAndAgent();
     const issueId = randomUUID();

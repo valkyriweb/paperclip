@@ -27,6 +27,7 @@ const mockHeartbeatService = vi.hoisted(() => ({
   getRun: vi.fn(async () => null),
   getActiveRunForAgent: vi.fn(async () => null),
   cancelRun: vi.fn(async () => null),
+  cancelIssueInvocations: vi.fn(async () => ({ runIds: [], wakeupIds: [] })),
 }));
 
 const mockAgentService = vi.hoisted(() => ({
@@ -280,6 +281,7 @@ describe.sequential("issue comment reopen routes", () => {
     mockHeartbeatService.getRun.mockReset();
     mockHeartbeatService.getActiveRunForAgent.mockReset();
     mockHeartbeatService.cancelRun.mockReset();
+    mockHeartbeatService.cancelIssueInvocations.mockReset();
     mockAgentService.getById.mockReset();
     mockAgentService.list.mockReset();
     mockAgentService.resolveByReference.mockReset();
@@ -320,6 +322,7 @@ describe.sequential("issue comment reopen routes", () => {
     mockHeartbeatService.getRun.mockResolvedValue(null);
     mockHeartbeatService.getActiveRunForAgent.mockResolvedValue(null);
     mockHeartbeatService.cancelRun.mockResolvedValue(null);
+    mockHeartbeatService.cancelIssueInvocations.mockResolvedValue({ runIds: [], wakeupIds: [] });
     mockExternalObjectService.syncCommentSafely.mockResolvedValue(undefined);
     mockExternalObjectService.syncIssueSafely.mockResolvedValue(undefined);
     mockObserveCrossIssueInfluence.mockResolvedValue({
@@ -2195,17 +2198,9 @@ describe.sequential("issue comment reopen routes", () => {
       ...issue,
       ...patch,
     }));
-    mockHeartbeatService.getRun.mockResolvedValue({
-      id: "run-1",
-      companyId: "company-1",
-      agentId: "22222222-2222-4222-8222-222222222222",
-      status: "running",
-    });
-    mockHeartbeatService.cancelRun.mockResolvedValue({
-      id: "run-1",
-      companyId: "company-1",
-      agentId: "22222222-2222-4222-8222-222222222222",
-      status: "cancelled",
+    mockHeartbeatService.cancelIssueInvocations.mockResolvedValue({
+      runIds: ["run-1"],
+      wakeupIds: ["wakeup-1"],
     });
 
     const res = await request(await installActor(createApp()))
@@ -2213,8 +2208,11 @@ describe.sequential("issue comment reopen routes", () => {
       .send({ status: "cancelled" });
 
     expect(res.status).toBe(200);
-    expect(mockHeartbeatService.getRun).toHaveBeenCalledWith("run-1");
-    expect(mockHeartbeatService.cancelRun).toHaveBeenCalledWith("run-1");
+    expect(mockHeartbeatService.cancelIssueInvocations).toHaveBeenCalledWith(
+      "company-1",
+      "11111111-1111-4111-8111-111111111111",
+      "Cancelled because issue reached terminal status",
+    );
     expect(mockLogActivity).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -2222,6 +2220,15 @@ describe.sequential("issue comment reopen routes", () => {
         details: expect.objectContaining({
           source: "issue_status_cancelled",
           issueId: "11111111-1111-4111-8111-111111111111",
+        }),
+      }),
+    );
+    expect(mockLogActivity).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: "heartbeat.wakeups_cancelled",
+        details: expect.objectContaining({
+          wakeupIds: ["wakeup-1"],
         }),
       }),
     );
@@ -2250,6 +2257,7 @@ describe.sequential("issue comment reopen routes", () => {
 
     expect(res.status).toBe(200);
     expect(mockHeartbeatService.cancelRun).not.toHaveBeenCalled();
+    expect(mockHeartbeatService.cancelIssueInvocations).not.toHaveBeenCalled();
   });
 
   it("writes decision ids into executionState and inserts the decision inside the transaction", async () => {
