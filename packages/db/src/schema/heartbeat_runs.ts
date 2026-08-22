@@ -112,5 +112,13 @@ export const heartbeatRuns = pgTable(
       sql`(${table.contextSnapshot} ->> 'taskKey')`,
       table.createdAt.desc(),
     ),
+    // Second OR branch of valuesForIssue (run-secret-redaction.ts). Without it
+    // the whole predicate is disqualified from a BitmapOr and falls back to a
+    // Seq Scan that detoasts context_snapshot. No created_at: the query has no
+    // ORDER BY and no LIMIT, so a sort key would only cost writes.
+    companyCtxPaperclipIssueIdx: index("heartbeat_runs_company_ctx_paperclip_issue_idx").on(
+      table.companyId,
+      sql`((${table.contextSnapshot} -> 'paperclipIssue') ->> 'id')`,
+    ),
   }),
 );
