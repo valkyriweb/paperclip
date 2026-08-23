@@ -466,6 +466,34 @@ describe("startServer feedback export wiring", () => {
     });
   });
 
+  // startServer registers several intervals (heartbeat scheduler, database
+  // backup, run-log archive, result retention). Capturing into a single slot
+  // silently assumed the scheduler registered the LAST one in the whole startup
+  // path — an unstated assumption that broke as soon as another unconditional
+  // timer was added. Select by period instead, which is what these tests
+  // actually mean.
+  function captureIntervals() {
+    const registered: Array<{ callback: () => void; ms: number | undefined }> = [];
+    const spy = vi
+      .spyOn(globalThis, "setInterval")
+      .mockImplementation(((callback: () => void, ms?: number) => {
+        registered.push({ callback, ms });
+        return 1 as unknown as ReturnType<typeof setInterval>;
+      }) as unknown as typeof setInterval);
+    return {
+      spy,
+      callbackFor(ms: number) {
+        const matches = registered.filter((entry) => entry.ms === ms);
+        if (matches.length !== 1) {
+          throw new Error(
+            `expected exactly one interval registered at ${ms}ms, found ${matches.length} (registered: ${registered.map((e) => e.ms).join(", ")})`,
+          );
+        }
+        return matches[0]!.callback;
+      },
+    };
+  }
+
   it("keeps routine ticks and setup cleanup active when heartbeat scheduling is suppressed", async () => {
     loadConfigMock.mockReturnValue(buildTestConfig({
       heartbeatSchedulerEnabled: true,
@@ -475,13 +503,8 @@ describe("startServer feedback export wiring", () => {
       suppressed: true,
       reason: "worktree_instance",
     });
-    let intervalCallback: (() => void) | null = null;
-    const setIntervalSpy = vi
-      .spyOn(globalThis, "setInterval")
-      .mockImplementation(((callback: () => void) => {
-        intervalCallback = callback;
-        return 1 as unknown as ReturnType<typeof setInterval>;
-      }) as typeof setInterval);
+    const intervals = captureIntervals();
+    const setIntervalSpy = intervals.spy;
 
     try {
       await startServer();
@@ -490,8 +513,7 @@ describe("startServer feedback export wiring", () => {
       expect(heartbeatServiceMock.tickTimers).not.toHaveBeenCalled();
       expect(environmentCustomImagesServiceMock.cleanupExpiredSetupSessions).toHaveBeenCalledTimes(1);
 
-      expect(intervalCallback).not.toBeNull();
-      intervalCallback?.();
+      intervals.callbackFor(30000)();
       await Promise.resolve();
       await Promise.resolve();
 
@@ -511,20 +533,14 @@ describe("startServer feedback export wiring", () => {
       heartbeatSchedulerEnabled: false,
       heartbeatSchedulerIntervalMs: 30000,
     }));
-    let intervalCallback: (() => void) | null = null;
-    const setIntervalSpy = vi
-      .spyOn(globalThis, "setInterval")
-      .mockImplementation(((callback: () => void) => {
-        intervalCallback = callback;
-        return 1 as unknown as ReturnType<typeof setInterval>;
-      }) as typeof setInterval);
+    const intervals = captureIntervals();
+    const setIntervalSpy = intervals.spy;
 
     try {
       await startServer();
 
       expect(heartbeatServiceFactoryMock).not.toHaveBeenCalled();
-      expect(intervalCallback).not.toBeNull();
-      intervalCallback?.();
+      intervals.callbackFor(30000)();
       await Promise.resolve();
       await Promise.resolve();
 
