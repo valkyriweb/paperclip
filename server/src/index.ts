@@ -79,6 +79,7 @@ import {
   createRunLogArchiverFromRuntime,
   resolveRunLogArchiverConfig,
 } from "./services/run-log-archiver.js";
+import { createHeartbeatResultRetentionFromRuntime } from "./services/heartbeat-result-retention.js";
 import { printStartupBanner } from "./startup-banner.js";
 import { getBoardClaimWarningUrl, initializeBoardClaimChallenge } from "./board-claim.js";
 import { maybePersistWorktreeRuntimePorts } from "./worktree-config.js";
@@ -1412,6 +1413,40 @@ export async function startServer(): Promise<StartedServer> {
     }
   }
 
+  // `heartbeat_runs.result_json` retention. On by default, because the growth it
+  // stops is unbounded. It is still an irreversible rewrite of stored rows, so
+  // it gets an explicit off switch the way the archiver does — an operator who
+  // wants those output tails kept must be able to stop the sweeper without
+  // editing code. Boot sweep is staggered 60s behind the archiver's 30s so two
+  // detoast-heavy sweeps don't collide on a cold start.
+  let runResultRetentionTimer: ReturnType<typeof setInterval> | null = null;
+  let runResultRetentionBootTimer: ReturnType<typeof setTimeout> | null = null;
+  if (!config.runResultRetentionEnabled) {
+    logger.info({}, "heartbeat result retention sweeper disabled");
+  } else {
+    const retention = createHeartbeatResultRetentionFromRuntime(db as any, config);
+    logger.info(
+      {
+        intervalMs: config.runResultRetentionIntervalMs,
+        retentionDays: config.runResultRetentionDays,
+        batchSize: config.runResultRetentionBatchSize,
+        itemLimit: config.runResultRetentionItemLimit,
+      },
+      "heartbeat result retention sweeper enabled",
+    );
+    runResultRetentionBootTimer = setTimeout(() => {
+      void retention.runSweep().catch((err) => {
+        logger.error({ err }, "heartbeat result retention boot sweep failed");
+      });
+    }, 60_000);
+    runResultRetentionBootTimer.unref?.();
+    runResultRetentionTimer = setInterval(() => {
+      void retention.runSweep().catch((err) => {
+        logger.error({ err }, "heartbeat result retention sweep failed");
+      });
+    }, config.runResultRetentionIntervalMs);
+  }
+
   // Wait for external adapters to finish loading before accepting requests.
   // Without this, adapter type validation (assertKnownAdapterType) would
   // reject valid external adapter types during the startup loading window.
@@ -1503,6 +1538,14 @@ export async function startServer(): Promise<StartedServer> {
       if (runLogArchiveTimer) {
         clearInterval(runLogArchiveTimer);
         runLogArchiveTimer = null;
+      }
+      if (runResultRetentionBootTimer) {
+        clearTimeout(runResultRetentionBootTimer);
+        runResultRetentionBootTimer = null;
+      }
+      if (runResultRetentionTimer) {
+        clearInterval(runResultRetentionTimer);
+        runResultRetentionTimer = null;
       }
       await systemdNotify(["--stopping", `--status=Stopping after ${signal}`]);
       heartbeatSchedulerStopped = true;

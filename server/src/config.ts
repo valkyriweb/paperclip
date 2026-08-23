@@ -99,6 +99,11 @@ export interface Config {
   runLogCompanyBudgetBytes: number;
   runLogSweepIntervalMs: number;
   runLogSweepItemLimit: number;
+  runResultRetentionEnabled: boolean;
+  runResultRetentionDays: number;
+  runResultRetentionIntervalMs: number;
+  runResultRetentionBatchSize: number;
+  runResultRetentionItemLimit: number;
   feedbackExportBackendUrl: string | undefined;
   feedbackExportBackendToken: string | undefined;
   heartbeatSchedulerEnabled: boolean;
@@ -193,6 +198,35 @@ export function loadConfig(): Config {
   const runLogSweepItemLimit = clampIntEnv(
     process.env.PAPERCLIP_RUN_LOG_SWEEP_ITEM_LIMIT,
     200,
+    1,
+  );
+  // `heartbeat_runs.result_json` retention. Trims oversized stdout/stderr in
+  // place on runs past the window; see services/heartbeat-result-retention.ts
+  // for why the column is trimmed rather than nulled. Daily is deliberate — the
+  // work is proportional to what aged past the cutoff since the last sweep, and
+  // each batch detoasts multi-megabyte values.
+  // Opt-out, not opt-in: the bloat it prevents is unbounded, and it only trims
+  // output the API has never served. `=== "false"` rather than `!== "true"` so a
+  // typo'd value leaves the sweeper running rather than silently off.
+  const runResultRetentionEnabled = process.env.PAPERCLIP_RUN_RESULT_RETENTION_ENABLED !== "false";
+  const runResultRetentionDays = clampIntEnv(
+    process.env.PAPERCLIP_RUN_RESULT_RETENTION_DAYS,
+    30,
+    1,
+  );
+  const runResultRetentionIntervalMs = clampIntEnv(
+    process.env.PAPERCLIP_RUN_RESULT_RETENTION_INTERVAL_MS,
+    24 * 60 * 60 * 1000,
+    60_000,
+  );
+  const runResultRetentionBatchSize = clampIntEnv(
+    process.env.PAPERCLIP_RUN_RESULT_RETENTION_BATCH_SIZE,
+    200,
+    1,
+  );
+  const runResultRetentionItemLimit = clampIntEnv(
+    process.env.PAPERCLIP_RUN_RESULT_RETENTION_ITEM_LIMIT,
+    2000,
     1,
   );
   const feedbackExportBackendUrl =
@@ -379,6 +413,11 @@ export function loadConfig(): Config {
     runLogCompanyBudgetBytes,
     runLogSweepIntervalMs,
     runLogSweepItemLimit,
+    runResultRetentionEnabled,
+    runResultRetentionDays,
+    runResultRetentionIntervalMs,
+    runResultRetentionBatchSize,
+    runResultRetentionItemLimit,
     feedbackExportBackendUrl,
     feedbackExportBackendToken,
     heartbeatSchedulerEnabled: process.env.HEARTBEAT_SCHEDULER_ENABLED !== "false",
