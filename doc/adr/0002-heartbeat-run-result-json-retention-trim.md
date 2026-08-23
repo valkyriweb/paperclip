@@ -121,7 +121,13 @@ the one lie this metadata must never tell.
 - `PAPERCLIP_RUN_RESULT_RETENTION_INTERVAL_MS` (default 24h; first sweep ~60s
   after boot, staggered against the run-log archiver's 30s).
 - `PAPERCLIP_RUN_RESULT_RETENTION_BATCH_SIZE` (default 200 candidate rows per
-  batch).
+  batch, clamped to 5,000). The ceiling is not tidiness. The trim binds one
+  query parameter per id and PostgreSQL caps a statement at 65,535 of them, so a
+  larger batch makes every trim throw; the cursor is function-local, so the
+  throw discards it and the next tick restarts from the beginning and fails at
+  the same point. Unclamped, an operator impatient with the backlog setting this
+  to `100000` would not get a fast sweeper but a permanently wedged one — an
+  error in the log every 24h, nothing trimmed, and the table still growing.
 - `PAPERCLIP_RUN_RESULT_RETENTION_ITEM_LIMIT` (default 2000 batches per sweep) —
   bounds one sweep, not the backlog.
 

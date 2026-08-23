@@ -48,17 +48,41 @@ maybeRepairLegacyWorktreeConfigAndEnvFiles();
 const TAILSCALE_DETECT_TIMEOUT_MS = 3000;
 
 /**
- * Parse an integer config knob, clamped to `[min, ∞)`. Rejects anything that is
- * not a finite integer — `Infinity`, `NaN`, and non-integers like `1.5` all
- * fall back to `def` — so a fat-fingered env value can't produce a nonsensical
- * sweep interval / budget.
+ * Parse an integer config knob, clamped to `[min, max]` (`max` optional,
+ * defaulting to unbounded). Rejects anything that is not a finite integer —
+ * `Infinity`, `NaN`, and non-integers like `1.5` all fall back to `def` — so a
+ * fat-fingered env value can't produce a nonsensical sweep interval / budget.
  */
-function clampIntEnv(raw: string | undefined, def: number, min: number): number {
+function clampIntEnv(
+  raw: string | undefined,
+  def: number,
+  min: number,
+  max = Number.POSITIVE_INFINITY,
+): number {
   if (raw == null || raw.trim() === "") return def;
   const parsed = Number(raw);
   if (!Number.isInteger(parsed)) return def;
-  return Math.max(min, parsed);
+  return Math.min(max, Math.max(min, parsed));
 }
+
+/**
+ * Ceiling on `PAPERCLIP_RUN_RESULT_RETENTION_BATCH_SIZE`.
+ *
+ * The retention sweeper binds one query parameter per candidate id, and
+ * PostgreSQL's wire protocol caps a statement at 65,535 of them. A batch size
+ * above that makes every `trimResultJson` call throw — and because the paging
+ * cursor is function-local, the throw kills it, so the next tick restarts from
+ * the beginning and dies at exactly the same point. The result is not a slow
+ * sweeper but a permanently wedged one: it logs an error every 24h and trims
+ * nothing, while the table it exists to bound keeps growing.
+ *
+ * The realistic route there is an operator impatient with the backlog setting
+ * this to something like 100000 to "just do it all at once". Clamping turns
+ * that into a large-but-working batch instead of a silent no-op. 5,000 is 25x
+ * the default with an order of magnitude of headroom under the protocol limit,
+ * and keeps a single batch's transaction — and its WAL burst — bounded.
+ */
+const RUN_RESULT_RETENTION_MAX_BATCH_SIZE = 5_000;
 
 type DatabaseMode = "embedded-postgres" | "postgres";
 
@@ -223,6 +247,7 @@ export function loadConfig(): Config {
     process.env.PAPERCLIP_RUN_RESULT_RETENTION_BATCH_SIZE,
     200,
     1,
+    RUN_RESULT_RETENTION_MAX_BATCH_SIZE,
   );
   const runResultRetentionItemLimit = clampIntEnv(
     process.env.PAPERCLIP_RUN_RESULT_RETENTION_ITEM_LIMIT,

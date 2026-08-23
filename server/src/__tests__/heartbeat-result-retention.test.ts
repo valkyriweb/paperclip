@@ -214,6 +214,49 @@ describe("PAPERCLIP_RUN_RESULT_RETENTION_ENABLED", () => {
   });
 });
 
+describe("PAPERCLIP_RUN_RESULT_RETENTION_BATCH_SIZE", () => {
+  const KEY = "PAPERCLIP_RUN_RESULT_RETENTION_BATCH_SIZE";
+  // PostgreSQL's wire protocol caps a statement at 65,535 bind parameters, and
+  // the trim UPDATE binds one per candidate id.
+  const PG_MAX_BIND_PARAMS = 65_535;
+  let saved: string | undefined;
+
+  beforeEach(() => {
+    saved = process.env[KEY];
+  });
+
+  afterEach(() => {
+    if (saved === undefined) delete process.env[KEY];
+    else process.env[KEY] = saved;
+  });
+
+  it("clamps a huge value below the bind-parameter limit instead of wedging the sweeper", () => {
+    // The failure this guards is not a slow sweep, it is a permanently stuck
+    // one. Over the bind-parameter limit every trim throws; the cursor is
+    // function-local so the throw discards it, and the next tick restarts from
+    // the beginning and dies at the same point — an error in the log every 24h
+    // and nothing trimmed, forever, while the table keeps growing.
+    process.env[KEY] = "100000";
+    const batchSize = loadConfig().runResultRetentionBatchSize;
+    expect(batchSize).toBeLessThan(PG_MAX_BIND_PARAMS);
+    // Clamped to something useful rather than reset to the default: an operator
+    // who asked for large batches still gets them.
+    expect(batchSize).toBeGreaterThan(200);
+  });
+
+  it("leaves ordinary values alone", () => {
+    process.env[KEY] = "500";
+    expect(loadConfig().runResultRetentionBatchSize).toBe(500);
+  });
+
+  it("still floors at 1, so a zero or negative value cannot stall the walk", () => {
+    for (const value of ["0", "-5"]) {
+      process.env[KEY] = value;
+      expect(loadConfig().runResultRetentionBatchSize).toBe(1);
+    }
+  });
+});
+
 const embeddedPostgresSupport = await getEmbeddedPostgresTestSupport();
 const describeEmbeddedPostgres = embeddedPostgresSupport.supported ? describe : describe.skip;
 
