@@ -82,16 +82,24 @@ export interface HeartbeatResultRetentionDb {
    * scan considers (measured on production: 0.749s versus 36.778s for the same
    * 200-row page). The "is there anything to trim" test therefore belongs in
    * the UPDATE, which touches only the ids this already returned.
+   *
+   * `createdAtText` is the row's timestamp in Postgres' own text form, carried
+   * back verbatim. It is NOT a `Date` and must never become one — see the
+   * cursor note on the driver implementation below.
    */
   selectOversizedPage(input: {
     cutoff: Date;
     maxBytes: number;
     limit: number;
-    cursor: { createdAt: Date; id: string } | null;
-  }): Promise<Array<{ id: string; createdAt: Date }>>;
+    cursor: { createdAtText: string; id: string } | null;
+  }): Promise<Array<{ id: string; createdAtText: string }>>;
 
   /** Trim `stdout`/`stderr` on the given ids. Returns rows actually rewritten. */
-  trimResultJson(input: { ids: string[]; keepOutputChars: number }): Promise<number>;
+  trimResultJson(input: {
+    ids: string[];
+    keepOutputChars: number;
+    maxBytes: number;
+  }): Promise<number>;
 }
 
 export interface HeartbeatResultRetentionDeps {
@@ -156,7 +164,11 @@ export function createHeartbeatResultRetention(
       // Ordering by (created_at, id) and walking past the last row seen
       // guarantees progress without needing a marker column or a `->>`
       // predicate. Such rows are simply re-examined on the next sweep.
-      let cursor: { createdAt: Date; id: string } | null = null;
+      //
+      // The timestamp is carried as opaque text, never a `Date` — see
+      // `selectOversizedPage` below for why a millisecond round-trip turns this
+      // into an infinite loop.
+      let cursor: { createdAtText: string; id: string } | null = null;
 
       while (batches < deps.config.itemLimit) {
         const page = await deps.db.selectOversizedPage({
@@ -169,11 +181,12 @@ export function createHeartbeatResultRetention(
 
         examined += page.length;
         const last = page[page.length - 1]!;
-        cursor = { createdAt: last.createdAt, id: last.id };
+        cursor = { createdAtText: last.createdAtText, id: last.id };
 
         trimmed += await deps.db.trimResultJson({
           ids: page.map((row) => row.id),
           keepOutputChars: deps.config.keepOutputChars,
+          maxBytes: deps.config.maxBytes,
         });
         batches += 1;
       }
@@ -230,11 +243,25 @@ function sqlUuidArray(values: string[]) {
 export function createDrizzleHeartbeatResultRetentionDb(db: Db): HeartbeatResultRetentionDb {
   return {
     async selectOversizedPage({ cutoff, maxBytes, limit, cursor }) {
+      // THE CURSOR TIMESTAMP MUST NOT PASS THROUGH A JS `Date`.
+      //
+      // `created_at` is `defaultNow()`, so stored values carry MICROSECONDS
+      // (measured on production: 1997 of 2000 recent rows have a non-zero
+      // sub-millisecond component). A `Date` holds milliseconds, and
+      // `toISOString()` truncates rather than rounds, so a round-tripped cursor
+      // is always slightly EARLIER than the row it came from. Row comparison
+      // settles on the first element, so `(created_at, id) > (truncated, id)`
+      // is true for that very row: it comes back at the head of the next page,
+      // every page, and the loop — which only stops on an empty page — never
+      // terminates once the newest remaining candidate is residue.
+      //
+      // So the timestamp is carried as Postgres' own text form and handed
+      // straight back. It is an opaque token, never parsed on this side.
       const afterCursor = cursor
-        ? sql`and (created_at, id) > (${cursor.createdAt.toISOString()}::timestamptz, ${cursor.id}::uuid)`
+        ? sql`and (created_at, id) > (${cursor.createdAtText}::timestamptz, ${cursor.id}::uuid)`
         : sql``;
       const raw = await db.execute(sql`
-        select id, created_at
+        select id, created_at::text as created_at_text
         from ${heartbeatRuns}
         where created_at < ${cutoff.toISOString()}::timestamptz
           and result_json is not null
@@ -245,11 +272,11 @@ export function createDrizzleHeartbeatResultRetentionDb(db: Db): HeartbeatResult
       `);
       return readRows(raw).map((row) => ({
         id: String(row.id),
-        createdAt: row.created_at instanceof Date ? row.created_at : new Date(String(row.created_at)),
+        createdAtText: String(row.created_at_text),
       }));
     },
 
-    async trimResultJson({ ids, keepOutputChars }) {
+    async trimResultJson({ ids, keepOutputChars, maxBytes }) {
       if (ids.length === 0) return 0;
 
       // Only rewrite a field when it is genuinely an over-long string. A `case`
@@ -280,6 +307,15 @@ export function createDrizzleHeartbeatResultRetentionDb(db: Db): HeartbeatResult
           false
         )
       `;
+      // A producer may already have marked the output truncated before we ever
+      // saw the row. Stamping our own finding on top would downgrade that
+      // `true` to `false` and assert the output is complete when it is not, so
+      // the two are OR'd. Compared as jsonb rather than cast to boolean: a
+      // non-boolean value here would make a `::boolean` cast throw, while
+      // jsonb equality just yields false.
+      const wasAlreadyTruncated = (key: "stdoutTruncated" | "stderrTruncated") => sql`
+        coalesce(h.result_json -> ${key} = 'true'::jsonb, false)
+      `;
 
       const raw = await db.execute(sql`
         update ${heartbeatRuns} as h
@@ -294,9 +330,16 @@ export function createDrizzleHeartbeatResultRetentionDb(db: Db): HeartbeatResult
               || jsonb_build_object(
                    'truncated',          true,
                    'truncationReason',   'retention_trimmed',
-                   'originalSizeBytes',  pg_column_size(h.result_json),
-                   'stdoutTruncated',    ${isOverCap("stdout")},
-                   'stderrTruncated',    ${isOverCap("stderr")},
+                   -- The LOGICAL size, deliberately not pg_column_size. This
+                   -- is the durable record of what was destroyed, and
+                   -- pg_column_size reports the COMPRESSED stored size, which
+                   -- can read an order of magnitude smaller than the text that
+                   -- was actually there. (The API projection stamps the same
+                   -- key from pg_column_size, but that value is ephemeral and
+                   -- the row behind it is still intact.)
+                   'originalSizeBytes',  octet_length(h.result_json::text),
+                   'stdoutTruncated',    ${isOverCap("stdout")} or ${wasAlreadyTruncated("stdoutTruncated")},
+                   'stderrTruncated',    ${isOverCap("stderr")} or ${wasAlreadyTruncated("stderrTruncated")},
                    'retentionTrimmedAt', now()
                  ),
               h.result_json
@@ -306,6 +349,11 @@ export function createDrizzleHeartbeatResultRetentionDb(db: Db): HeartbeatResult
             -- and make months-old runs look freshly active.
             updated_at = h.updated_at
         where h.id = any(${sqlUuidArray(ids)})
+          -- Re-checked here, not just in the selector: between the select and
+          -- this update a concurrent writer could have replaced the document
+          -- with a small one. Without this the sweeper would trim and stamp a
+          -- row the API would have served whole.
+          and pg_column_size(h.result_json) > ${maxBytes}
           and (${isOverCap("stdout")} or ${isOverCap("stderr")})
         returning h.id
       `);

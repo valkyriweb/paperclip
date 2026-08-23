@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import {
   createDrizzleHeartbeatResultRetentionDb,
   createHeartbeatResultRetention,
@@ -43,9 +43,14 @@ describe("heartbeat result retention sweep loop", () => {
     // sweeper cannot fix (a large field that is neither stdout nor stderr) is
     // never modified, so a plain LIMIT-only selector returns the same page on
     // every iteration and the sweep spins until itemLimit.
+    //
+    // Scope: this exercises the LOOP, against a fake that resolves the cursor
+    // exactly. That the real driver's cursor IS exact — the other half of the
+    // same guarantee — is covered against real Postgres by "pages forward ...
+    // on rows carrying microsecond timestamps".
     const residue = Array.from({ length: 3 }, (_, i) => ({
       id: `res-${i}`,
-      createdAt: new Date(NOW.getTime() - (10 - i) * 1000),
+      createdAtText: new Date(NOW.getTime() - (10 - i) * 1000).toISOString(),
     }));
     const seenCursors: Array<string | null> = [];
     const db: HeartbeatResultRetentionDb = {
@@ -119,7 +124,7 @@ describe("heartbeat result retention sweep loop", () => {
     const db: HeartbeatResultRetentionDb = {
       async selectOversizedPage({ cursor }) {
         const n = cursor ? Number(cursor.id) + 1 : 0;
-        return [{ id: String(n), createdAt: new Date(NOW.getTime() - 1000) }];
+        return [{ id: String(n), createdAtText: new Date(NOW.getTime() - 1000).toISOString() }];
       },
       async trimResultJson() {
         return 1;
@@ -144,9 +149,19 @@ describe("heartbeat result retention config", () => {
     // a permanent candidate and the sweep would re-detoast it forever. Asserted
     // against the real constants so a future edit to either cannot quietly
     // erase the margin.
+    //
+    // The cap counts CHARACTERS (`left()`/`length()`) but the gate counts
+    // BYTES (`pg_column_size`), so the worst case is every kept character being
+    // a 4-byte one. Asserting 4096 chars as 4096 bytes would understate the
+    // real figure fourfold and let a future edit slip through.
+    const MAX_UTF8_BYTES_PER_CHAR = 4;
     const STAMPED_METADATA_BYTES = 512; // generous upper bound for the six keys
-    const worstCaseTrimmedBytes = 2 * HEARTBEAT_RUN_RESULT_OUTPUT_MAX_CHARS + STAMPED_METADATA_BYTES;
-    expect(worstCaseTrimmedBytes).toBeLessThan(HEARTBEAT_RUN_SAFE_RESULT_JSON_MAX_BYTES / 2);
+    const worstCaseTrimmedBytes =
+      2 * HEARTBEAT_RUN_RESULT_OUTPUT_MAX_CHARS * MAX_UTF8_BYTES_PER_CHAR + STAMPED_METADATA_BYTES;
+    // 33,280 against a 65,536 gate: a 1.97x margin, and that is the pessimistic
+    // reading twice over, since the gate measures the COMPRESSED stored size
+    // while this counts raw bytes. Doubling either constant breaks this.
+    expect(worstCaseTrimmedBytes).toBeLessThan(HEARTBEAT_RUN_SAFE_RESULT_JSON_MAX_BYTES);
   });
 
   it("reads its window and batching from config", () => {
@@ -237,7 +252,14 @@ describeEmbeddedPostgres("createDrizzleHeartbeatResultRetentionDb (real Postgres
     id: string;
     companyId: string;
     agentId: string;
-    createdAt: Date;
+    /**
+     * Omit to let the schema's `defaultNow()` fire. That is the ONLY way to get
+     * a row with the microsecond precision production rows actually carry — a
+     * JS `Date` can only express milliseconds, so seeding one produces a
+     * `.000000` timestamp that round-trips losslessly and hides any
+     * cursor-precision bug. Pair it with `ageRun` to move the row into the past.
+     */
+    createdAt?: Date;
     resultJson: Record<string, unknown> | null;
   }) {
     await db.insert(heartbeatRuns).values({
@@ -245,9 +267,18 @@ describeEmbeddedPostgres("createDrizzleHeartbeatResultRetentionDb (real Postgres
       companyId: over.companyId,
       agentId: over.agentId,
       status: "succeeded",
-      createdAt: over.createdAt,
+      ...(over.createdAt ? { createdAt: over.createdAt } : {}),
       resultJson: over.resultJson,
     });
+  }
+
+  /** Move a seeded run into the past, preserving its sub-millisecond digits. */
+  async function ageRun(id: string, days: number) {
+    await db.execute(
+      sql`update heartbeat_runs
+          set created_at = created_at - ${`${days} days`}::interval
+          where id = ${id}::uuid`,
+    );
   }
 
   async function readRun(id: string) {
@@ -289,7 +320,7 @@ describeEmbeddedPostgres("createDrizzleHeartbeatResultRetentionDb (real Postgres
     });
     expect(page.map((r) => r.id)).toEqual([id]);
 
-    const trimmed = await retentionDb.trimResultJson({ ids: [id], keepOutputChars: 10 });
+    const trimmed = await retentionDb.trimResultJson({ ids: [id], keepOutputChars: 10, maxBytes: 200 });
     expect(trimmed).toBe(1);
 
     const after = (await readRun(id)).resultJson as Record<string, unknown>;
@@ -333,7 +364,7 @@ describeEmbeddedPostgres("createDrizzleHeartbeatResultRetentionDb (real Postgres
     });
     expect(page.map((r) => r.id)).toEqual([id]);
 
-    const trimmed = await retentionDb.trimResultJson({ ids: [id], keepOutputChars: 10 });
+    const trimmed = await retentionDb.trimResultJson({ ids: [id], keepOutputChars: 10, maxBytes: 200 });
     expect(trimmed).toBe(0);
 
     const after = (await readRun(id)).resultJson as Record<string, unknown>;
@@ -358,7 +389,7 @@ describeEmbeddedPostgres("createDrizzleHeartbeatResultRetentionDb (real Postgres
     });
 
     const retentionDb = createDrizzleHeartbeatResultRetentionDb(db);
-    expect(await retentionDb.trimResultJson({ ids: [id], keepOutputChars: 10 })).toBe(1);
+    expect(await retentionDb.trimResultJson({ ids: [id], keepOutputChars: 10, maxBytes: 200 })).toBe(1);
 
     const after = (await readRun(id)).resultJson as Record<string, unknown>;
     expect(after).not.toBeNull();
@@ -382,7 +413,7 @@ describeEmbeddedPostgres("createDrizzleHeartbeatResultRetentionDb (real Postgres
     const before = await readRun(id);
 
     const retentionDb = createDrizzleHeartbeatResultRetentionDb(db);
-    expect(await retentionDb.trimResultJson({ ids: [id], keepOutputChars: 10 })).toBe(1);
+    expect(await retentionDb.trimResultJson({ ids: [id], keepOutputChars: 10, maxBytes: 200 })).toBe(1);
 
     const after = await readRun(id);
     expect(after.updatedAt!.getTime()).toBe(before.updatedAt!.getTime());
@@ -428,24 +459,43 @@ describeEmbeddedPostgres("createDrizzleHeartbeatResultRetentionDb (real Postgres
     expect(page.map((r) => r.id)).toEqual([oldBig]);
   });
 
-  it("pages forward with the (created_at, id) cursor without repeating rows", async () => {
+  it("pages forward with the (created_at, id) cursor on rows carrying microsecond timestamps", async () => {
+    // The rows are seeded through the schema default and then aged, so their
+    // timestamps keep the microseconds `now()` gave them — exactly like
+    // production, where 1997 of 2000 sampled rows have a non-zero
+    // sub-millisecond component.
+    //
+    // This is the regression that matters: carry the cursor through a JS `Date`
+    // and `toISOString()` truncates it below the row it came from, so
+    // `(created_at, id) > (cursor)` stays true for that row and it heads every
+    // subsequent page forever. Seeding a plain `Date` here would give a
+    // `.000000` timestamp, round-trip losslessly, and prove nothing.
     const { companyId, agentId } = await seedCompanyAndAgent();
     const ids = [uuid(1), uuid(2), uuid(3)];
-    for (const [i, id] of ids.entries()) {
-      await seedRun({
-        id,
-        companyId,
-        agentId,
-        createdAt: new Date(daysAgo(40).getTime() + i * 1000),
-        resultJson: { stdout: "H".repeat(500) },
-      });
+    for (const id of ids) {
+      await seedRun({ id, companyId, agentId, resultJson: { stdout: "H".repeat(500) } });
+      await ageRun(id, 40);
     }
+
+    const [{ subMs }] = (await db.execute(sql`
+      select count(*) filter (
+        where (date_part('microsecond', created_at)::bigint % 1000) <> 0
+      )::int as "subMs"
+      from heartbeat_runs
+      where id = any(${sql`ARRAY[${sql.join(
+        ids.map((id) => sql`${id}`),
+        sql`, `,
+      )}]::uuid[]`})
+    `)) as unknown as Array<{ subMs: number }>;
+    // Guards the guard: if the fixture ever stops producing microseconds this
+    // test silently goes back to proving nothing.
+    expect(subMs).toBe(ids.length);
 
     const retentionDb = createDrizzleHeartbeatResultRetentionDb(db);
     const seen: string[] = [];
-    let cursor: { createdAt: Date; id: string } | null = null;
+    let cursor: { createdAtText: string; id: string } | null = null;
     for (let i = 0; i < 5; i += 1) {
-      const page: Array<{ id: string; createdAt: Date }> = await retentionDb.selectOversizedPage({
+      const page = await retentionDb.selectOversizedPage({
         cutoff: daysAgo(30),
         maxBytes: 200,
         limit: 1,
@@ -454,9 +504,11 @@ describeEmbeddedPostgres("createDrizzleHeartbeatResultRetentionDb (real Postgres
       if (page.length === 0) break;
       seen.push(...page.map((r) => r.id));
       const last = page[page.length - 1]!;
-      cursor = { createdAt: last.createdAt, id: last.id };
+      cursor = { createdAtText: last.createdAtText, id: last.id };
     }
 
+    // Four pages of one row, then an empty page. A truncating cursor returns
+    // the third row on every iteration and never yields an empty page at all.
     expect(seen).toEqual(ids);
   });
 
@@ -475,7 +527,7 @@ describeEmbeddedPostgres("createDrizzleHeartbeatResultRetentionDb (real Postgres
     }
 
     const retentionDb = createDrizzleHeartbeatResultRetentionDb(db);
-    expect(await retentionDb.trimResultJson({ ids: [target], keepOutputChars: 10 })).toBe(1);
+    expect(await retentionDb.trimResultJson({ ids: [target], keepOutputChars: 10, maxBytes: 200 })).toBe(1);
 
     expect(((await readRun(target)).resultJson as Record<string, unknown>).stdout).toBe("I".repeat(10));
     expect(((await readRun(bystander)).resultJson as Record<string, unknown>).stdout).toBe("I".repeat(500));
@@ -483,7 +535,7 @@ describeEmbeddedPostgres("createDrizzleHeartbeatResultRetentionDb (real Postgres
 
   it("is a no-op for an empty id list", async () => {
     const retentionDb = createDrizzleHeartbeatResultRetentionDb(db);
-    expect(await retentionDb.trimResultJson({ ids: [], keepOutputChars: 10 })).toBe(0);
+    expect(await retentionDb.trimResultJson({ ids: [], keepOutputChars: 10, maxBytes: 200 })).toBe(0);
   });
 
   it("is idempotent: a second sweep drops the row from the candidate set", async () => {
