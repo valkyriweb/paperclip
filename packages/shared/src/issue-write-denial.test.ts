@@ -86,6 +86,17 @@ describe("describeIssueWriteDenial", () => {
     expect(copy.sanctionedPath).toContain("PAPERCLIP_RUN_ID");
   });
 
+  it("points a context-less run at its own assigned issues", () => {
+    const copy = describeIssueWriteDenial("cross_issue_influence_run_context_required", {
+      actorLabel: "Fable",
+    });
+    // Retrying with the same header is a no-op detour when the run simply has
+    // no task context: the write only fits an issue the caller owns.
+    expect(copy.sanctionedPath).toContain("assigned to you");
+    expect(copy.whoCanAct).toContain("Fable");
+    expect(copy.whoCanAct).toContain("assignee");
+  });
+
   it("tells a spoof attempt that the write itself was fine", () => {
     const copy = describeIssueWriteDenial("issue_write_attribution_spoof_rejected", {
       actorLabel: "Fable",
