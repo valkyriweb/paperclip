@@ -38,6 +38,7 @@ import {
   startRuntimeServicesForWorkspaceControl,
   stopRuntimeServicesForExecutionWorkspace,
 } from "../services/workspace-runtime.ts";
+import * as workspaceRuntime from "../services/workspace-runtime.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -836,6 +837,131 @@ describeEmbeddedPostgres("executionWorkspaceService.getCloseReadiness", () => {
       "This shared workspace session points at project workspace infrastructure. Archiving it only removes the session record.",
     ]));
   });
+
+  async function seedSharedTerminalSession() {
+    const companyId = randomUUID();
+    const projectId = randomUUID();
+    const projectWorkspaceId = randomUUID();
+    const executionWorkspaceId = randomUUID();
+    const sourceIssueId = randomUUID();
+    const sharedCheckout = await createTempRepo();
+    tempDirs.add(sharedCheckout);
+    await fs.writeFile(path.join(sharedCheckout, "sibling-wip.txt"), "other session work\n", "utf8");
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `P${companyId.slice(0, 8).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+    await db.insert(projects).values({
+      id: projectId,
+      companyId,
+      name: "Shared sessions",
+      status: "in_progress",
+      executionWorkspacePolicy: { enabled: true },
+    });
+    await db.insert(projectWorkspaces).values({
+      id: projectWorkspaceId,
+      companyId,
+      projectId,
+      name: "Primary",
+      sourceType: "local_path",
+      isPrimary: true,
+      cwd: sharedCheckout,
+    });
+    await db.insert(executionWorkspaces).values({
+      id: executionWorkspaceId,
+      companyId,
+      projectId,
+      projectWorkspaceId,
+      mode: "shared_workspace",
+      strategyType: "project_primary",
+      name: "Shared session",
+      status: "active",
+      providerType: "local_fs",
+      cwd: sharedCheckout,
+      branchName: null,
+      baseRef: null,
+    });
+    await db.insert(issues).values({
+      id: sourceIssueId,
+      companyId,
+      projectId,
+      title: "Terminal shared session",
+      status: "done",
+      priority: "medium",
+      executionWorkspaceId: null,
+    });
+    await db
+      .update(executionWorkspaces)
+      .set({ sourceIssueId })
+      .where(eq(executionWorkspaces.id, executionWorkspaceId));
+    await db
+      .update(issues)
+      .set({ executionWorkspaceId })
+      .where(eq(issues.id, sourceIssueId));
+
+    return { executionWorkspaceId, sharedCheckout };
+  }
+
+  it("archives terminal shared sessions without inspecting or deleting the project checkout", async () => {
+    const seeded = await seedSharedTerminalSession();
+
+    const sweep = await svc.sweepTerminalWorkspaces();
+
+    expect(sweep).toMatchObject({
+      archived: 1,
+      archivedSharedSession: 1,
+      cleanupFailed: 0,
+      skippedUndelivered: 0,
+    });
+    await expect(fs.access(seeded.sharedCheckout)).resolves.toBeUndefined();
+    await expect(fs.access(path.join(seeded.sharedCheckout, "sibling-wip.txt"))).resolves.toBeUndefined();
+    await expect(
+      db.select({ status: executionWorkspaces.status, cleanupReason: executionWorkspaces.cleanupReason })
+        .from(executionWorkspaces)
+        .where(eq(executionWorkspaces.id, seeded.executionWorkspaceId))
+        .then((rows) => rows[0]),
+    ).resolves.toMatchObject({ status: "archived", cleanupReason: "issue_terminal_shared_session" });
+  }, 20_000);
+
+  it("scopes terminal shared-session teardown to the session record", async () => {
+    const seeded = await seedSharedTerminalSession();
+    const teardownCalls: Array<{ executionWorkspaceId: string; workspaceCwd?: string | null }> = [];
+    const teardownSpy = vi
+      .spyOn(workspaceRuntime, "stopRuntimeServicesForExecutionWorkspace")
+      .mockImplementation(async (input) => {
+        teardownCalls.push({
+          executionWorkspaceId: input.executionWorkspaceId,
+          workspaceCwd: input.workspaceCwd,
+        });
+      });
+
+    try {
+      await svc.sweepTerminalWorkspaces();
+    } finally {
+      teardownSpy.mockRestore();
+    }
+
+    expect(teardownCalls).toEqual([
+      { executionWorkspaceId: seeded.executionWorkspaceId, workspaceCwd: null },
+    ]);
+  }, 20_000);
+
+  it("does not delete a shared checkout even when runtime-created metadata is set", async () => {
+    const seeded = await seedSharedTerminalSession();
+    await db
+      .update(executionWorkspaces)
+      .set({ metadata: { createdByRuntime: true }, projectWorkspaceId: null })
+      .where(eq(executionWorkspaces.id, seeded.executionWorkspaceId));
+
+    const sweep = await svc.sweepTerminalWorkspaces();
+
+    expect(sweep).toMatchObject({ archived: 1, cleanupFailed: 0 });
+    await expect(fs.access(seeded.sharedCheckout)).resolves.toBeUndefined();
+    await expect(fs.access(path.join(seeded.sharedCheckout, "sibling-wip.txt"))).resolves.toBeUndefined();
+  }, 20_000);
 
   it("clears matching environment selections transactionally without touching other workspaces", async () => {
     const companyId = randomUUID();

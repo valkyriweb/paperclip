@@ -66,6 +66,7 @@ const TERMINAL_ISSUE_STATUSES = new Set(["done", "cancelled"]);
 const WORKSPACE_BRANCH_INCOHERENCE_REASON = "git_worktree_branch_incoherence";
 const WORKSPACE_VALIDATION_RECOVERY_CAUSE = "workspace_validation_failed";
 export const ISSUE_TERMINAL_WORKSPACE_CLEANUP_REASON = "issue_terminal";
+export const ISSUE_TERMINAL_SHARED_SESSION_CLEANUP_REASON = "issue_terminal_shared_session";
 
 export type ExecutionWorkspaceServiceOptions = {
   resolvePullRequestDetails?: PullRequestMergeDetailsResolver;
@@ -1116,14 +1117,19 @@ export function executionWorkspaceService(db: Db, opts: ExecutionWorkspaceServic
       .limit(100);
   }
 
-  async function assessDelivery(
-    workspace: ExecutionWorkspaceRow,
-    git: ExecutionWorkspaceCloseGitReadiness | null,
-  ) {
+  async function assessIssueTreeTerminality(workspace: ExecutionWorkspaceRow) {
     const issueTree = await listWorkspaceIssueTree(workspace);
     const sourceIssue = issueTree.find((issue) => issue.id === workspace.sourceIssueId) ?? null;
     const sourceIssueTerminal = Boolean(sourceIssue && TERMINAL_ISSUE_STATUSES.has(sourceIssue.status));
     const subtreeTerminal = Boolean(sourceIssue && issueTree.every((issue) => TERMINAL_ISSUE_STATUSES.has(issue.status)));
+    return { sourceIssueTerminal, subtreeTerminal };
+  }
+
+  async function assessDelivery(
+    workspace: ExecutionWorkspaceRow,
+    git: ExecutionWorkspaceCloseGitReadiness | null,
+  ) {
+    const { sourceIssueTerminal, subtreeTerminal } = await assessIssueTreeTerminality(workspace);
     let mergedPullRequest = false;
     let pullRequestStateUnknown = false;
     const workspaceHeadSha = git?.repoRoot && git.workspacePath
@@ -1297,7 +1303,7 @@ export function executionWorkspaceService(db: Db, opts: ExecutionWorkspaceServic
       await stopRuntimeServicesForExecutionWorkspace({
         db,
         executionWorkspaceId: workspace.id,
-        workspaceCwd: workspace.cwd,
+        workspaceCwd: workspace.mode === "shared_workspace" ? null : workspace.cwd,
       });
       const cleanup = await cleanupExecutionWorkspaceArtifacts({
         workspace,
@@ -1327,7 +1333,12 @@ export function executionWorkspaceService(db: Db, opts: ExecutionWorkspaceServic
             eq(issues.executionWorkspaceId, workspace.id),
           ));
       }
-      const cleanupReason = [ISSUE_TERMINAL_WORKSPACE_CLEANUP_REASON, ...cleanup.warnings].join(" | ");
+      const cleanupReason = [
+        workspace.mode === "shared_workspace"
+          ? ISSUE_TERMINAL_SHARED_SESSION_CLEANUP_REASON
+          : ISSUE_TERMINAL_WORKSPACE_CLEANUP_REASON,
+        ...cleanup.warnings,
+      ].join(" | ");
       if (!cleanup.cleaned || cleanup.warnings.length > 0) {
         await db
           .update(executionWorkspaces)
@@ -2047,6 +2058,7 @@ export function executionWorkspaceService(db: Db, opts: ExecutionWorkspaceServic
         checked: candidates.length,
         eligible: 0,
         archived: 0,
+        archivedSharedSession: 0,
         cleanupFailed: 0,
         skippedActiveRun: 0,
         skippedNonTerminalTree: 0,
@@ -2056,22 +2068,32 @@ export function executionWorkspaceService(db: Db, opts: ExecutionWorkspaceServic
 
       for (const workspace of candidates) {
         const executionWorkspace = toExecutionWorkspace(workspace);
-        const { git } = await inspectGitCloseReadiness(executionWorkspace);
-        const assessment = await assessDelivery(workspace, git);
+        const sharedSession = workspace.mode === "shared_workspace";
+        const git = sharedSession ? null : (await inspectGitCloseReadiness(executionWorkspace)).git;
+        const assessment = sharedSession
+          ? {
+            ...await assessIssueTreeTerminality(workspace),
+            deliveryState: null,
+            workspaceDirty: false,
+            workspaceHeadSha: null,
+          }
+          : await assessDelivery(workspace, git);
         if (!assessment.sourceIssueTerminal || !assessment.subtreeTerminal) {
           result.skippedNonTerminalTree += 1;
           continue;
         }
-        if (assessment.workspaceDirty) {
-          result.skippedUndelivered += 1;
-          continue;
-        }
-        if (
-          assessment.deliveryState !== "merged_via_pr"
-          && assessment.deliveryState !== "merged_by_ancestry"
-        ) {
-          result.skippedUndelivered += 1;
-          continue;
+        if (!sharedSession) {
+          if (assessment.workspaceDirty) {
+            result.skippedUndelivered += 1;
+            continue;
+          }
+          if (
+            assessment.deliveryState !== "merged_via_pr"
+            && assessment.deliveryState !== "merged_by_ancestry"
+          ) {
+            result.skippedUndelivered += 1;
+            continue;
+          }
         }
         if (await workspaceHasActiveRun(workspace)) {
           result.skippedActiveRun += 1;
@@ -2085,7 +2107,9 @@ export function executionWorkspaceService(db: Db, opts: ExecutionWorkspaceServic
             status: "archived",
             closedAt,
             cleanupEligibleAt: workspace.cleanupEligibleAt ?? closedAt,
-            cleanupReason: ISSUE_TERMINAL_WORKSPACE_CLEANUP_REASON,
+            cleanupReason: sharedSession
+              ? ISSUE_TERMINAL_SHARED_SESSION_CLEANUP_REASON
+              : ISSUE_TERMINAL_WORKSPACE_CLEANUP_REASON,
             updatedAt: closedAt,
           })
           .where(and(
@@ -2146,15 +2170,19 @@ export function executionWorkspaceService(db: Db, opts: ExecutionWorkspaceServic
           details: {
             sourceIssueId: archived.sourceIssueId,
             deliveryState: assessment.deliveryState,
+            sharedSession,
             cleanupEligibleAt: archived.cleanupEligibleAt?.toISOString() ?? null,
-            cleanupReason: ISSUE_TERMINAL_WORKSPACE_CLEANUP_REASON,
+            cleanupReason: archived.cleanupReason,
           },
         });
 
         try {
           const cleanup = await cleanupTerminalWorkspace(archived, assessment.workspaceHeadSha);
           if (!cleanup.cleaned) result.cleanupFailed += 1;
-          else result.archived += 1;
+          else {
+            result.archived += 1;
+            if (sharedSession) result.archivedSharedSession += 1;
+          }
         } catch (error) {
           result.cleanupFailed += 1;
           const failure = error instanceof Error ? error.message : String(error);
