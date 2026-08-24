@@ -31,6 +31,7 @@ import {
   resolveExecutionWorkspaceReuseProvisioningPolicy,
   resolveNextSessionState,
   resolveTaskSessionConfigFreshness,
+  isGatewayUnreachableFailure,
   isWorkspaceSyncConflictFailure,
   requiresPushCapabilityPreflight,
   resolveWorkspaceAfterLowTrustPreflight,
@@ -2883,6 +2884,22 @@ describe("isWorkspaceSyncConflictFailure", () => {
     expect(isWorkspaceSyncConflictFailure("no Codex credentials provisioned for managed home")).toBe(false);
     expect(isWorkspaceSyncConflictFailure(null)).toBe(false);
     expect(isWorkspaceSyncConflictFailure("")).toBe(false);
+  });
+});
+
+describe("isGatewayUnreachableFailure", () => {
+  it("keeps an agent idle when the gateway was unreachable", () => {
+    // Every restart-window signature now lands on this one error code, so this
+    // is what stops a rollout from leaving a bridge stuck in `error`.
+    expect(isGatewayUnreachableFailure("openclaw_gateway_connect_timeout")).toBe(true);
+  });
+
+  it("still errors on failures that are the agent's own", () => {
+    expect(isGatewayUnreachableFailure("openclaw_gateway_request_failed")).toBe(false);
+    expect(isGatewayUnreachableFailure("openclaw_gateway_timeout")).toBe(false);
+    expect(isGatewayUnreachableFailure("provider_quota")).toBe(false);
+    expect(isGatewayUnreachableFailure(null)).toBe(false);
+    expect(isGatewayUnreachableFailure(undefined)).toBe(false);
   });
 });
 
