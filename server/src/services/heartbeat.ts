@@ -4329,6 +4329,18 @@ export function isWorkspaceSyncConflictFailure(message: string | null | undefine
   return WORKSPACE_SYNC_CONFLICT_SIGNATURES.some((signature) => message.includes(signature));
 }
 
+/**
+ * A gateway we could not reach is an infrastructure blip, not a broken agent.
+ * Restarting an OpenClaw gateway takes 40-56s to reload its plugin set, and any
+ * bridge run caught in that window used to finish `failed` and leave the agent
+ * stuck in `error` -- a state nothing retries and only a human can clear from
+ * the UI. Treat it the way we already treat provider quota and workspace-sync
+ * conflicts: keep the agent idle so the next timer picks it up by itself.
+ */
+export function isGatewayUnreachableFailure(errorCode: string | null | undefined): boolean {
+  return errorCode === "openclaw_gateway_connect_timeout";
+}
+
 export function shouldDeferFollowupWakeForSameIssue(input: {
   activeRunStatus: string | null | undefined;
   isSameExecutionAgent: boolean;
@@ -16297,6 +16309,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
           keepIdleOnFailure:
             outcome === "failed" &&
             ((finalizedRun ? readHeartbeatRunErrorFamily(finalizedRun) === "provider_quota" : runErrorCode === "provider_quota") ||
+              isGatewayUnreachableFailure(finalizedRun?.errorCode ?? runErrorCode) ||
               isWorkspaceSyncConflictFailure(adapterResult.errorMessage)),
           wasFirstHeartbeat: timerClaimWasFirstHeartbeat(run),
         },
