@@ -27,9 +27,8 @@ async function main(): Promise<void> {
 
     if (resolved.mode === "postgres") {
       const coordinator = new MigrationCoordinator(resolved.connectionString);
-      const timeoutMs = Number.parseInt(process.env.PAPERCLIP_MIGRATION_LOCK_TIMEOUT_MS ?? "", 10);
       await coordinator.withExclusiveMigrationLock(runMigrations, {
-        timeoutMs: Number.isSafeInteger(timeoutMs) && timeoutMs > 0 ? timeoutMs : undefined,
+        timeoutMs: resolved.lockTimeoutMs,
         onStateChange: (state) => {
           console.log(`Migration coordination: ${state} (lock ${coordinator.lockId})`);
         },

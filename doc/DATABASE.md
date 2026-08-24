@@ -111,16 +111,21 @@ If you later run the app with a pooled runtime URL, set `DATABASE_MIGRATION_URL`
 ```sh
 DATABASE_URL=postgres://postgres.[PROJECT-REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:6543/postgres
 DATABASE_MIGRATION_URL=postgres://postgres.[PROJECT-REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:5432/postgres
+# Required with PAPERCLIP_DEPLOYMENT_PROFILE=multi_replica after verifying the endpoint contract:
+DATABASE_MIGRATION_SESSION_CAPABLE=true
 ```
 
 If your hosted database requires transaction-pooling-only connections (pgbouncer transaction mode, Supavisor port 6543, Neon `-pooler` endpoints), set `DATABASE_PREPARED_STATEMENTS=false` so the client does not rely on session-scoped prepared statements, and keep `DATABASE_MIGRATION_URL` on a direct connection. Do not edit database client source files as part of deployment setup.
+
+Multi-replica deployments must also set `DATABASE_MIGRATION_SESSION_CAPABLE=true`. This is an explicit operator attestation that `DATABASE_MIGRATION_URL` reaches one stable PostgreSQL backend session for the lifetime of a connection and supports session advisory locks. PostgreSQL URLs do not encode pooling mode, so Paperclip fails unknown endpoints closed instead of guessing from provider hostnames or ports. Do not set this flag for PgBouncer/Supavisor transaction-pooling endpoints. `pnpm db:migrate` reads the same migration URL, profile, attestation, and lock-timeout contract as server startup.
 
 ### Multi-replica migration coordination
 
 Set `PAPERCLIP_DEPLOYMENT_PROFILE=multi_replica` before running more than one API replica. This profile refuses embedded PostgreSQL and requires both:
 
 - `DATABASE_URL` for normal application queries; and
-- `DATABASE_MIGRATION_URL` for a **direct, session-capable** PostgreSQL connection. Do not use a transaction-pooler endpoint for the migration URL.
+- `DATABASE_MIGRATION_URL` for a **direct, session-capable** PostgreSQL connection. Do not use a transaction-pooler endpoint for the migration URL; and
+- `DATABASE_MIGRATION_SESSION_CAPABLE=true` as the explicit operator attestation for that endpoint contract.
 
 Startup and `pnpm db:migrate` serialize migration inspection, migration-history repair, application, and final inspection with a stable PostgreSQL session advisory lock. A waiting replica re-inspects the schema after acquiring the lock; it never applies a stale pending-migration list. Logs expose only the hashed lock id and the states `waiting_for_migration_lock`, `migrating`, `ready`, or `failed`, never either connection string.
 

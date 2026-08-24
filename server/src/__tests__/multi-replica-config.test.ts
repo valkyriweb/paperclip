@@ -40,21 +40,23 @@ describe("multi-replica database configuration", () => {
     expect(() => loadConfig()).toThrow("requires a direct PostgreSQL DATABASE_MIGRATION_URL");
   });
 
-  it("rejects common transaction-pooler endpoints", () => {
+  it("fails unknown migration endpoints closed without an explicit session-capability attestation", () => {
     configureIsolatedHome();
-    process.env.DATABASE_URL = "postgres://app@db.example.test:6543/paperclip";
-    process.env.DATABASE_MIGRATION_URL = "postgres://migration@db-pooler.example.test:6543/paperclip";
+    process.env.DATABASE_URL = "postgres://app@runtime.example.test:5432/paperclip";
+    process.env.DATABASE_MIGRATION_URL = "postgres://migration@pgbouncer.internal:5432/paperclip";
+    delete process.env.DATABASE_MIGRATION_SESSION_CAPABLE;
 
-    expect(() => loadConfig()).toThrow("not a transaction pooler");
+    expect(() => loadConfig()).toThrow("DATABASE_MIGRATION_SESSION_CAPABLE=true");
   });
 
   it.each([
     "postgres://migration@paperclip-pg-rw:5432/paperclip",
-    "postgres://migration@aws-0-region.pooler.supabase.com:5432/postgres",
-  ])("accepts a direct session-capable migration endpoint: %s", (migrationUrl) => {
+    "postgres://migration@primary.example.test:6432/postgres",
+  ])("accepts an explicitly attested direct session-capable migration endpoint: %s", (migrationUrl) => {
     configureIsolatedHome();
     process.env.DATABASE_URL = "postgres://app@paperclip-pg-rw:5432/paperclip";
     process.env.DATABASE_MIGRATION_URL = migrationUrl;
+    process.env.DATABASE_MIGRATION_SESSION_CAPABLE = "true";
     process.env.PAPERCLIP_MIGRATION_LOCK_TIMEOUT_MS = "90000";
 
     const config = loadConfig();

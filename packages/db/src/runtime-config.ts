@@ -24,7 +24,12 @@ export type ResolvedDatabaseTarget =
   | {
       mode: "postgres";
       connectionString: string;
-      source: "DATABASE_URL" | "paperclip-env" | "config.database.connectionString";
+      source:
+        | "DATABASE_MIGRATION_URL"
+        | "paperclip-env:DATABASE_MIGRATION_URL"
+        | "DATABASE_URL"
+        | "paperclip-env"
+        | "config.database.connectionString";
       configPath: string;
       envPath: string;
     }
@@ -181,10 +186,39 @@ function readConfig(configPath: string): PartialConfig | null {
   };
 }
 
-export function resolveDatabaseTarget(): ResolvedDatabaseTarget {
+export function resolveDatabaseEnvironment(): Record<string, string | undefined> {
+  const configPath = resolvePaperclipConfigPath();
+  return { ...readEnvEntries(resolvePaperclipEnvPath(configPath)), ...process.env };
+}
+
+export function resolveDatabaseTarget(options: { preferMigrationUrl?: boolean } = {}): ResolvedDatabaseTarget {
   const configPath = resolvePaperclipConfigPath();
   const envPath = resolvePaperclipEnvPath(configPath);
   const envEntries = readEnvEntries(envPath);
+
+  if (options.preferMigrationUrl) {
+    const migrationUrl = process.env.DATABASE_MIGRATION_URL?.trim();
+    if (migrationUrl) {
+      return {
+        mode: "postgres",
+        connectionString: migrationUrl,
+        source: "DATABASE_MIGRATION_URL",
+        configPath,
+        envPath,
+      };
+    }
+
+    const fileMigrationUrl = envEntries.DATABASE_MIGRATION_URL?.trim();
+    if (fileMigrationUrl) {
+      return {
+        mode: "postgres",
+        connectionString: fileMigrationUrl,
+        source: "paperclip-env:DATABASE_MIGRATION_URL",
+        configPath,
+        envPath,
+      };
+    }
+  }
 
   const envUrl = process.env.DATABASE_URL?.trim();
   if (envUrl) {

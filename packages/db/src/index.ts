@@ -1,4 +1,9 @@
 export {
+  resolveMigrationConfig,
+  type DeploymentProfile,
+  type MigrationConfig,
+} from "./migration-config.js";
+export {
   MigrationCoordinator,
   type MigrationCoordinatorOptions,
   type MigrationCoordinatorState,

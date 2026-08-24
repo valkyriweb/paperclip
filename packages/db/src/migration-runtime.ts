@@ -4,7 +4,8 @@ import path from "node:path";
 import { ensurePostgresDatabase, getPostgresDataDirectory } from "./client.js";
 import { createEmbeddedPostgresLogBuffer, formatEmbeddedPostgresError } from "./embedded-postgres-error.js";
 import { prepareEmbeddedPostgresNativeRuntime } from "./embedded-postgres-native.js";
-import { resolveDatabaseTarget } from "./runtime-config.js";
+import { resolveMigrationConfig } from "./migration-config.js";
+import { resolveDatabaseEnvironment, resolveDatabaseTarget } from "./runtime-config.js";
 
 type EmbeddedPostgresInstance = {
   initialise(): Promise<void>;
@@ -27,6 +28,7 @@ export type MigrationConnection = {
   mode: "postgres" | "embedded-postgres";
   connectionString: string;
   source: string;
+  lockTimeoutMs: number;
   stop: () => Promise<void>;
 };
 
@@ -92,7 +94,7 @@ async function loadEmbeddedPostgresCtor(): Promise<EmbeddedPostgresCtor> {
 async function ensureEmbeddedPostgresConnection(
   dataDir: string,
   preferredPort: number,
-): Promise<MigrationConnection> {
+): Promise<Omit<MigrationConnection, "lockTimeoutMs">> {
   const EmbeddedPostgres = await loadEmbeddedPostgresCtor();
   await prepareEmbeddedPostgresNativeRuntime();
   const selectedPort = await findAvailablePort(preferredPort);
@@ -187,15 +189,26 @@ async function ensureEmbeddedPostgresConnection(
 }
 
 export async function resolveMigrationConnection(): Promise<MigrationConnection> {
-  const target = resolveDatabaseTarget();
+  const env = resolveDatabaseEnvironment();
+  const runtimeTarget = resolveDatabaseTarget();
+  const target = resolveDatabaseTarget({ preferMigrationUrl: true });
+  const runtimeUrl = runtimeTarget.mode === "postgres" ? runtimeTarget.connectionString : undefined;
+  const migrationUrl = target.mode === "postgres" ? target.connectionString : undefined;
+  const migrationConfig = resolveMigrationConfig(
+    env,
+    runtimeUrl,
+    migrationUrl !== runtimeUrl ? migrationUrl : env.DATABASE_MIGRATION_URL?.trim(),
+  );
   if (target.mode === "postgres") {
     return {
       mode: "postgres",
       connectionString: target.connectionString,
       source: target.source,
+      lockTimeoutMs: migrationConfig.lockTimeoutMs,
       stop: async () => {},
     };
   }
 
-  return ensureEmbeddedPostgresConnection(target.dataDir, target.port);
+  const connection = await ensureEmbeddedPostgresConnection(target.dataDir, target.port);
+  return { ...connection, lockTimeoutMs: migrationConfig.lockTimeoutMs };
 }
