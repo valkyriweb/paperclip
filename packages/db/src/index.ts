@@ -1,4 +1,10 @@
 export {
+  MigrationCoordinator,
+  type MigrationCoordinatorOptions,
+  type MigrationCoordinatorState,
+  type MigrationLockMetadata,
+} from "./migration-coordinator.js";
+export {
   createDb,
   getPostgresDataDirectory,
   ensurePostgresDatabase,

@@ -24,6 +24,7 @@ type EmbeddedPostgresCtor = new (opts: {
 }) => EmbeddedPostgresInstance;
 
 export type MigrationConnection = {
+  mode: "postgres" | "embedded-postgres";
   connectionString: string;
   source: string;
   stop: () => Promise<void>;
@@ -116,6 +117,7 @@ async function ensureEmbeddedPostgresConnection(
         `Adopting an existing PostgreSQL instance on port ${preferredPort} for embedded data dir ${dataDir} because postmaster.pid is missing.`,
       );
       return {
+        mode: "embedded-postgres",
         connectionString: `postgres://paperclip:paperclip@127.0.0.1:${preferredPort}/paperclip`,
         source: `embedded-postgres@${preferredPort}`,
         stop: async () => {},
@@ -130,6 +132,7 @@ async function ensureEmbeddedPostgresConnection(
     const adminConnectionString = `postgres://paperclip:paperclip@127.0.0.1:${port}/postgres`;
     await ensurePostgresDatabase(adminConnectionString, "paperclip");
     return {
+      mode: "embedded-postgres",
       connectionString: `postgres://paperclip:paperclip@127.0.0.1:${port}/paperclip`,
       source: `embedded-postgres@${port}`,
       stop: async () => {},
@@ -174,6 +177,7 @@ async function ensureEmbeddedPostgresConnection(
   await ensurePostgresDatabase(adminConnectionString, "paperclip");
 
   return {
+    mode: "embedded-postgres",
     connectionString: `postgres://paperclip:paperclip@127.0.0.1:${selectedPort}/paperclip`,
     source: `embedded-postgres@${selectedPort}`,
     stop: async () => {
@@ -186,6 +190,7 @@ export async function resolveMigrationConnection(): Promise<MigrationConnection>
   const target = resolveDatabaseTarget();
   if (target.mode === "postgres") {
     return {
+      mode: "postgres",
       connectionString: target.connectionString,
       source: target.source,
       stop: async () => {},

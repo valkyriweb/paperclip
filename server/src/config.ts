@@ -85,8 +85,11 @@ function clampIntEnv(
 const RUN_RESULT_RETENTION_MAX_BATCH_SIZE = 5_000;
 
 type DatabaseMode = "embedded-postgres" | "postgres";
+export type DeploymentProfile = "single_replica" | "multi_replica";
 
 export interface Config {
+  deploymentProfile: DeploymentProfile;
+  migrationLockTimeoutMs: number;
   deploymentMode: DeploymentMode;
   deploymentExposure: DeploymentExposure;
   bind: BindMode;
@@ -157,6 +160,20 @@ function detectTailnetBindHost(): string | undefined {
 
 export function loadConfig(): Config {
   const fileConfig = readConfigFile();
+  const deploymentProfileRaw = process.env.PAPERCLIP_DEPLOYMENT_PROFILE?.trim();
+  if (deploymentProfileRaw && deploymentProfileRaw !== "single_replica" && deploymentProfileRaw !== "multi_replica") {
+    throw new Error(
+      `PAPERCLIP_DEPLOYMENT_PROFILE must be "single_replica" or "multi_replica", got: ${deploymentProfileRaw}`,
+    );
+  }
+  const deploymentProfile: DeploymentProfile = deploymentProfileRaw === "multi_replica"
+    ? "multi_replica"
+    : "single_replica";
+  const migrationLockTimeoutMs = clampIntEnv(
+    process.env.PAPERCLIP_MIGRATION_LOCK_TIMEOUT_MS,
+    10 * 60 * 1000,
+    1_000,
+  );
   const fileDatabaseMode =
     (fileConfig?.database.mode === "postgres" ? "postgres" : "embedded-postgres") as DatabaseMode;
 
@@ -371,6 +388,34 @@ export function loadConfig(): Config {
       fileDatabaseBackup?.dir ??
       resolveDefaultBackupDir(),
   );
+  const databaseUrl = process.env.DATABASE_URL ?? fileDbUrl;
+  const databaseMigrationUrl = process.env.DATABASE_MIGRATION_URL;
+  if (deploymentProfile === "multi_replica") {
+    if (!databaseUrl) {
+      throw new Error("multi_replica profile requires external PostgreSQL via DATABASE_URL");
+    }
+    if (!databaseMigrationUrl) {
+      throw new Error(
+        "multi_replica profile requires a direct PostgreSQL DATABASE_MIGRATION_URL for session advisory locks",
+      );
+    }
+    let migrationUrl: URL;
+    try {
+      migrationUrl = new URL(databaseMigrationUrl);
+    } catch {
+      throw new Error("DATABASE_MIGRATION_URL must be a valid PostgreSQL URL");
+    }
+    if (migrationUrl.protocol !== "postgres:" && migrationUrl.protocol !== "postgresql:") {
+      throw new Error("DATABASE_MIGRATION_URL must use postgres:// or postgresql://");
+    }
+    const host = migrationUrl.hostname.toLowerCase();
+    if (migrationUrl.port === "6543" || host.includes("-pooler")) {
+      throw new Error(
+        "multi_replica profile requires DATABASE_MIGRATION_URL to use a direct, session-capable PostgreSQL endpoint, not a transaction pooler",
+      );
+    }
+  }
+
   const bindValidationErrors = validateConfiguredBindMode({
     deploymentMode,
     deploymentExposure,
@@ -392,6 +437,8 @@ export function loadConfig(): Config {
   }
 
   return {
+    deploymentProfile,
+    migrationLockTimeoutMs,
     deploymentMode,
     deploymentExposure,
     bind: resolvedBind.bind,
@@ -403,8 +450,8 @@ export function loadConfig(): Config {
     authPublicBaseUrl,
     authDisableSignUp,
     databaseMode: fileDatabaseMode,
-    databaseUrl: process.env.DATABASE_URL ?? fileDbUrl,
-    databaseMigrationUrl: process.env.DATABASE_MIGRATION_URL,
+    databaseUrl,
+    databaseMigrationUrl,
     embeddedPostgresDataDir: resolveHomeAwarePath(
       fileConfig?.database.embeddedPostgresDataDir ?? resolveDefaultEmbeddedPostgresDir(),
     ),

@@ -115,6 +115,17 @@ DATABASE_MIGRATION_URL=postgres://postgres.[PROJECT-REF]:[PASSWORD]@aws-0-[REGIO
 
 If your hosted database requires transaction-pooling-only connections (pgbouncer transaction mode, Supavisor port 6543, Neon `-pooler` endpoints), set `DATABASE_PREPARED_STATEMENTS=false` so the client does not rely on session-scoped prepared statements, and keep `DATABASE_MIGRATION_URL` on a direct connection. Do not edit database client source files as part of deployment setup.
 
+### Multi-replica migration coordination
+
+Set `PAPERCLIP_DEPLOYMENT_PROFILE=multi_replica` before running more than one API replica. This profile refuses embedded PostgreSQL and requires both:
+
+- `DATABASE_URL` for normal application queries; and
+- `DATABASE_MIGRATION_URL` for a **direct, session-capable** PostgreSQL connection. Do not use a transaction-pooler endpoint for the migration URL.
+
+Startup and `pnpm db:migrate` serialize migration inspection, migration-history repair, application, and final inspection with a stable PostgreSQL session advisory lock. A waiting replica re-inspects the schema after acquiring the lock; it never applies a stale pending-migration list. Logs expose only the hashed lock id and the states `waiting_for_migration_lock`, `migrating`, `ready`, or `failed`, never either connection string.
+
+`PAPERCLIP_MIGRATION_LOCK_TIMEOUT_MS` bounds how long startup waits (default: 10 minutes). Keep the Kubernetes startup-probe budget longer than this timeout plus the longest measured migration. If migration work fails, leave the deployment at one replica, fix or roll back the migration, and retry; do not bypass the lock or point the migration URL at a transaction pooler.
+
 ### Client tuning (optional)
 
 All of these are optional; when unset, the driver defaults apply and behavior is unchanged — typical self-hosted setups need none of them:
