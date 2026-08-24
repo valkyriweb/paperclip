@@ -117,7 +117,7 @@ DATABASE_MIGRATION_SESSION_CAPABLE=true
 
 If your hosted database requires transaction-pooling-only connections (pgbouncer transaction mode, Supavisor port 6543, Neon `-pooler` endpoints), set `DATABASE_PREPARED_STATEMENTS=false` so the client does not rely on session-scoped prepared statements, and keep `DATABASE_MIGRATION_URL` on a direct connection. Do not edit database client source files as part of deployment setup.
 
-Multi-replica deployments must also set `DATABASE_MIGRATION_SESSION_CAPABLE=true`. This is an explicit operator attestation that `DATABASE_MIGRATION_URL` reaches one stable PostgreSQL backend session for the lifetime of a connection and supports session advisory locks. PostgreSQL URLs do not encode pooling mode, so Paperclip fails unknown endpoints closed instead of guessing from provider hostnames or ports. Do not set this flag for PgBouncer/Supavisor transaction-pooling endpoints. `pnpm db:migrate` reads the same migration URL, profile, attestation, and lock-timeout contract as server startup.
+Multi-replica deployments must also set `DATABASE_MIGRATION_SESSION_CAPABLE=true`. This is an explicit operator attestation that `DATABASE_MIGRATION_URL` reaches one stable PostgreSQL backend session for the lifetime of a connection and supports session advisory locks. PostgreSQL URLs do not encode pooling mode, so Paperclip fails unknown endpoints closed instead of guessing from provider hostnames or ports. Do not set this flag for PgBouncer/Supavisor transaction-pooling endpoints. `pnpm db:migrate` reads the same process environment, config-adjacent `.env`, and current-working-directory `.env` layers as server startup, with that precedence, including the same migration URL, profile, attestation, and lock-timeout contract.
 
 ### Multi-replica migration coordination
 
@@ -128,6 +128,8 @@ Set `PAPERCLIP_DEPLOYMENT_PROFILE=multi_replica` before running more than one AP
 - `DATABASE_MIGRATION_SESSION_CAPABLE=true` as the explicit operator attestation for that endpoint contract.
 
 Startup and `pnpm db:migrate` serialize migration inspection, migration-history repair, application, and final inspection with a stable PostgreSQL session advisory lock. A waiting replica re-inspects the schema after acquiring the lock; it never applies a stale pending-migration list. Logs expose only the hashed lock id and the states `waiting_for_migration_lock`, `migrating`, `ready`, or `failed`, never either connection string.
+
+If the reserved PostgreSQL session closes, Paperclip records lost lock ownership, waits for the migration callback to settle, performs best-effort idempotent cleanup, and reports `failed` instead of issuing another query through the closed session. Migration callbacks are not generally cancellable, so session loss cannot stop DDL already running through separate clients; operators must treat the deployment as failed and verify database state before retrying.
 
 `PAPERCLIP_MIGRATION_LOCK_TIMEOUT_MS` bounds how long startup waits (default: 10 minutes). Keep the Kubernetes startup-probe budget longer than this timeout plus the longest measured migration. If migration work fails, leave the deployment at one replica, fix or roll back the migration, and retry; do not bypass the lock or point the migration URL at a transaction pooler.
 
