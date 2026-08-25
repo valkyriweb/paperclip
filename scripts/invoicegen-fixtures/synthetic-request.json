@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "mode": "synthetic",
+  "state": "draft",
+  "idempotencyKey": "synthetic-2026-08-25-001",
+  "invoice": {
+    "number": 990001,
+    "date": "2026-08-25",
+    "sender": {
+      "name": "SYNTHETIC TEST SENDER",
+      "address": "TEST DATA ONLY\nNOT A REAL BUSINESS"
+    },
+    "client": {
+      "bill_to": "SYNTHETIC TEST CLIENT\nNOT A REAL RECIPIENT",
+      "ship_to": "SYNTHETIC TEST CLIENT\nNOT A REAL RECIPIENT",
+      "default_rate": 1
+    },
+    "notes": "DRAFT — SYNTHETIC TEST DATA — NOT FOR ISSUE OR SEND",
+    "tax_rate": 0,
+    "tax_note": "SYNTHETIC TEST ONLY",
+    "items": [
+      {
+        "description": "Synthetic service fixture",
+        "quantity": 1,
+        "rate": 1
+      }
+    ]
+  }
+}

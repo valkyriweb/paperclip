@@ -1,0 +1,7 @@
+{
+  "rendererRepo": "valkyriweb/invoicegen",
+  "rendererVersion": "v0.1.2-bermont.1",
+  "rendererCommit": "1929e7ba9536c8801ddcd039d07ebd446b5b8b09",
+  "embeddedTemplatePath": "templates/invoice-minimal.typ",
+  "embeddedTemplateSha256": "3940eee903d905c614144ffcc7e5dc657a44ace84427743914ccf2c8684f171a"
+}
