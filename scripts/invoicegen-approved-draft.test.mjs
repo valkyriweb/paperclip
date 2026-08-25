@@ -14,6 +14,7 @@ async function fixture() {
   const mutateConfigSentinel = join(root, "mutate-config-during-approval");
   const paperclipaiBin = join(root, "paperclipai.mjs");
   const configPath = join(root, "config.yaml");
+  const renderTracePath = join(root, "renderer-invocations.log");
   const logoPath = join(root, "logo.svg");
   const templateContractPath = join(root, "template.json");
   const invoicegenBin = join(root, "invoicegen.mjs");
@@ -25,9 +26,10 @@ async function fixture() {
   await writeFile(
     invoicegenBin,
     `#!/usr/bin/env node
-import { readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 const input = process.argv[3];
 const output = process.argv[5];
+appendFileSync(${JSON.stringify(renderTracePath)}, "render\\n");
 writeFileSync(output, Buffer.concat([Buffer.from("%PDF-approved-draft\\n"), readFileSync(input)]));
 `,
     { mode: 0o755 },
@@ -67,7 +69,7 @@ writeFileSync(output, Buffer.concat([Buffer.from("%PDF-approved-draft\\n"), read
   Object.assign(payload.numberReservation, { reservedBy: "Luke", reservedAt: "2026-08-25T13:29:00Z", evidenceReference: "BER-400 human handoff", iqHandoff: "human-verified" });
   await writeFile(approvalRecordPath, JSON.stringify({ id: "approval-1", type: "request_board_approval", status: "approved", companyId: "bermont-company", decidedByUserId: "luke-user", decidedAt: "2026-08-25T13:30:00Z", payload }));
   await writeFile(paperclipaiBin, `#!/usr/bin/env node\nimport { existsSync, readFileSync, writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(approvalTracePath)}, JSON.stringify({ argv: process.argv.slice(2), apiUrl: process.env.PAPERCLIP_API_URL ?? null, context: process.env.PAPERCLIP_CONTEXT ?? null, cwd: process.cwd() }));\nif (existsSync(${JSON.stringify(mutateConfigSentinel)})) writeFileSync(${JSON.stringify(configPath)}, "sender:\\n  name: Attacker\\ndefaults:\\n  currency: USD\\n  number_prefix: BAD\\n");\nprocess.stdout.write(readFileSync(${JSON.stringify(approvalRecordPath)}, "utf8"));\n`, { mode: 0o755 });
-  return { ...options, approvalTracePath, logoPath, mutateConfigSentinel, ...workflow };
+  return { ...options, approvalTracePath, logoPath, mutateConfigSentinel, renderTracePath, ...workflow };
 }
 
 test("CLI rejects approval executable and profile overrides", () => {
@@ -138,6 +140,14 @@ test("renders a real approved draft and retries idempotently", async () => {
   assert.equal(manifest.safety.issueCapability, "absent");
   assert.equal(manifest.safety.sendCapability, "absent");
   assert.match(input, /Example Approved Client/);
+});
+
+test("concurrent identical renders converge after one renderer invocation", async () => {
+  const f = await fixture();
+  const results = await Promise.all([f.runApprovedDraft(f), f.runApprovedDraft(f)]);
+  assert.deepEqual(results.map((result) => result.idempotent).sort(), [false, true]);
+  const invocations = (await readFile(f.renderTracePath, "utf8")).trim().split("\n");
+  assert.equal(invocations.length, 1);
 });
 
 test("fails closed without exact approval", async () => {

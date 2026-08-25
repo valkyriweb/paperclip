@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { chmod, copyFile, mkdir, open, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { setTimeout as delay } from "node:timers/promises";
 
 function fail(message) {
   throw new Error(`invoicegen approved draft: ${message}`);
@@ -181,11 +182,15 @@ async function withFileLock(targetPath, action) {
   const token = randomUUID();
   await mkdir(dirname(targetPath), { recursive: true });
   let handle;
-  try {
-    handle = await open(lockPath, "wx", 0o600);
-  } catch (error) {
-    if (error.code === "EEXIST") fail(`workflow is locked at ${lockPath}; inspect its owner before manual cleanup`);
-    throw error;
+  const deadline = Date.now() + 35_000;
+  while (!handle) {
+    try {
+      handle = await open(lockPath, "wx", 0o600);
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      if (Date.now() >= deadline) fail(`workflow remains locked at ${lockPath}; inspect its owner before manual cleanup`);
+      await delay(100);
+    }
   }
   await handle.writeFile(canonicalJson({ schemaVersion: 1, pid: process.pid, hostname: process.env.HOSTNAME ?? "unknown", token }));
   try {
