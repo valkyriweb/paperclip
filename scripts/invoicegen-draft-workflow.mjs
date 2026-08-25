@@ -5,6 +5,7 @@ import {
   chmod,
   copyFile,
   mkdir,
+  open,
   readFile,
   rename,
   rm,
@@ -18,6 +19,8 @@ const REGISTER_SCHEMA_VERSION = 1;
 const REQUEST_SCHEMA_VERSION = 1;
 const SYNTHETIC_NUMBER_MIN = 990000;
 const SYNTHETIC_NUMBER_MAX = 999999;
+const PINNED_RENDERER_COMMIT = "1929e7ba9536c8801ddcd039d07ebd446b5b8b09";
+const PINNED_TEMPLATE_SHA256 = "3940eee903d905c614144ffcc7e5dc657a44ace84427743914ccf2c8684f171a";
 const LOCK_RETRIES = 1_400;
 const LOCK_DELAY_MS = 25;
 
@@ -63,6 +66,34 @@ async function readJson(path, label) {
   }
 }
 
+function rejectForbiddenWorkflowFields(value) {
+  const forbiddenKeys = new Set([
+    "approval",
+    "approve",
+    "approved",
+    "approvedat",
+    "email",
+    "issuance",
+    "issue",
+    "issued",
+    "issuedat",
+    "recipient",
+    "send",
+    "sent",
+    "sentat",
+  ]);
+  if (Array.isArray(value)) {
+    for (const entry of value) rejectForbiddenWorkflowFields(entry);
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  for (const [key, entry] of Object.entries(value)) {
+    const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (forbiddenKeys.has(normalizedKey)) fail(`field ${key} is not allowed in a synthetic draft`);
+    rejectForbiddenWorkflowFields(entry);
+  }
+}
+
 function validateRequest(request) {
   if (request.schemaVersion !== REQUEST_SCHEMA_VERSION) fail("request schemaVersion must be 1");
   if (request.mode !== "synthetic") fail("mode must be synthetic; real client data requires a separate human-approved workflow");
@@ -101,20 +132,29 @@ function validateRequest(request) {
 
   const serialized = canonicalJson(request);
   if (/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(serialized)) fail("synthetic requests must not contain email addresses");
-  for (const forbiddenKey of ["recipient", "email", "send", "issuedAt", "approvedAt"]) {
-    if (Object.hasOwn(request, forbiddenKey) || Object.hasOwn(invoice, forbiddenKey)) {
-      fail(`field ${forbiddenKey} is not allowed in a synthetic draft`);
-    }
-  }
+  rejectForbiddenWorkflowFields(request);
 }
 
 function validateTemplateContract(contract) {
   if (contract.rendererRepo !== "valkyriweb/invoicegen" || contract.rendererVersion !== "v0.1.2-bermont.1") {
     fail("template contract must identify the pinned Bermont Invoicegen release");
   }
-  if (!/^[a-f0-9]{40}$/.test(contract.rendererCommit ?? "")) fail("template contract rendererCommit must be an exact commit");
+  if (contract.rendererCommit !== PINNED_RENDERER_COMMIT) fail("renderer commit does not match the pinned release");
   if (contract.embeddedTemplatePath !== "templates/invoice-minimal.typ") fail("unexpected embedded template path");
-  if (!/^[a-f0-9]{64}$/.test(contract.embeddedTemplateSha256 ?? "")) fail("template contract must contain an exact SHA-256");
+  if (contract.embeddedTemplateSha256 !== PINNED_TEMPLATE_SHA256) {
+    fail("embedded template SHA-256 does not match the pinned release");
+  }
+}
+
+async function hasPdfHeader(path) {
+  const handle = await open(path, "r");
+  try {
+    const header = Buffer.alloc(5);
+    const { bytesRead } = await handle.read(header, 0, header.length, 0);
+    return bytesRead === header.length && header.toString("ascii") === "%PDF-";
+  } finally {
+    await handle.close();
+  }
 }
 
 async function withLock(registerPath, action) {
@@ -209,25 +249,30 @@ export async function runDraftWorkflow(options) {
   validateTemplateContract(templateContract);
 
   const requestSha256 = sha256Bytes(canonicalJson(request));
-  const hashes = {
-    requestSha256,
-    configSha256: await sha256File(configPath),
-    templateSha256: templateContract.embeddedTemplateSha256,
-    templateContractSha256: sha256Bytes(canonicalJson(templateContract)),
-    rendererSha256: await sha256File(invoicegenBin),
-  };
   await reserveSyntheticNumber(registerPath, request, requestSha256);
 
   const executionId = `${request.invoice.number}-${sha256Bytes(request.idempotencyKey).slice(0, 12)}`;
   const executionDir = join(outputDir, executionId);
   const inputPath = join(executionDir, `draft-${request.invoice.number}.yaml`);
   const artifactPath = join(executionDir, `draft-${request.invoice.number}.pdf`);
+  const renderedArtifactPath = `${artifactPath}.rendering`;
   const manifestPath = join(executionDir, "audit-manifest.json");
   const configHome = join(executionDir, ".config", "invoicegen");
+  const stagedConfigPath = join(configHome, "config.yaml");
+  const rendererDir = join(executionDir, ".bin");
+  const stagedRendererPath = join(rendererDir, "invoicegen");
   const invoiceInput = canonicalJson(request.invoice);
-  hashes.inputSha256 = sha256Bytes(invoiceInput);
 
   return withLock(manifestPath, async () => {
+    const hashes = {
+      requestSha256,
+      configSha256: await sha256File(configPath),
+      templateSha256: templateContract.embeddedTemplateSha256,
+      templateContractSha256: sha256Bytes(canonicalJson(templateContract)),
+      rendererSha256: await sha256File(invoicegenBin),
+      inputSha256: sha256Bytes(invoiceInput),
+    };
+
     try {
       const manifest = await readJson(manifestPath, "existing audit manifest");
       for (const [key, value] of Object.entries(hashes)) {
@@ -237,9 +282,13 @@ export async function runDraftWorkflow(options) {
       if (manifest.hashes?.inputSha256 !== persistedInputSha256) {
         fail("existing input hash does not match its audit manifest");
       }
-      const persistedConfigSha256 = await sha256File(join(configHome, "config.yaml"));
+      const persistedConfigSha256 = await sha256File(stagedConfigPath);
       if (manifest.hashes?.configSha256 !== persistedConfigSha256) {
         fail("existing config hash does not match its audit manifest");
+      }
+      const persistedRendererSha256 = await sha256File(stagedRendererPath);
+      if (manifest.hashes?.rendererSha256 !== persistedRendererSha256) {
+        fail("existing renderer hash does not match its audit manifest");
       }
       const artifactSha256 = await sha256File(artifactPath);
       if (manifest.hashes?.artifactSha256 !== artifactSha256) {
@@ -251,25 +300,42 @@ export async function runDraftWorkflow(options) {
     }
 
     await mkdir(configHome, { recursive: true });
-    await copyFile(configPath, join(configHome, "config.yaml"));
-    await chmod(join(configHome, "config.yaml"), 0o600);
+    await mkdir(rendererDir, { recursive: true });
+    await copyFile(configPath, stagedConfigPath);
+    await chmod(stagedConfigPath, 0o600);
+    await copyFile(invoicegenBin, stagedRendererPath);
+    await chmod(stagedRendererPath, 0o700);
     await writeFile(inputPath, invoiceInput, { mode: 0o600 });
 
-    const result = spawnSync(invoicegenBin, ["generate", inputPath, "-o", artifactPath], {
+    if ((await sha256File(stagedConfigPath)) !== hashes.configSha256) {
+      fail("config changed while it was staged; draft remains reserved and can be retried");
+    }
+    if ((await sha256File(stagedRendererPath)) !== hashes.rendererSha256) {
+      fail("renderer changed while it was staged; draft remains reserved and can be retried");
+    }
+
+    await rm(renderedArtifactPath, { force: true });
+    const result = spawnSync(stagedRendererPath, ["generate", inputPath, "-o", renderedArtifactPath], {
       cwd: executionDir,
       env: { ...env, XDG_CONFIG_HOME: join(executionDir, ".config") },
       encoding: "utf8",
       timeout: 30_000,
     });
-    if (result.error) fail(`renderer did not execute: ${result.error.message}`);
+    if (result.error) {
+      await rm(renderedArtifactPath, { force: true });
+      fail(`renderer did not execute: ${result.error.message}`);
+    }
     if (result.status !== 0) {
+      await rm(renderedArtifactPath, { force: true });
       fail(`renderer exited with status ${result.status}; draft remains reserved and can be retried`);
     }
-    const artifactStat = await stat(artifactPath).catch(() => null);
-    if (!artifactStat?.isFile() || artifactStat.size === 0) {
+    const artifactStat = await stat(renderedArtifactPath).catch(() => null);
+    if (!artifactStat?.isFile() || artifactStat.size === 0 || !(await hasPdfHeader(renderedArtifactPath))) {
+      await rm(renderedArtifactPath, { force: true });
       fail("renderer did not create a non-empty PDF artifact");
     }
-    hashes.artifactSha256 = await sha256File(artifactPath);
+    hashes.artifactSha256 = await sha256File(renderedArtifactPath);
+    await rename(renderedArtifactPath, artifactPath);
 
     const manifest = {
       schemaVersion: 1,
@@ -280,7 +346,7 @@ export async function runDraftWorkflow(options) {
         repository: templateContract.rendererRepo,
         version: templateContract.rendererVersion,
         commit: templateContract.rendererCommit,
-        invocation: ["generate", basename(inputPath), "-o", basename(artifactPath)],
+        invocation: ["generate", basename(inputPath), "-o", basename(renderedArtifactPath)],
       },
       safety: {
         mode: "synthetic",

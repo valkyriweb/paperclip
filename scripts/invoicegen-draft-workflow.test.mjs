@@ -138,13 +138,79 @@ test("fails closed for non-draft states and non-synthetic data", async () => {
   await assert.rejects(readFile(f.calls, "utf8"), /ENOENT/, "renderer must not run");
 });
 
-test("detects persisted input changes instead of trusting stale hash evidence", async () => {
+test("rejects forbidden workflow fields at any nesting depth", async () => {
+  const f = await fixture();
+  const request = JSON.parse(await readFile(f.request, "utf8"));
+  request.invoice.client.approvedAt = "2026-08-25T00:00:00Z";
+  await writeFile(f.request, JSON.stringify(request));
+
+  await assert.rejects(run(f), /field approvedAt is not allowed/);
+  await assert.rejects(readFile(f.calls, "utf8"), /ENOENT/, "renderer must not run");
+});
+
+test("rejects template provenance that differs from the pinned release", async () => {
+  const f = await fixture();
+  const contract = JSON.parse(await readFile(f.templateContract, "utf8"));
+  contract.embeddedTemplateSha256 = "0".repeat(64);
+  await writeFile(f.templateContract, JSON.stringify(contract));
+
+  await assert.rejects(run(f), /embedded template SHA-256 does not match/);
+});
+
+test("does not accept stale output left by a failed renderer", async () => {
+  const f = await fixture();
+  await writeFile(
+    f.bin,
+    `#!/usr/bin/env node
+import { existsSync, writeFileSync } from "node:fs";
+const output = process.argv[5];
+const marker = process.env.FAILURE_MARKER;
+if (!existsSync(marker)) {
+  writeFileSync(marker, "failed");
+  writeFileSync(output, "STALE PARTIAL");
+  process.exit(1);
+}
+process.exit(0);
+`,
+    { mode: 0o755 },
+  );
+  const marker = join(f.root, "failure-marker");
+  const options = { ...f, calls: f.calls };
+  const runStale = () =>
+    runDraftWorkflow({
+      requestPath: options.request,
+      registerPath: options.register,
+      outputDir: options.outputDir,
+      configPath: options.config,
+      templateContractPath: options.templateContract,
+      invoicegenBin: options.bin,
+      env: { ...process.env, FAILURE_MARKER: marker },
+    });
+
+  await assert.rejects(runStale(), /renderer exited with status 1/);
+  await assert.rejects(runStale(), /renderer did not create a non-empty PDF artifact/);
+});
+
+test("detects persisted input, config, and renderer changes", async () => {
   const f = await fixture();
   const result = await run(f);
   const executionDir = dirname(result.manifestPath);
+  const inputPath = join(executionDir, "draft-990001.yaml");
+  const originalInput = await readFile(inputPath);
 
-  await writeFile(join(executionDir, "draft-990001.yaml"), "mutated");
+  await writeFile(inputPath, "mutated");
   await assert.rejects(run(f), /input hash does not match/);
+
+  await writeFile(inputPath, originalInput);
+  const stagedConfigPath = join(executionDir, ".config", "invoicegen", "config.yaml");
+  const originalConfig = await readFile(stagedConfigPath);
+  await writeFile(stagedConfigPath, "mutated");
+  await assert.rejects(run(f), /config hash does not match/);
+
+  await writeFile(stagedConfigPath, originalConfig);
+  const stagedRendererPath = join(executionDir, ".bin", "invoicegen");
+  await writeFile(stagedRendererPath, "mutated");
+  await assert.rejects(run(f), /renderer hash does not match/);
 });
 
 test("detects artifact changes instead of silently accepting a rerun", async () => {

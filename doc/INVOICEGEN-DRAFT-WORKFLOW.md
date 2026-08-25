@@ -30,7 +30,7 @@ node scripts/invoicegen-draft-workflow.mjs \
   --invoicegen-bin /usr/local/bin/invoicegen
 ```
 
-The output directory contains the canonical input, draft PDF, and `audit-manifest.json`. The manifest records exact SHA-256 hashes for the request, config, embedded template source, template contract, renderer binary, canonical input, and artifact. The checked-in template contract pins fork tag `v0.1.2-bermont.1`, commit `1929e7ba9536c8801ddcd039d07ebd446b5b8b09`, and its embedded template source hash.
+The output directory contains the canonical input, draft PDF, and `audit-manifest.json`. The workflow stages private copies of the config and renderer, hashes the copies it uses, renders to a temporary path, requires a PDF header, and only then promotes the artifact. The manifest records exact SHA-256 hashes for the request, config, embedded template source, template contract, renderer binary, canonical input, and artifact. The checked-in template contract pins fork tag `v0.1.2-bermont.1`, commit `1929e7ba9536c8801ddcd039d07ebd446b5b8b09`, and its embedded template source hash.
 
 A repeated command with identical inputs returns `idempotent: true` and does not render again. The coordinated JSON register binds each synthetic number and idempotency key under an atomic directory lock. Reusing either identity with different content fails closed. A renderer failure leaves the number reserved so an operator can retry the same request without creating a duplicate.
 
