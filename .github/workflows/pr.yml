@@ -311,12 +311,6 @@ jobs:
       - name: Build
         run: pnpm build
 
-      - name: Smoke trusted Paperclip approval CLI
-        if: github.repository_owner == 'valkyriweb'
-        run: |
-          test -f cli/dist/index.js
-          node cli/dist/index.js approval get --help >/dev/null
-
   verify_serialized_server:
     name: Verify serialized server suites (${{ matrix.shard_label }})
     needs: [policy]

@@ -64,7 +64,7 @@ paperclipai approval create --profile bermont \
   --issue-ids <paperclip-issue-uuid>
 ```
 
-The board must approve that Paperclip record. An editable local JSON file is not approval. Rendering queries the image's trusted `/app/cli/dist/index.js` CLI through the fixed `bermont` profile and `http://127.0.0.1:3100` endpoint. The subprocess uses a sanitized environment and fixed working directory; callers cannot override the approval executable, endpoint, profile, or context.
+The board must approve that Paperclip record. An editable local JSON file is not approval. Rendering queries the fixed `http://127.0.0.1:3100` Paperclip API endpoint directly with `PAPERCLIP_API_KEY`. Callers cannot override the approval endpoint, executable, profile, or context.
 
 Changing the request, config, renderer, or template after board approval invalidates the packet.
 

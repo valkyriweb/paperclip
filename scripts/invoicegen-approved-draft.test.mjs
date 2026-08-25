@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { mkdtemp, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
@@ -12,7 +13,6 @@ async function fixture() {
   const approvalRecordPath = join(root, "approval-record.json");
   const approvalTracePath = join(root, "approval-trace.json");
   const mutateConfigSentinel = join(root, "mutate-config-during-approval");
-  const paperclipaiBin = join(root, "paperclipai.mjs");
   const configPath = join(root, "config.yaml");
   const renderTracePath = join(root, "renderer-invocations.log");
   const logoPath = join(root, "logo.svg");
@@ -56,10 +56,19 @@ writeFileSync(output, Buffer.concat([Buffer.from("%PDF-approved-draft\\n"), read
       },
     }),
   );
+  const server = createServer(async (request, response) => {
+    await writeFile(approvalTracePath, JSON.stringify({ url: request.url, authorization: request.headers.authorization ?? null }));
+    if (await readFile(mutateConfigSentinel).catch(() => null)) await writeFile(configPath, "sender:\n  name: Attacker\ndefaults:\n  currency: USD\n  number_prefix: BAD\n");
+    response.setHeader("content-type", "application/json");
+    response.end(await readFile(approvalRecordPath, "utf8"));
+  });
+  await new Promise((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
+  server.unref();
+  const apiBase = `http://127.0.0.1:${server.address().port}`;
+  process.env.PAPERCLIP_API_KEY = "fixture-api-key";
   const workflowPath = join(root, "invoicegen-approved-draft.mjs");
   const source = (await readFile(resolve("scripts/invoicegen-approved-draft.mjs"), "utf8"))
-    .replace('const cliScript = "/app/cli/dist/index.js";', `const cliScript = ${JSON.stringify(paperclipaiBin)};`)
-    .replace('cwd: "/app"', `cwd: ${JSON.stringify(root)}`)
+    .replace("http://127.0.0.1:3100", apiBase)
     .replaceAll("/paperclip/.config/invoicegen/logo.svg", logoPath)
     .replace("907ce7ce767e82bbc9fd9d8a3dc1cf9cdf8c0d6dfe32e184aec9e161f0675ba5", rendererSha256);
   await writeFile(workflowPath, source);
@@ -68,7 +77,6 @@ writeFileSync(output, Buffer.concat([Buffer.from("%PDF-approved-draft\\n"), read
   const payload = await workflow.prepareApproval(options);
   Object.assign(payload.numberReservation, { reservedBy: "Luke", reservedAt: "2026-08-25T13:29:00Z", evidenceReference: "BER-400 human handoff", iqHandoff: "human-verified" });
   await writeFile(approvalRecordPath, JSON.stringify({ id: "approval-1", type: "request_board_approval", status: "approved", companyId: "bermont-company", decidedByUserId: "luke-user", decidedAt: "2026-08-25T13:30:00Z", payload }));
-  await writeFile(paperclipaiBin, `#!/usr/bin/env node\nimport { existsSync, readFileSync, writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(approvalTracePath)}, JSON.stringify({ argv: process.argv.slice(2), apiUrl: process.env.PAPERCLIP_API_URL ?? null, context: process.env.PAPERCLIP_CONTEXT ?? null, cwd: process.cwd() }));\nif (existsSync(${JSON.stringify(mutateConfigSentinel)})) writeFileSync(${JSON.stringify(configPath)}, "sender:\\n  name: Attacker\\ndefaults:\\n  currency: USD\\n  number_prefix: BAD\\n");\nprocess.stdout.write(readFileSync(${JSON.stringify(approvalRecordPath)}, "utf8"));\n`, { mode: 0o755 });
   return { ...options, approvalTracePath, logoPath, mutateConfigSentinel, renderTracePath, ...workflow };
 }
 
@@ -101,9 +109,8 @@ test("approval lookup ignores redirecting environment and uses the trusted API b
     }
   }
   const trace = JSON.parse(await readFile(f.approvalTracePath, "utf8"));
-  assert.equal(trace.apiUrl, null);
-  assert.equal(trace.context, null);
-  assert.deepEqual(trace.argv.slice(3, 5), ["--api-base", "http://127.0.0.1:3100"]);
+  assert.equal(trace.url, "/api/approvals/approval-1");
+  assert.equal(trace.authorization, "Bearer untrusted-key-cannot-change-the-endpoint");
 });
 
 test("renders only the config bytes captured before approval lookup", async () => {

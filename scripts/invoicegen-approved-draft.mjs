@@ -141,19 +141,16 @@ function validateApprovalPayload(payload, hashes, request, configIdentity) {
   }
 }
 
-function fetchPaperclipApproval(options) {
-  const cliScript = "/app/cli/dist/index.js";
-  const args = [cliScript, "approval", "get", options.approvalId, "--api-base", "http://127.0.0.1:3100", "--profile", "bermont", "--json"];
-  const env = {
-    HOME: "/paperclip",
-    NODE_ENV: "production",
-    PATH: "/usr/local/bin:/usr/bin:/bin",
-    ...(process.env.PAPERCLIP_API_KEY ? { PAPERCLIP_API_KEY: process.env.PAPERCLIP_API_KEY } : {}),
-  };
-  const result = spawnSync(process.execPath, args, { cwd: "/app", env, encoding: "utf8", timeout: 15_000 });
-  if (result.error || result.status !== 0) fail(result.error ? `could not query Paperclip approval: ${result.error.message}` : `Paperclip approval query exited ${result.status}`);
+async function fetchPaperclipApproval(options) {
+  const apiKey = process.env.PAPERCLIP_API_KEY?.trim();
+  if (!apiKey) fail("PAPERCLIP_API_KEY is required to query approval from the trusted local Paperclip API");
+  const response = await fetch(`http://127.0.0.1:3100/api/approvals/${encodeURIComponent(options.approvalId)}`, {
+    headers: { authorization: `Bearer ${apiKey}`, accept: "application/json" },
+    signal: AbortSignal.timeout(15_000),
+  }).catch((error) => fail(`could not query Paperclip approval: ${error.message}`));
+  if (!response.ok) fail(`Paperclip approval query returned HTTP ${response.status}`);
   try {
-    return JSON.parse(result.stdout);
+    return await response.json();
   } catch (error) {
     fail(`Paperclip approval response is invalid JSON: ${error.message}`);
   }
@@ -289,7 +286,7 @@ export async function runApprovedDraft(options) {
   validateTemplateContract(await readJson(templateContractPath, "template contract"), hashes.rendererSha256);
   const { identity: configIdentity, logoPath } = await validateBermontConfig(configText);
   hashes.logoSha256 = configIdentity.logoSha256;
-  const approval = fetchPaperclipApproval(options);
+  const approval = await fetchPaperclipApproval(options);
   if (approval.status !== "approved" || approval.type !== "request_board_approval") fail("Paperclip approval must be an approved request_board_approval record");
   if (!approval.decidedByUserId || !approval.decidedAt) fail("Paperclip approval must have a human decision actor and time");
   if (approval.companyId !== options.companyId) fail("Paperclip approval belongs to a different company");

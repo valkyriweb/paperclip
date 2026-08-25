@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { chmod, mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -13,7 +14,6 @@ test("pinned Invoicegen release renders visible draft markings", { skip: !render
   const requestPath = join(root, "request.json");
   const configPath = join(root, "config.yaml");
   const approvalRecordPath = join(root, "approval.json");
-  const paperclipaiBin = join(root, "paperclipai.mjs");
   const options = {
     requestPath,
     configPath,
@@ -44,10 +44,16 @@ test("pinned Invoicegen release renders visible draft markings", { skip: !render
       items,
     },
   }));
+  const server = createServer(async (_request, response) => {
+    response.setHeader("content-type", "application/json");
+    response.end(await readFile(approvalRecordPath, "utf8"));
+  });
+  await new Promise((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
+  server.unref();
+  process.env.PAPERCLIP_API_KEY = "integration-api-key";
   const workflowPath = join(root, "invoicegen-approved-draft.mjs");
   const source = (await readFile(resolve("scripts/invoicegen-approved-draft.mjs"), "utf8"))
-    .replace('const cliScript = "/app/cli/dist/index.js";', `const cliScript = ${JSON.stringify(paperclipaiBin)};`)
-    .replace('cwd: "/app"', `cwd: ${JSON.stringify(root)}`);
+    .replace("http://127.0.0.1:3100", `http://127.0.0.1:${server.address().port}`);
   await writeFile(workflowPath, source);
   const { prepareApproval, runApprovedDraft } = await import(workflowPath);
   const payload = await prepareApproval(options);
@@ -66,9 +72,6 @@ test("pinned Invoicegen release renders visible draft markings", { skip: !render
     decidedAt: "2026-08-25T14:01:00Z",
     payload,
   }));
-  await writeFile(paperclipaiBin, `#!/usr/bin/env node\nimport { readFileSync } from "node:fs";\nprocess.stdout.write(readFileSync(${JSON.stringify(approvalRecordPath)}, "utf8"));\n`);
-  await chmod(paperclipaiBin, 0o700);
-
   const result = await runApprovedDraft(options);
   const extraction = spawnSync(process.env.PDFTOTEXT_BIN ?? "pdftotext", [result.artifactPath, "-"], { encoding: "utf8" });
   assert.equal(extraction.status, 0, extraction.stderr);
