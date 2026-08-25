@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -98,6 +98,51 @@ test("rejects issue or send states and fields", async () => {
   request.state = "sent";
   await writeFile(f.requestPath, JSON.stringify(request));
   await assert.rejects(runApprovedDraft(f), /state must be draft/);
+});
+
+test("requires approval from the configured company", async () => {
+  const f = await fixture();
+  const missingCompany = { ...f };
+  delete missingCompany.companyId;
+  await assert.rejects(runApprovedDraft(missingCompany), /company-id is required/);
+
+  const wrongCompany = { ...f, companyId: "other-company" };
+  await assert.rejects(runApprovedDraft(wrongCompany), /different company/);
+});
+
+test("rejects malformed number-register entries", async () => {
+  const f = await fixture();
+  await writeFile(
+    f.registerPath,
+    JSON.stringify({
+      schemaVersion: 1,
+      namespace: "invoicegen-approved-drafts-v1",
+      reservations: [
+        {
+          numberPrefix: "INVBD",
+          invoiceNumber: "348",
+          idempotencyKey: "old-key",
+          requestSha256: "0".repeat(64),
+          approvalSha256: "1".repeat(64),
+          state: "draft-reserved",
+          reservationKind: "human-approved-iq-handoff",
+        },
+      ],
+    }),
+  );
+  await assert.rejects(runApprovedDraft(f), /invalid reservation/);
+});
+
+test("fails closed when persisted artifact or manifest evidence is missing", async () => {
+  const missingArtifact = await fixture();
+  const first = await runApprovedDraft(missingArtifact);
+  await unlink(first.artifactPath);
+  await assert.rejects(runApprovedDraft(missingArtifact), /ENOENT/);
+
+  const missingManifest = await fixture();
+  const second = await runApprovedDraft(missingManifest);
+  await unlink(second.manifestPath);
+  await assert.rejects(runApprovedDraft(missingManifest), /artifact exists without its audit manifest/);
 });
 
 test("prevents duplicate invoice-number reservations", async () => {
