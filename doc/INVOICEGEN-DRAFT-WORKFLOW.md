@@ -25,6 +25,7 @@ Create a JSON request with `state: "draft"`, a stable idempotency key, and norma
   "invoice": {
     "number": 348,
     "number_prefix": "INVBD",
+    "draft": true,
     "date": "2026-08-25",
     "client": {
       "bill_to": "Approved Client\nApproved address",
@@ -82,7 +83,7 @@ node scripts/invoicegen-approved-draft.mjs render \
   --invoicegen-bin /usr/local/bin/invoicegen
 ```
 
-The output is named `INVBD<number>-DRAFT.pdf`. The audit manifest records approval identity and exact hashes. Repeating the same approved request is idempotent. Reusing a number or idempotency key with different content fails closed.
+The output is named `INVBD<number>-DRAFT.pdf`. Every page is visibly marked `DRAFT — NOT ISSUED`, and the renderer uses `Draft Invoice` and `DRAFT DATE` labels. The audit manifest records approval identity and exact hashes. Repeating the same approved request is idempotent. Reusing a number or idempotency key with different content fails closed.
 
 ## Lock diagnosis
 

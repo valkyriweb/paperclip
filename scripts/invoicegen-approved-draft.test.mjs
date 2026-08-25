@@ -40,6 +40,7 @@ writeFileSync(output, Buffer.concat([Buffer.from("%PDF-approved-draft\\n"), read
       invoice: {
         number: 348,
         number_prefix: "INVBD",
+        draft: true,
         date: "2026-08-25",
         client: { bill_to: "Example Approved Client\n1 Main Road", ship_to: "", default_rate: 100 },
         po_number: null,

@@ -63,9 +63,10 @@ function validateRequest(request) {
   if (!/^[a-z0-9][a-z0-9-]{7,80}$/.test(request.idempotencyKey ?? "")) fail("invalid idempotencyKey");
 
   const invoice = request.invoice;
-  exactKeys(invoice, ["number", "number_prefix", "date", "client", "po_number", "notes", "tax_rate", "tax_note", "items"], "invoice");
+  exactKeys(invoice, ["number", "number_prefix", "draft", "date", "client", "po_number", "notes", "tax_rate", "tax_note", "items"], "invoice");
   if (!Number.isInteger(invoice.number) || invoice.number < 1 || invoice.number > 999_999) fail("invoice number must be an integer from 1 to 999999");
   if (invoice.number_prefix !== "INVBD") fail("invoice number_prefix must be INVBD");
+  if (invoice.draft !== true) fail("invoice.draft must be true so the PDF is visibly marked as not issued");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(invoice.date ?? "")) fail("invoice date must use YYYY-MM-DD");
   exactKeys(invoice.client, ["bill_to", "ship_to", "default_rate"], "invoice.client");
   if (!String(invoice.client.bill_to ?? "").trim()) fail("invoice.client.bill_to is required");
