@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, utimes, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { hostname, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 
@@ -180,7 +180,7 @@ test("reclaims a lock whose recorded owner process is dead", async () => {
   await mkdir(`${f.register}.lock`);
   await writeFile(
     join(`${f.register}.lock`, "owner.json"),
-    JSON.stringify({ schemaVersion: 1, pid: 2_147_483_647, hostname: "test-host" }),
+    JSON.stringify({ schemaVersion: 1, pid: 2_147_483_647, hostname: hostname() }),
   );
 
   const result = await run(f);
@@ -192,7 +192,7 @@ test("serializes contenders that reclaim the same stale lock", async () => {
   await mkdir(`${f.register}.lock`);
   await writeFile(
     join(`${f.register}.lock`, "owner.json"),
-    JSON.stringify({ schemaVersion: 1, pid: 2_147_483_647, hostname: "test-host" }),
+    JSON.stringify({ schemaVersion: 1, pid: 2_147_483_647, hostname: hostname() }),
   );
 
   const results = await Promise.all([run(f), run(f), run(f), run(f)]);
@@ -201,14 +201,20 @@ test("serializes contenders that reclaim the same stale lock", async () => {
   assert.equal(calls.trim().split("\n").length, 1);
 });
 
-test("reclaims an old ownerless lock left between lock creation and owner write", async () => {
+test("does not reclaim a lock owned on another host", async () => {
   const f = await fixture();
   const lockPath = `${f.register}.lock`;
   await mkdir(lockPath);
-  const old = new Date(Date.now() - 120_000);
-  await utimes(lockPath, old, old);
+  await writeFile(
+    join(lockPath, "owner.json"),
+    JSON.stringify({ schemaVersion: 1, pid: 2_147_483_647, hostname: "other-host", ownershipToken: "foreign" }),
+  );
 
-  const result = await run(f);
+  const pending = run(f);
+  await new Promise((resolveDelay) => setTimeout(resolveDelay, 75));
+  assert.equal(JSON.parse(await readFile(join(lockPath, "owner.json"), "utf8")).ownershipToken, "foreign");
+  await rm(lockPath, { recursive: true });
+  const result = await pending;
   assert.equal(result.idempotent, false);
 });
 

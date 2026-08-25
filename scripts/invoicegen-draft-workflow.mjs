@@ -29,7 +29,6 @@ const APPROVED_RENDERER_SHA256 = new Set([
 ]);
 const LOCK_RETRIES = 1_400;
 const LOCK_DELAY_MS = 25;
-const OWNERLESS_LOCK_STALE_MS = 60_000;
 
 function fail(message) {
   throw new Error(`invoicegen draft workflow: ${message}`);
@@ -202,26 +201,25 @@ async function readLockOwner(lockPath) {
 
 async function lockOwnerIsDead(lockPath) {
   const owner = await readLockOwner(lockPath);
-  if (owner) return owner.schemaVersion === 1 && !processIsAlive(owner.pid);
-  const lockStat = await stat(lockPath).catch(() => null);
-  return Boolean(lockStat && Date.now() - lockStat.mtimeMs >= OWNERLESS_LOCK_STALE_MS);
+  return Boolean(owner?.schemaVersion === 1 && owner.hostname === hostname() && !processIsAlive(owner.pid));
 }
 
-async function reclaimDeadOwnerLock(lockPath) {
-  const reclaimPath = `${lockPath}.reclaim`;
+async function acquireOwnedDirectory(lockPath) {
+  const ownershipToken = randomUUID();
+  const candidatePath = `${lockPath}.candidate-${ownershipToken}`;
+  await mkdir(candidatePath);
+  await writeFile(
+    join(candidatePath, "owner.json"),
+    canonicalJson({ schemaVersion: 1, pid: process.pid, hostname: hostname(), ownershipToken }),
+    { mode: 0o600 },
+  );
   try {
-    await mkdir(reclaimPath);
+    await rename(candidatePath, lockPath);
+    return ownershipToken;
   } catch (error) {
-    if (error.code === "EEXIST") return false;
+    await rm(candidatePath, { recursive: true, force: true });
+    if (error.code === "EEXIST" || error.code === "ENOTEMPTY") return null;
     throw error;
-  }
-
-  try {
-    if (!(await lockOwnerIsDead(lockPath))) return false;
-    await rm(lockPath, { recursive: true, force: true });
-    return true;
-  } finally {
-    await rm(reclaimPath, { recursive: true, force: true });
   }
 }
 
@@ -232,29 +230,29 @@ async function releaseOwnedLock(lockPath, ownershipToken) {
   }
 }
 
+async function reclaimDeadOwnerLock(lockPath) {
+  const reclaimPath = `${lockPath}.reclaim`;
+  const reclaimToken = await acquireOwnedDirectory(reclaimPath);
+  if (!reclaimToken) return false;
+
+  try {
+    if (!(await lockOwnerIsDead(lockPath))) return false;
+    await rm(lockPath, { recursive: true, force: true });
+    return true;
+  } finally {
+    await releaseOwnedLock(reclaimPath, reclaimToken);
+  }
+}
+
 async function withLock(registerPath, action) {
   const lockPath = `${registerPath}.lock`;
   await mkdir(dirname(registerPath), { recursive: true });
   for (let attempt = 0; attempt < LOCK_RETRIES; attempt += 1) {
-    try {
-      await mkdir(lockPath);
-    } catch (error) {
-      if (error.code !== "EEXIST") throw error;
+    const ownershipToken = await acquireOwnedDirectory(lockPath);
+    if (!ownershipToken) {
       if (await reclaimDeadOwnerLock(lockPath)) continue;
       await new Promise((resolveDelay) => setTimeout(resolveDelay, LOCK_DELAY_MS));
       continue;
-    }
-
-    const ownershipToken = randomUUID();
-    try {
-      await writeFile(
-        join(lockPath, "owner.json"),
-        canonicalJson({ schemaVersion: 1, pid: process.pid, hostname: hostname(), ownershipToken }),
-        { mode: 0o600 },
-      );
-    } catch (error) {
-      await rm(lockPath, { recursive: true, force: true });
-      throw error;
     }
 
     try {
