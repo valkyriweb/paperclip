@@ -187,6 +187,20 @@ test("reclaims a lock whose recorded owner process is dead", async () => {
   assert.equal(result.idempotent, false);
 });
 
+test("serializes contenders that reclaim the same stale lock", async () => {
+  const f = await fixture();
+  await mkdir(`${f.register}.lock`);
+  await writeFile(
+    join(`${f.register}.lock`, "owner.json"),
+    JSON.stringify({ schemaVersion: 1, pid: 2_147_483_647, hostname: "test-host" }),
+  );
+
+  const results = await Promise.all([run(f), run(f), run(f), run(f)]);
+  const calls = await readFile(f.calls, "utf8");
+  assert.equal(results.filter((result) => !result.idempotent).length, 1);
+  assert.equal(calls.trim().split("\n").length, 1);
+});
+
 test("reclaims an old ownerless lock left between lock creation and owner write", async () => {
   const f = await fixture();
   const lockPath = `${f.register}.lock`;

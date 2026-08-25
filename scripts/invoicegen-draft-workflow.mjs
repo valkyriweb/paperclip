@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
   chmod,
@@ -192,19 +192,44 @@ function processIsAlive(pid) {
   }
 }
 
-async function reclaimDeadOwnerLock(lockPath) {
-  let owner;
+async function readLockOwner(lockPath) {
   try {
-    owner = JSON.parse(await readFile(join(lockPath, "owner.json"), "utf8"));
+    return JSON.parse(await readFile(join(lockPath, "owner.json"), "utf8"));
   } catch {
-    const lockStat = await stat(lockPath).catch(() => null);
-    if (!lockStat || Date.now() - lockStat.mtimeMs < OWNERLESS_LOCK_STALE_MS) return false;
+    return null;
+  }
+}
+
+async function lockOwnerIsDead(lockPath) {
+  const owner = await readLockOwner(lockPath);
+  if (owner) return owner.schemaVersion === 1 && !processIsAlive(owner.pid);
+  const lockStat = await stat(lockPath).catch(() => null);
+  return Boolean(lockStat && Date.now() - lockStat.mtimeMs >= OWNERLESS_LOCK_STALE_MS);
+}
+
+async function reclaimDeadOwnerLock(lockPath) {
+  const reclaimPath = `${lockPath}.reclaim`;
+  try {
+    await mkdir(reclaimPath);
+  } catch (error) {
+    if (error.code === "EEXIST") return false;
+    throw error;
+  }
+
+  try {
+    if (!(await lockOwnerIsDead(lockPath))) return false;
     await rm(lockPath, { recursive: true, force: true });
     return true;
+  } finally {
+    await rm(reclaimPath, { recursive: true, force: true });
   }
-  if (owner.schemaVersion !== 1 || processIsAlive(owner.pid)) return false;
-  await rm(lockPath, { recursive: true, force: true });
-  return true;
+}
+
+async function releaseOwnedLock(lockPath, ownershipToken) {
+  const owner = await readLockOwner(lockPath);
+  if (owner?.ownershipToken === ownershipToken) {
+    await rm(lockPath, { recursive: true, force: true });
+  }
 }
 
 async function withLock(registerPath, action) {
@@ -220,15 +245,22 @@ async function withLock(registerPath, action) {
       continue;
     }
 
+    const ownershipToken = randomUUID();
     try {
       await writeFile(
         join(lockPath, "owner.json"),
-        canonicalJson({ schemaVersion: 1, pid: process.pid, hostname: hostname() }),
+        canonicalJson({ schemaVersion: 1, pid: process.pid, hostname: hostname(), ownershipToken }),
         { mode: 0o600 },
       );
+    } catch (error) {
+      await rm(lockPath, { recursive: true, force: true });
+      throw error;
+    }
+
+    try {
       return await action();
     } finally {
-      await rm(lockPath, { recursive: true, force: true });
+      await releaseOwnedLock(lockPath, ownershipToken);
     }
   }
   fail(`timed out acquiring coordinated number-register lock ${lockPath}`);
