@@ -6,8 +6,6 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 
-import { prepareApproval, runApprovedDraft } from "./invoicegen-approved-draft.mjs";
-
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "approved-invoice-"));
   const requestPath = join(root, "request.json");
@@ -31,7 +29,7 @@ writeFileSync(output, Buffer.concat([Buffer.from("%PDF-approved-draft\\n"), read
     { mode: 0o755 },
   );
   const rendererSha256 = createHash("sha256").update(await readFile(invoicegenBin)).digest("hex");
-  await writeFile(templateContractPath, JSON.stringify({ rendererRepo: "test", rendererVersion: "test", rendererCommit: "test", linuxAmd64ArchiveSha256: "a".repeat(64), linuxAmd64BinarySha256: rendererSha256, embeddedTemplatePath: "test", embeddedTemplateSha256: "b".repeat(64) }));
+  await writeFile(templateContractPath, JSON.stringify({ rendererRepo: "valkyriweb/invoicegen", rendererVersion: "v0.1.2-bermont.3", rendererCommit: "af2fb920801fe016e54da384d145da5fd1e67c41", linuxAmd64ArchiveSha256: "dd18719fc46c0bf26c0934445187942c591ceda5d714a020dc0effbbaeda0bee", linuxAmd64BinarySha256: rendererSha256, embeddedTemplatePath: "templates/invoice-minimal.typ", embeddedTemplateSha256: "d028fab9b96c14881708175d00cd5d29647afd2cd7f106f0748b62c53785e159" }));
   await writeFile(
     requestPath,
     JSON.stringify({
@@ -52,12 +50,18 @@ writeFileSync(output, Buffer.concat([Buffer.from("%PDF-approved-draft\\n"), read
       },
     }),
   );
-  const options = { requestPath, configPath, templateContractPath, invoicegenBin, registerPath, outputDir, testOnlyPaperclipaiBin: paperclipaiBin, approvalId: "approval-1", companyId: "bermont-company", approvalRecordPath, testOnlyUseFixtureContract: true };
-  const payload = await prepareApproval(options);
+  const workflowPath = join(root, "invoicegen-approved-draft.mjs");
+  const source = (await readFile(resolve("scripts/invoicegen-approved-draft.mjs"), "utf8"))
+    .replace('const cliScript = "/app/cli/dist/index.js";', `const cliScript = ${JSON.stringify(paperclipaiBin)};`)
+    .replace("907ce7ce767e82bbc9fd9d8a3dc1cf9cdf8c0d6dfe32e184aec9e161f0675ba5", rendererSha256);
+  await writeFile(workflowPath, source);
+  const workflow = await import(workflowPath);
+  const options = { requestPath, configPath, templateContractPath, invoicegenBin, registerPath, outputDir, approvalId: "approval-1", companyId: "bermont-company", approvalRecordPath };
+  const payload = await workflow.prepareApproval(options);
   Object.assign(payload.numberReservation, { reservedBy: "Luke", reservedAt: "2026-08-25T13:29:00Z", evidenceReference: "BER-400 human handoff", iqHandoff: "human-verified" });
   await writeFile(approvalRecordPath, JSON.stringify({ id: "approval-1", type: "request_board_approval", status: "approved", companyId: "bermont-company", decidedByUserId: "luke-user", decidedAt: "2026-08-25T13:30:00Z", payload }));
   await writeFile(paperclipaiBin, `#!/usr/bin/env node\nimport { readFileSync } from "node:fs";\nprocess.stdout.write(readFileSync(${JSON.stringify(approvalRecordPath)}, "utf8"));\n`, { mode: 0o755 });
-  return options;
+  return { ...options, ...workflow };
 }
 
 test("CLI rejects approval executable and profile overrides", () => {
@@ -70,7 +74,7 @@ test("CLI rejects approval executable and profile overrides", () => {
 
 test("prepares an approval packet bound to request, config, renderer, and template", async () => {
   const f = await fixture();
-  const approval = await prepareApproval(f);
+  const approval = await f.prepareApproval(f);
   assert.equal(approval.kind, "invoicegen-draft-v1");
   assert.equal(approval.numberReservation.numberPrefix, "INVBD");
   for (const key of ["requestSha256", "configSha256", "rendererSha256", "templateContractSha256"]) {
@@ -80,8 +84,8 @@ test("prepares an approval packet bound to request, config, renderer, and templa
 
 test("renders a real approved draft and retries idempotently", async () => {
   const f = await fixture();
-  const first = await runApprovedDraft(f);
-  const second = await runApprovedDraft(f);
+  const first = await f.runApprovedDraft(f);
+  const second = await f.runApprovedDraft(f);
   const manifest = JSON.parse(await readFile(first.manifestPath, "utf8"));
   const input = await readFile(join(dirname(first.manifestPath), "INVBD348.yaml"), "utf8");
   assert.equal(first.idempotent, false);
@@ -98,7 +102,7 @@ test("fails closed without exact approval", async () => {
   const approval = JSON.parse(await readFile(f.approvalRecordPath, "utf8"));
   approval.payload.requestSha256 = "0".repeat(64);
   await writeFile(f.approvalRecordPath, JSON.stringify(approval));
-  await assert.rejects(runApprovedDraft(f), /requestSha256 does not match/);
+  await assert.rejects(f.runApprovedDraft(f), /requestSha256 does not match/);
 });
 
 test("rejects issue or send states and fields", async () => {
@@ -106,17 +110,30 @@ test("rejects issue or send states and fields", async () => {
   const request = JSON.parse(await readFile(f.requestPath, "utf8"));
   request.state = "sent";
   await writeFile(f.requestPath, JSON.stringify(request));
-  await assert.rejects(runApprovedDraft(f), /state must be draft/);
+  await assert.rejects(f.runApprovedDraft(f), /state must be draft/);
+});
+
+test("requires the reviewed Bermont ZAR and INVBD config identity", async () => {
+  for (const [from, to, expected] of [
+    ["Bermont Digital", "Other Sender", /sender must identify Bermont Digital/],
+    ["currency: ZAR", "currency: USD", /currency must be ZAR/],
+    ["number_prefix: INVBD", "number_prefix: OTHER", /number_prefix must be INVBD/],
+  ]) {
+    const f = await fixture();
+    const config = await readFile(f.configPath, "utf8");
+    await writeFile(f.configPath, config.replace(from, to));
+    await assert.rejects(f.prepareApproval(f), expected);
+  }
 });
 
 test("requires approval from the configured company", async () => {
   const f = await fixture();
   const missingCompany = { ...f };
   delete missingCompany.companyId;
-  await assert.rejects(runApprovedDraft(missingCompany), /company-id is required/);
+  await assert.rejects(f.runApprovedDraft(missingCompany), /company-id is required/);
 
   const wrongCompany = { ...f, companyId: "other-company" };
-  await assert.rejects(runApprovedDraft(wrongCompany), /different company/);
+  await assert.rejects(f.runApprovedDraft(wrongCompany), /different company/);
 });
 
 test("rejects malformed number-register entries", async () => {
@@ -139,29 +156,29 @@ test("rejects malformed number-register entries", async () => {
       ],
     }),
   );
-  await assert.rejects(runApprovedDraft(f), /invalid reservation/);
+  await assert.rejects(f.runApprovedDraft(f), /invalid reservation/);
 });
 
 test("fails closed when persisted artifact or manifest evidence is missing", async () => {
   const missingArtifact = await fixture();
-  const first = await runApprovedDraft(missingArtifact);
+  const first = await missingArtifact.runApprovedDraft(missingArtifact);
   await unlink(first.artifactPath);
-  await assert.rejects(runApprovedDraft(missingArtifact), /ENOENT/);
+  await assert.rejects(missingArtifact.runApprovedDraft(missingArtifact), /ENOENT/);
 
   const missingManifest = await fixture();
-  const second = await runApprovedDraft(missingManifest);
+  const second = await missingManifest.runApprovedDraft(missingManifest);
   await unlink(second.manifestPath);
-  await assert.rejects(runApprovedDraft(missingManifest), /artifact exists without its audit manifest/);
+  await assert.rejects(missingManifest.runApprovedDraft(missingManifest), /artifact exists without its audit manifest/);
 });
 
 test("prevents duplicate invoice-number reservations", async () => {
   const first = await fixture();
-  await runApprovedDraft(first);
+  await first.runApprovedDraft(first);
   const request = JSON.parse(await readFile(first.requestPath, "utf8"));
   request.idempotencyKey = "invbd348-second-draft";
   await writeFile(first.requestPath, JSON.stringify(request));
-  const payload = await prepareApproval(first);
+  const payload = await first.prepareApproval(first);
   Object.assign(payload.numberReservation, { reservedBy: "Luke", reservedAt: "2026-08-25T13:39:00Z", evidenceReference: "BER-400 second", iqHandoff: "human-verified" });
   await writeFile(first.approvalRecordPath, JSON.stringify({ id: "approval-2", type: "request_board_approval", status: "approved", companyId: "bermont-company", decidedByUserId: "luke-user", decidedAt: "2026-08-25T13:40:00Z", payload }));
-  await assert.rejects(runApprovedDraft(first), /INVBD348 is already reserved/);
+  await assert.rejects(first.runApprovedDraft(first), /INVBD348 is already reserved/);
 });

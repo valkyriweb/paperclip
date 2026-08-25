@@ -85,20 +85,45 @@ function validateRequest(request) {
   }
 }
 
-function validateTemplateContract(contract, rendererSha256, testOnly = false) {
+function validateTemplateContract(contract, rendererSha256) {
   exactKeys(contract, ["rendererRepo", "rendererVersion", "rendererCommit", "linuxAmd64ArchiveSha256", "linuxAmd64BinarySha256", "embeddedTemplatePath", "embeddedTemplateSha256"], "templateContract");
-  if (testOnly && process.env.NODE_TEST_CONTEXT && contract.linuxAmd64BinarySha256 === rendererSha256) return;
   if (contract.rendererRepo !== "valkyriweb/invoicegen" || contract.rendererVersion !== "v0.1.2-bermont.3" || contract.rendererCommit !== "af2fb920801fe016e54da384d145da5fd1e67c41") fail("template contract does not identify the approved Invoicegen release");
-  if (contract.linuxAmd64ArchiveSha256 !== "dd18719fc46c0bf26c0934445187942c591ceda5d714a020dc0effbbaeda0bee" || contract.embeddedTemplateSha256 !== "d028fab9b96c14881708175d00cd5d29647afd2cd7f106f0748b62c53785e159") fail("template contract hashes do not match the approved release");
+  if (contract.linuxAmd64ArchiveSha256 !== "dd18719fc46c0bf26c0934445187942c591ceda5d714a020dc0effbbaeda0bee" || contract.linuxAmd64BinarySha256 !== "907ce7ce767e82bbc9fd9d8a3dc1cf9cdf8c0d6dfe32e184aec9e161f0675ba5" || contract.embeddedTemplateSha256 !== "d028fab9b96c14881708175d00cd5d29647afd2cd7f106f0748b62c53785e159") fail("template contract hashes do not match the approved release");
   if (contract.linuxAmd64BinarySha256 !== rendererSha256) fail("renderer binary does not match the approved template contract");
 }
 
-function validateApprovalPayload(payload, hashes, request) {
-  exactKeys(payload, ["schemaVersion", "kind", "requestSha256", "configSha256", "rendererSha256", "templateContractSha256", "numberReservation"], "approval.payload");
+function configScalar(configText, section, key) {
+  const lines = configText.split(/\r?\n/);
+  const sectionIndex = lines.findIndex((line) => new RegExp(`^${section}:\\s*(?:#.*)?$`).test(line));
+  if (sectionIndex < 0) fail(`config.${section} is required`);
+  for (let index = sectionIndex + 1; index < lines.length; index += 1) {
+    if (/^\S/.test(lines[index])) break;
+    const match = lines[index].match(new RegExp(`^\\s+${key}:\\s*([^#]+?)\\s*(?:#.*)?$`));
+    if (match) return match[1].trim().replace(/^(["'])(.*)\1$/, "$2");
+  }
+  fail(`config.${section}.${key} is required`);
+}
+
+function validateBermontConfig(configText) {
+  const identity = {
+    senderName: configScalar(configText, "sender", "name"),
+    currency: configScalar(configText, "defaults", "currency"),
+    numberPrefix: configScalar(configText, "defaults", "number_prefix"),
+  };
+  if (!/^Bermont Digital(?:\b|\s|\()/.test(identity.senderName)) fail("config sender must identify Bermont Digital");
+  if (identity.currency !== "ZAR") fail("config defaults.currency must be ZAR");
+  if (identity.numberPrefix !== "INVBD") fail("config defaults.number_prefix must be INVBD");
+  return identity;
+}
+
+function validateApprovalPayload(payload, hashes, request, configIdentity) {
+  exactKeys(payload, ["schemaVersion", "kind", "requestSha256", "configSha256", "rendererSha256", "templateContractSha256", "configIdentity", "numberReservation"], "approval.payload");
   if (payload.schemaVersion !== 1 || payload.kind !== "invoicegen-draft-v1") fail("approval payload kind must be invoicegen-draft-v1");
   for (const key of ["requestSha256", "configSha256", "rendererSha256", "templateContractSha256"]) {
     if (payload[key] !== hashes[key]) fail(`approval ${key} does not match the exact approved input`);
   }
+  exactKeys(payload.configIdentity, ["senderName", "currency", "numberPrefix"], "approval.payload.configIdentity");
+  if (canonicalJson(payload.configIdentity) !== canonicalJson(configIdentity)) fail("approval configIdentity does not match the reviewed Bermont config");
   const reservation = payload.numberReservation;
   exactKeys(reservation, ["numberPrefix", "invoiceNumber", "reservedBy", "reservedAt", "evidenceReference", "iqHandoff"], "approval.payload.numberReservation");
   if (reservation.numberPrefix !== request.invoice.number_prefix || reservation.invoiceNumber !== request.invoice.number) fail("approval number reservation does not match the invoice");
@@ -109,9 +134,7 @@ function validateApprovalPayload(payload, hashes, request) {
 }
 
 function fetchPaperclipApproval(options) {
-  const cliScript = process.env.NODE_TEST_CONTEXT && options.testOnlyPaperclipaiBin
-    ? options.testOnlyPaperclipaiBin
-    : "/app/cli/dist/index.js";
+  const cliScript = "/app/cli/dist/index.js";
   const args = [cliScript, "approval", "get", options.approvalId, "--profile", "bermont", "--json"];
   const result = spawnSync(process.execPath, args, { encoding: "utf8", timeout: 15_000 });
   if (result.error || result.status !== 0) fail(result.error ? `could not query Paperclip approval: ${result.error.message}` : `Paperclip approval query exited ${result.status}`);
@@ -202,11 +225,13 @@ export async function prepareApproval(options) {
     rendererSha256: await sha256File(resolve(options.invoicegenBin)),
     templateContractSha256: await sha256File(contractPath),
   };
-  validateTemplateContract(await readJson(contractPath, "template contract"), hashes.rendererSha256, options.testOnlyUseFixtureContract === true);
+  validateTemplateContract(await readJson(contractPath, "template contract"), hashes.rendererSha256);
+  const configIdentity = validateBermontConfig(await readFile(resolve(options.configPath), "utf8"));
   return {
     schemaVersion: 1,
     kind: "invoicegen-draft-v1",
     ...hashes,
+    configIdentity,
     numberReservation: { numberPrefix: request.invoice.number_prefix, invoiceNumber: request.invoice.number, reservedBy: "", reservedAt: "", evidenceReference: "", iqHandoff: "pending-human-verification" },
   };
 }
@@ -232,12 +257,13 @@ export async function runApprovedDraft(options) {
     rendererSha256: await sha256File(invoicegenBin),
     templateContractSha256: await sha256File(templateContractPath),
   };
-  validateTemplateContract(await readJson(templateContractPath, "template contract"), hashes.rendererSha256, options.testOnlyUseFixtureContract === true);
+  validateTemplateContract(await readJson(templateContractPath, "template contract"), hashes.rendererSha256);
+  const configIdentity = validateBermontConfig(await readFile(configPath, "utf8"));
   const approval = fetchPaperclipApproval(options);
   if (approval.status !== "approved" || approval.type !== "request_board_approval") fail("Paperclip approval must be an approved request_board_approval record");
   if (!approval.decidedByUserId || !approval.decidedAt) fail("Paperclip approval must have a human decision actor and time");
   if (approval.companyId !== options.companyId) fail("Paperclip approval belongs to a different company");
-  validateApprovalPayload(approval.payload, hashes, request);
+  validateApprovalPayload(approval.payload, hashes, request, configIdentity);
   hashes.approvalSha256 = sha256(canonicalJson(approval));
   await reserveNumber(registerPath, request, hashes.approvalSha256, hashes.requestSha256);
 

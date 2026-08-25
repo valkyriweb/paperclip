@@ -54,7 +54,7 @@ node scripts/invoicegen-approved-draft.mjs prepare-approval \
   > approval-payload.json
 ```
 
-This packet binds the exact request, sender config, renderer, and template contract hashes. A human fills in `reservedBy`, `reservedAt`, `evidenceReference`, and `iqHandoff: "human-verified"`. The operator then creates a Paperclip approval:
+This packet binds the exact request, sender config, renderer, and template contract hashes. It also exposes the reviewed config identity (`senderName`, `currency`, and `numberPrefix`); the workflow requires a Bermont Digital sender, `ZAR`, and `INVBD`. A human fills in `reservedBy`, `reservedAt`, `evidenceReference`, and `iqHandoff: "human-verified"`. The operator then creates a Paperclip approval:
 
 ```sh
 paperclipai approval create --profile bermont \

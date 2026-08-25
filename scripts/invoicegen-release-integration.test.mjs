@@ -6,8 +6,6 @@ import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 
-import { prepareApproval, runApprovedDraft } from "./invoicegen-approved-draft.mjs";
-
 const renderer = process.env.INVOICEGEN_INTEGRATION_BIN;
 
 test("pinned Invoicegen release renders visible draft markings", { skip: !renderer }, async () => {
@@ -23,7 +21,6 @@ test("pinned Invoicegen release renders visible draft markings", { skip: !render
     invoicegenBin: resolve(renderer),
     registerPath: join(root, "register.json"),
     outputDir: join(root, "out"),
-    testOnlyPaperclipaiBin: paperclipaiBin,
     approvalId: "release-integration-approval",
     companyId: "bermont-company",
   };
@@ -47,6 +44,11 @@ test("pinned Invoicegen release renders visible draft markings", { skip: !render
       items,
     },
   }));
+  const workflowPath = join(root, "invoicegen-approved-draft.mjs");
+  const source = (await readFile(resolve("scripts/invoicegen-approved-draft.mjs"), "utf8"))
+    .replace('const cliScript = "/app/cli/dist/index.js";', `const cliScript = ${JSON.stringify(paperclipaiBin)};`);
+  await writeFile(workflowPath, source);
+  const { prepareApproval, runApprovedDraft } = await import(workflowPath);
   const payload = await prepareApproval(options);
   Object.assign(payload.numberReservation, {
     reservedBy: "Integration Operator",
