@@ -11,6 +11,7 @@ async function fixture() {
   const requestPath = join(root, "request.json");
   const approvalRecordPath = join(root, "approval-record.json");
   const approvalTracePath = join(root, "approval-trace.json");
+  const mutateConfigSentinel = join(root, "mutate-config-during-approval");
   const paperclipaiBin = join(root, "paperclipai.mjs");
   const configPath = join(root, "config.yaml");
   const logoPath = join(root, "logo.svg");
@@ -65,8 +66,8 @@ writeFileSync(output, Buffer.concat([Buffer.from("%PDF-approved-draft\\n"), read
   const payload = await workflow.prepareApproval(options);
   Object.assign(payload.numberReservation, { reservedBy: "Luke", reservedAt: "2026-08-25T13:29:00Z", evidenceReference: "BER-400 human handoff", iqHandoff: "human-verified" });
   await writeFile(approvalRecordPath, JSON.stringify({ id: "approval-1", type: "request_board_approval", status: "approved", companyId: "bermont-company", decidedByUserId: "luke-user", decidedAt: "2026-08-25T13:30:00Z", payload }));
-  await writeFile(paperclipaiBin, `#!/usr/bin/env node\nimport { readFileSync, writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(approvalTracePath)}, JSON.stringify({ argv: process.argv.slice(2), apiUrl: process.env.PAPERCLIP_API_URL ?? null, context: process.env.PAPERCLIP_CONTEXT ?? null, cwd: process.cwd() }));\nprocess.stdout.write(readFileSync(${JSON.stringify(approvalRecordPath)}, "utf8"));\n`, { mode: 0o755 });
-  return { ...options, approvalTracePath, logoPath, ...workflow };
+  await writeFile(paperclipaiBin, `#!/usr/bin/env node\nimport { existsSync, readFileSync, writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(approvalTracePath)}, JSON.stringify({ argv: process.argv.slice(2), apiUrl: process.env.PAPERCLIP_API_URL ?? null, context: process.env.PAPERCLIP_CONTEXT ?? null, cwd: process.cwd() }));\nif (existsSync(${JSON.stringify(mutateConfigSentinel)})) writeFileSync(${JSON.stringify(configPath)}, "sender:\\n  name: Attacker\\ndefaults:\\n  currency: USD\\n  number_prefix: BAD\\n");\nprocess.stdout.write(readFileSync(${JSON.stringify(approvalRecordPath)}, "utf8"));\n`, { mode: 0o755 });
+  return { ...options, approvalTracePath, logoPath, mutateConfigSentinel, ...workflow };
 }
 
 test("CLI rejects approval executable and profile overrides", () => {
@@ -101,6 +102,17 @@ test("approval lookup ignores redirecting environment and uses the trusted API b
   assert.equal(trace.apiUrl, null);
   assert.equal(trace.context, null);
   assert.deepEqual(trace.argv.slice(3, 5), ["--api-base", "http://127.0.0.1:3100"]);
+});
+
+test("renders only the config bytes captured before approval lookup", async () => {
+  const f = await fixture();
+  await writeFile(f.mutateConfigSentinel, "swap config");
+  const result = await f.runApprovedDraft(f);
+  const sourceConfig = await readFile(f.configPath, "utf8");
+  const stagedConfig = await readFile(join(dirname(result.manifestPath), ".config", "invoicegen", "config.yaml"), "utf8");
+  assert.match(sourceConfig, /Attacker/);
+  assert.match(stagedConfig, /Bermont Digital/);
+  assert.doesNotMatch(stagedConfig, /Attacker/);
 });
 
 test("prepares an approval packet bound to request, config, renderer, and template", async () => {

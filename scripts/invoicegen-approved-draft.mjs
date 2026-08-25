@@ -239,14 +239,15 @@ export async function prepareApproval(options) {
   const request = await readJson(resolve(options.requestPath), "request");
   validateRequest(request);
   const contractPath = resolve(options.templateContractPath);
+  const configBuffer = await readFile(resolve(options.configPath));
   const hashes = {
     requestSha256: sha256(canonicalJson(request)),
-    configSha256: await sha256File(resolve(options.configPath)),
+    configSha256: sha256(configBuffer),
     rendererSha256: await sha256File(resolve(options.invoicegenBin)),
     templateContractSha256: await sha256File(contractPath),
   };
   validateTemplateContract(await readJson(contractPath, "template contract"), hashes.rendererSha256);
-  const { identity: configIdentity } = await validateBermontConfig(await readFile(resolve(options.configPath), "utf8"));
+  const { identity: configIdentity } = await validateBermontConfig(configBuffer.toString("utf8"));
   hashes.logoSha256 = configIdentity.logoSha256;
   return {
     schemaVersion: 1,
@@ -272,14 +273,15 @@ export async function runApprovedDraft(options) {
   const outputDir = resolve(options.outputDir);
   const request = await readJson(requestPath, "request");
   validateRequest(request);
+  const configBuffer = await readFile(configPath);
+  const configText = configBuffer.toString("utf8");
   const hashes = {
     requestSha256: sha256(canonicalJson(request)),
-    configSha256: await sha256File(configPath),
+    configSha256: sha256(configBuffer),
     rendererSha256: await sha256File(invoicegenBin),
     templateContractSha256: await sha256File(templateContractPath),
   };
   validateTemplateContract(await readJson(templateContractPath, "template contract"), hashes.rendererSha256);
-  const configText = await readFile(configPath, "utf8");
   const { identity: configIdentity, logoPath } = await validateBermontConfig(configText);
   hashes.logoSha256 = configIdentity.logoSha256;
   const approval = fetchPaperclipApproval(options);
@@ -327,7 +329,7 @@ export async function runApprovedDraft(options) {
   await mkdir(dirname(stagedRenderer), { recursive: true });
   const stagedConfig = join(configHome, "config.yaml");
   const stagedLogo = join(configHome, "logo.svg");
-  if ((await sha256File(configPath)) !== hashes.configSha256 || (logoPath && (await sha256File(logoPath)) !== hashes.logoSha256)) fail("approved config or logo changed before staging");
+  if (logoPath && (await sha256File(logoPath)) !== hashes.logoSha256) fail("approved logo changed before staging");
   if (logoPath) {
     await copyFile(logoPath, stagedLogo);
     await chmod(stagedLogo, 0o600);
