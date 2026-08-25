@@ -20,6 +20,8 @@ import {
   getPostgresDataDirectory,
   inspectMigrations,
   applyPendingMigrations,
+  MigrationCoordinator,
+  type MigrationCoordinatorState,
   createEmbeddedPostgresLogBuffer,
   prepareEmbeddedPostgresNativeRuntime,
   reconcilePendingMigrationHistory,
@@ -352,7 +354,33 @@ export async function startServer(): Promise<StartedServer> {
   assertCloudDatabaseContract();
   if (config.databaseUrl) {
     const migrationUrl = config.databaseMigrationUrl ?? config.databaseUrl;
-    migrationSummary = await ensureMigrations(migrationUrl, "PostgreSQL");
+    if (config.deploymentProfile === "multi_replica") {
+      const coordinator = new MigrationCoordinator(migrationUrl);
+      const { value, metadata } = await coordinator.withExclusiveMigrationLock(
+        () => ensureMigrations(migrationUrl, "PostgreSQL"),
+        {
+          timeoutMs: config.migrationLockTimeoutMs,
+          onStateChange: (state: MigrationCoordinatorState) => {
+            logger.info(
+              { migrationState: state, migrationLockId: coordinator.lockId },
+              "multi-replica migration coordination state changed",
+            );
+          },
+        },
+      );
+      migrationSummary = value;
+      logger.info(
+        {
+          migrationLockId: metadata.lockId,
+          migrationLockWaited: metadata.waited,
+          migrationLockWaitMs: metadata.waitMs,
+          migrationDurationMs: metadata.durationMs,
+        },
+        "multi-replica migration coordination complete",
+      );
+    } else {
+      migrationSummary = await ensureMigrations(migrationUrl, "PostgreSQL");
+    }
   
     db = createDb(config.databaseUrl);
     // Dedicated single-connection client for the health probe so main-pool

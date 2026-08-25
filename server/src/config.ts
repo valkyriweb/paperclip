@@ -1,9 +1,10 @@
 import { readConfigFile } from "./config-file.js";
 import { execFileSync } from "node:child_process";
-import { existsSync, realpathSync } from "node:fs";
-import { resolve } from "node:path";
-import { config as loadDotenv } from "dotenv";
-import { resolvePaperclipEnvPath } from "./paths.js";
+import {
+  loadDatabaseEnvironment,
+  resolveDatabaseEnvironment,
+  resolveDefinedDatabaseUrl,
+} from "@paperclipai/db/runtime-config";
 import { maybeRepairLegacyWorktreeConfigAndEnvFiles } from "./worktree-config.js";
 import {
   AUTH_BASE_URL_MODES,
@@ -22,6 +23,7 @@ import {
   resolveRuntimeBind,
   validateConfiguredBindMode,
 } from "@paperclipai/shared";
+import { resolveMigrationConfig, type DeploymentProfile } from "@paperclipai/db/migration-config";
 import {
   resolveDefaultBackupDir,
   resolveDefaultEmbeddedPostgresDir,
@@ -30,19 +32,7 @@ import {
   resolveHomeAwarePath,
 } from "./home-paths.js";
 
-const PAPERCLIP_ENV_FILE_PATH = resolvePaperclipEnvPath();
-if (existsSync(PAPERCLIP_ENV_FILE_PATH)) {
-  loadDotenv({ path: PAPERCLIP_ENV_FILE_PATH, override: false, quiet: true });
-}
-
-const CWD_ENV_PATH = resolve(process.cwd(), ".env");
-const isSameFile = existsSync(CWD_ENV_PATH) && existsSync(PAPERCLIP_ENV_FILE_PATH)
-  ? realpathSync(CWD_ENV_PATH) === realpathSync(PAPERCLIP_ENV_FILE_PATH)
-  : CWD_ENV_PATH === PAPERCLIP_ENV_FILE_PATH;
-if (!isSameFile && existsSync(CWD_ENV_PATH)) {
-  loadDotenv({ path: CWD_ENV_PATH, override: false, quiet: true });
-}
-
+loadDatabaseEnvironment();
 maybeRepairLegacyWorktreeConfigAndEnvFiles();
 
 const TAILSCALE_DETECT_TIMEOUT_MS = 3000;
@@ -85,8 +75,11 @@ function clampIntEnv(
 const RUN_RESULT_RETENTION_MAX_BATCH_SIZE = 5_000;
 
 type DatabaseMode = "embedded-postgres" | "postgres";
+export type { DeploymentProfile } from "@paperclipai/db/migration-config";
 
 export interface Config {
+  deploymentProfile: DeploymentProfile;
+  migrationLockTimeoutMs: number;
   deploymentMode: DeploymentMode;
   deploymentExposure: DeploymentExposure;
   bind: BindMode;
@@ -371,6 +364,19 @@ export function loadConfig(): Config {
       fileDatabaseBackup?.dir ??
       resolveDefaultBackupDir(),
   );
+  const databaseEnvironment = resolveDatabaseEnvironment();
+  const databaseUrl = resolveDefinedDatabaseUrl(databaseEnvironment, "DATABASE_URL") ?? fileDbUrl;
+  const databaseMigrationUrl = resolveDefinedDatabaseUrl(
+    databaseEnvironment,
+    "DATABASE_MIGRATION_URL",
+  );
+  const migrationConfig = resolveMigrationConfig(
+    databaseEnvironment,
+    databaseUrl,
+    databaseMigrationUrl,
+  );
+  const { deploymentProfile, lockTimeoutMs: migrationLockTimeoutMs } = migrationConfig;
+
   const bindValidationErrors = validateConfiguredBindMode({
     deploymentMode,
     deploymentExposure,
@@ -392,6 +398,8 @@ export function loadConfig(): Config {
   }
 
   return {
+    deploymentProfile,
+    migrationLockTimeoutMs,
     deploymentMode,
     deploymentExposure,
     bind: resolvedBind.bind,
@@ -403,8 +411,8 @@ export function loadConfig(): Config {
     authPublicBaseUrl,
     authDisableSignUp,
     databaseMode: fileDatabaseMode,
-    databaseUrl: process.env.DATABASE_URL ?? fileDbUrl,
-    databaseMigrationUrl: process.env.DATABASE_MIGRATION_URL,
+    databaseUrl,
+    databaseMigrationUrl,
     embeddedPostgresDataDir: resolveHomeAwarePath(
       fileConfig?.database.embeddedPostgresDataDir ?? resolveDefaultEmbeddedPostgresDir(),
     ),

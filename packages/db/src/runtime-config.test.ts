@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { resolveMigrationConnection } from "./migration-runtime.js";
 import { resolveDatabaseTarget } from "./runtime-config.js";
 
 const ORIGINAL_CWD = process.cwd();
@@ -29,6 +30,204 @@ afterEach(() => {
 });
 
 describe("resolveDatabaseTarget", () => {
+  it("uses DATABASE_MIGRATION_URL first for migration commands", () => {
+    process.env.DATABASE_URL = "postgres://app@pooler.example.com:6543/paperclip";
+    process.env.DATABASE_MIGRATION_URL = "postgres://migrator@primary.example.com:5432/paperclip";
+
+    const target = resolveDatabaseTarget({ preferMigrationUrl: true });
+
+    expect(target).toMatchObject({
+      mode: "postgres",
+      connectionString: "postgres://migrator@primary.example.com:5432/paperclip",
+      source: "DATABASE_MIGRATION_URL",
+    });
+  });
+
+  it.each([
+    { key: "DATABASE_URL", value: "" },
+    { key: "DATABASE_URL", value: "  \t  " },
+    { key: "DATABASE_MIGRATION_URL", value: "" },
+    { key: "DATABASE_MIGRATION_URL", value: "  \t  " },
+  ] as const)("fails closed for a defined-blank process $key", async ({ key, value }) => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "paperclip-db-runtime-"));
+    const configPath = path.join(tempDir, "instance", "config.json");
+    process.env.PAPERCLIP_CONFIG = configPath;
+    for (const envKey of [
+      "PAPERCLIP_DEPLOYMENT_PROFILE",
+      "DATABASE_URL",
+      "DATABASE_MIGRATION_URL",
+      "DATABASE_MIGRATION_SESSION_CAPABLE",
+      "PAPERCLIP_MIGRATION_LOCK_TIMEOUT_MS",
+    ]) delete process.env[envKey];
+    writeText(
+      path.join(path.dirname(configPath), ".env"),
+      "PAPERCLIP_DEPLOYMENT_PROFILE=multi_replica\n" +
+        "DATABASE_URL=postgres://lower-runtime@runtime.example.com/paperclip\n" +
+        "DATABASE_MIGRATION_URL=postgres://lower-migration@migration.example.com/paperclip\n" +
+        "DATABASE_MIGRATION_SESSION_CAPABLE=true\n",
+    );
+    process.env[key] = value;
+
+    await expect(resolveMigrationConnection()).rejects.toThrow(
+      `${key} must not be blank when defined`,
+    );
+  });
+
+  it.each([
+    { key: "DATABASE_URL", value: "''" },
+    { key: "DATABASE_URL", value: "'  \t  '" },
+    { key: "DATABASE_MIGRATION_URL", value: "''" },
+    { key: "DATABASE_MIGRATION_URL", value: "'  \t  '" },
+  ] as const)("does not fall through a defined-blank config-adjacent $key", async ({ key, value }) => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "paperclip-db-runtime-"));
+    const projectDir = path.join(tempDir, "repo");
+    const configPath = path.join(projectDir, ".paperclip", "config.json");
+    fs.mkdirSync(projectDir, { recursive: true });
+    process.chdir(projectDir);
+    process.env.PAPERCLIP_CONFIG = configPath;
+    for (const envKey of [
+      "PAPERCLIP_DEPLOYMENT_PROFILE",
+      "DATABASE_URL",
+      "DATABASE_MIGRATION_URL",
+      "DATABASE_MIGRATION_SESSION_CAPABLE",
+      "PAPERCLIP_MIGRATION_LOCK_TIMEOUT_MS",
+    ]) delete process.env[envKey];
+    writeText(
+      path.join(projectDir, ".env"),
+      "DATABASE_URL=postgres://cwd-runtime@runtime.example.com/paperclip\n" +
+        "DATABASE_MIGRATION_URL=postgres://cwd-migration@migration.example.com/paperclip\n",
+    );
+    writeText(
+      path.join(path.dirname(configPath), ".env"),
+      "PAPERCLIP_DEPLOYMENT_PROFILE=multi_replica\n" +
+        "DATABASE_MIGRATION_SESSION_CAPABLE=true\n" +
+        `${key}=${value}\n`,
+    );
+
+    await expect(resolveMigrationConnection()).rejects.toThrow(
+      `${key} must not be blank when defined`,
+    );
+  });
+
+  it("uses DATABASE_MIGRATION_URL from repo-local .paperclip/.env", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "paperclip-db-runtime-"));
+    const projectDir = path.join(tempDir, "repo");
+    fs.mkdirSync(projectDir, { recursive: true });
+    process.chdir(projectDir);
+    delete process.env.PAPERCLIP_CONFIG;
+    delete process.env.DATABASE_URL;
+    delete process.env.DATABASE_MIGRATION_URL;
+    writeJson(path.join(projectDir, ".paperclip", "config.json"), {
+      database: { mode: "embedded-postgres", embeddedPostgresPort: 54329 },
+    });
+    writeText(
+      path.join(projectDir, ".paperclip", ".env"),
+      "PAPERCLIP_DEPLOYMENT_PROFILE=multi_replica\n" +
+        "DATABASE_URL=postgres://app@pooler.example.com:6543/paperclip\n" +
+        "DATABASE_MIGRATION_URL=postgres://migrator@primary.example.com:5432/paperclip\n" +
+        "DATABASE_MIGRATION_SESSION_CAPABLE=true\n" +
+        "PAPERCLIP_MIGRATION_LOCK_TIMEOUT_MS=90000\n",
+    );
+
+    const target = resolveDatabaseTarget({ preferMigrationUrl: true });
+
+    expect(target).toMatchObject({
+      mode: "postgres",
+      connectionString: "postgres://migrator@primary.example.com:5432/paperclip",
+      source: "paperclip-env:DATABASE_MIGRATION_URL",
+    });
+  });
+
+  it("shares CWD root env URL, profile, attestation, and timeout with migration commands", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "paperclip-db-runtime-"));
+    const projectDir = path.join(tempDir, "repo");
+    fs.mkdirSync(projectDir, { recursive: true });
+    process.chdir(projectDir);
+    for (const key of [
+      "PAPERCLIP_CONFIG",
+      "PAPERCLIP_DEPLOYMENT_PROFILE",
+      "DATABASE_URL",
+      "DATABASE_MIGRATION_URL",
+      "DATABASE_MIGRATION_SESSION_CAPABLE",
+      "PAPERCLIP_MIGRATION_LOCK_TIMEOUT_MS",
+    ]) delete process.env[key];
+    writeJson(path.join(projectDir, ".paperclip", "config.json"), {
+      database: {
+        mode: "postgres",
+        connectionString: "postgres://config@fallback.example.com:5432/paperclip",
+      },
+    });
+    writeText(
+      path.join(projectDir, ".env"),
+      "PAPERCLIP_DEPLOYMENT_PROFILE=multi_replica\n" +
+        "DATABASE_URL=postgres://app@pooler.example.com:6543/paperclip\n" +
+        "DATABASE_MIGRATION_URL=postgres://migrator@primary.example.com:5432/paperclip\n" +
+        "DATABASE_MIGRATION_SESSION_CAPABLE=true\n" +
+        "PAPERCLIP_MIGRATION_LOCK_TIMEOUT_MS=91000\n",
+    );
+
+    const connection = await resolveMigrationConnection();
+
+    expect(connection).toMatchObject({
+      mode: "postgres",
+      connectionString: "postgres://migrator@primary.example.com:5432/paperclip",
+      source: "cwd-env:DATABASE_MIGRATION_URL",
+      lockTimeoutMs: 91_000,
+    });
+  });
+
+  it("keeps process env above config-adjacent and CWD env", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "paperclip-db-runtime-"));
+    const projectDir = path.join(tempDir, "repo");
+    fs.mkdirSync(projectDir, { recursive: true });
+    process.chdir(projectDir);
+    writeJson(path.join(projectDir, ".paperclip", "config.json"), { database: { mode: "postgres" } });
+    writeText(path.join(projectDir, ".env"), "DATABASE_URL=postgres://cwd@cwd.example.com/paperclip\n");
+    writeText(
+      path.join(projectDir, ".paperclip", ".env"),
+      "DATABASE_URL=postgres://paperclip@paperclip.example.com/paperclip\n",
+    );
+    process.env.DATABASE_URL = "postgres://process@process.example.com/paperclip";
+
+    expect(resolveDatabaseTarget()).toMatchObject({
+      connectionString: "postgres://process@process.example.com/paperclip",
+      source: "DATABASE_URL",
+    });
+  });
+
+  it("shares repo-local multi-replica validation and timeout with migration commands", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "paperclip-db-runtime-"));
+    const projectDir = path.join(tempDir, "repo");
+    fs.mkdirSync(projectDir, { recursive: true });
+    process.chdir(projectDir);
+    delete process.env.PAPERCLIP_CONFIG;
+    delete process.env.PAPERCLIP_DEPLOYMENT_PROFILE;
+    delete process.env.DATABASE_URL;
+    delete process.env.DATABASE_MIGRATION_URL;
+    delete process.env.DATABASE_MIGRATION_SESSION_CAPABLE;
+    delete process.env.PAPERCLIP_MIGRATION_LOCK_TIMEOUT_MS;
+    writeJson(path.join(projectDir, ".paperclip", "config.json"), {
+      database: { mode: "postgres" },
+    });
+    writeText(
+      path.join(projectDir, ".paperclip", ".env"),
+      "PAPERCLIP_DEPLOYMENT_PROFILE=multi_replica\n" +
+        "DATABASE_URL=postgres://app@pooler.example.com:6543/paperclip\n" +
+        "DATABASE_MIGRATION_URL=postgres://migrator@primary.example.com:5432/paperclip\n" +
+        "DATABASE_MIGRATION_SESSION_CAPABLE=true\n" +
+        "PAPERCLIP_MIGRATION_LOCK_TIMEOUT_MS=90000\n",
+    );
+
+    const connection = await resolveMigrationConnection();
+
+    expect(connection).toMatchObject({
+      mode: "postgres",
+      connectionString: "postgres://migrator@primary.example.com:5432/paperclip",
+      source: "paperclip-env:DATABASE_MIGRATION_URL",
+      lockTimeoutMs: 90_000,
+    });
+  });
+
   it("uses DATABASE_URL from process env first", () => {
     process.env.DATABASE_URL = "postgres://env-user:env-pass@db.example.com:5432/paperclip";
 

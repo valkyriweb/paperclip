@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import {
   expandHomePrefix,
@@ -24,7 +24,14 @@ export type ResolvedDatabaseTarget =
   | {
       mode: "postgres";
       connectionString: string;
-      source: "DATABASE_URL" | "paperclip-env" | "config.database.connectionString";
+      source:
+        | "DATABASE_MIGRATION_URL"
+        | "paperclip-env:DATABASE_MIGRATION_URL"
+        | "cwd-env:DATABASE_MIGRATION_URL"
+        | "DATABASE_URL"
+        | "paperclip-env"
+        | "cwd-env"
+        | "config.database.connectionString";
       configPath: string;
       envPath: string;
     }
@@ -99,6 +106,67 @@ function parseEnvFile(contents: string): Record<string, string> {
 function readEnvEntries(envPath: string): Record<string, string> {
   if (!existsSync(envPath)) return {};
   return parseEnvFile(readFileSync(envPath, "utf8"));
+}
+
+function sameFile(firstPath: string, secondPath: string): boolean {
+  if (!existsSync(firstPath) || !existsSync(secondPath)) return firstPath === secondPath;
+  return realpathSync(firstPath) === realpathSync(secondPath);
+}
+
+export type DatabaseEnvironment = Record<string, string | undefined>;
+export type DatabaseUrlEnvironmentKey = "DATABASE_URL" | "DATABASE_MIGRATION_URL";
+
+export interface DatabaseEnvironmentLayers {
+  configPath: string;
+  paperclipEnvPath: string;
+  cwdEnvPath: string;
+  process: DatabaseEnvironment;
+  paperclip: Record<string, string>;
+  cwd: Record<string, string>;
+  combined: DatabaseEnvironment;
+}
+
+export function resolveDatabaseEnvironmentLayers(): DatabaseEnvironmentLayers {
+  const configPath = resolvePaperclipConfigPath();
+  const paperclipEnvPath = resolvePaperclipEnvPath(configPath);
+  const cwdEnvPath = path.resolve(process.cwd(), ".env");
+  const paperclip = readEnvEntries(paperclipEnvPath);
+  const cwd = sameFile(cwdEnvPath, paperclipEnvPath) ? {} : readEnvEntries(cwdEnvPath);
+  const processEntries = { ...process.env };
+
+  return {
+    configPath,
+    paperclipEnvPath,
+    cwdEnvPath,
+    process: processEntries,
+    paperclip,
+    cwd,
+    combined: { ...cwd, ...paperclip, ...processEntries },
+  };
+}
+
+export function resolveDefinedDatabaseUrl(
+  environment: DatabaseEnvironment,
+  key: DatabaseUrlEnvironmentKey,
+): string | undefined {
+  const value = environment[key];
+  if (value === undefined) return undefined;
+
+  const normalized = value.trim();
+  if (!normalized) {
+    throw new Error(`${key} must not be blank when defined`);
+  }
+  return normalized;
+}
+
+function effectiveEnvironmentLayer(
+  layers: DatabaseEnvironmentLayers,
+  key: DatabaseUrlEnvironmentKey,
+): "process" | "paperclip" | "cwd" | undefined {
+  if (layers.process[key] !== undefined) return "process";
+  if (layers.paperclip[key] !== undefined) return "paperclip";
+  if (layers.cwd[key] !== undefined) return "cwd";
+  return undefined;
 }
 
 function migrateLegacyConfig(raw: unknown): PartialConfig | null {
@@ -181,31 +249,47 @@ function readConfig(configPath: string): PartialConfig | null {
   };
 }
 
-export function resolveDatabaseTarget(): ResolvedDatabaseTarget {
-  const configPath = resolvePaperclipConfigPath();
-  const envPath = resolvePaperclipEnvPath(configPath);
-  const envEntries = readEnvEntries(envPath);
+export function resolveDatabaseEnvironment(): DatabaseEnvironment {
+  return resolveDatabaseEnvironmentLayers().combined;
+}
 
-  const envUrl = process.env.DATABASE_URL?.trim();
-  if (envUrl) {
-    return {
-      mode: "postgres",
-      connectionString: envUrl,
-      source: "DATABASE_URL",
-      configPath,
-      envPath,
-    };
+export function loadDatabaseEnvironment(): DatabaseEnvironment {
+  const environment = resolveDatabaseEnvironment();
+  for (const [key, value] of Object.entries(environment)) {
+    if (process.env[key] === undefined && value !== undefined) process.env[key] = value;
+  }
+  return environment;
+}
+
+export function resolveDatabaseTarget(options: {
+  preferMigrationUrl?: boolean;
+  environmentLayers?: DatabaseEnvironmentLayers;
+} = {}): ResolvedDatabaseTarget {
+  const layers = options.environmentLayers ?? resolveDatabaseEnvironmentLayers();
+  const { configPath, paperclipEnvPath: envPath } = layers;
+
+  if (options.preferMigrationUrl) {
+    const migrationUrl = resolveDefinedDatabaseUrl(layers.combined, "DATABASE_MIGRATION_URL");
+    if (migrationUrl !== undefined) {
+      const layer = effectiveEnvironmentLayer(layers, "DATABASE_MIGRATION_URL");
+      const source = layer === "process"
+        ? "DATABASE_MIGRATION_URL"
+        : layer === "paperclip"
+          ? "paperclip-env:DATABASE_MIGRATION_URL"
+          : "cwd-env:DATABASE_MIGRATION_URL";
+      return { mode: "postgres", connectionString: migrationUrl, source, configPath, envPath };
+    }
   }
 
-  const fileEnvUrl = envEntries.DATABASE_URL?.trim();
-  if (fileEnvUrl) {
-    return {
-      mode: "postgres",
-      connectionString: fileEnvUrl,
-      source: "paperclip-env",
-      configPath,
-      envPath,
-    };
+  const databaseUrl = resolveDefinedDatabaseUrl(layers.combined, "DATABASE_URL");
+  if (databaseUrl !== undefined) {
+    const layer = effectiveEnvironmentLayer(layers, "DATABASE_URL");
+    const source = layer === "process"
+      ? "DATABASE_URL"
+      : layer === "paperclip"
+        ? "paperclip-env"
+        : "cwd-env";
+    return { mode: "postgres", connectionString: databaseUrl, source, configPath, envPath };
   }
 
   const config = readConfig(configPath);
