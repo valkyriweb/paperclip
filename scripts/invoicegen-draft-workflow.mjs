@@ -18,7 +18,7 @@ const REGISTER_SCHEMA_VERSION = 1;
 const REQUEST_SCHEMA_VERSION = 1;
 const SYNTHETIC_NUMBER_MIN = 990000;
 const SYNTHETIC_NUMBER_MAX = 999999;
-const LOCK_RETRIES = 100;
+const LOCK_RETRIES = 1_400;
 const LOCK_DELAY_MS = 25;
 
 function fail(message) {
@@ -232,6 +232,14 @@ export async function runDraftWorkflow(options) {
       const manifest = await readJson(manifestPath, "existing audit manifest");
       for (const [key, value] of Object.entries(hashes)) {
         if (manifest.hashes?.[key] !== value) fail(`existing manifest ${key} does not match this execution`);
+      }
+      const persistedInputSha256 = await sha256File(inputPath);
+      if (manifest.hashes?.inputSha256 !== persistedInputSha256) {
+        fail("existing input hash does not match its audit manifest");
+      }
+      const persistedConfigSha256 = await sha256File(join(configHome, "config.yaml"));
+      if (manifest.hashes?.configSha256 !== persistedConfigSha256) {
+        fail("existing config hash does not match its audit manifest");
       }
       const artifactSha256 = await sha256File(artifactPath);
       if (manifest.hashes?.artifactSha256 !== artifactSha256) {

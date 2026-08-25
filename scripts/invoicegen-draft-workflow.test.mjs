@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 
 import { runDraftWorkflow } from "./invoicegen-draft-workflow.mjs";
@@ -136,6 +136,15 @@ test("fails closed for non-draft states and non-synthetic data", async () => {
   const f = await fixture({ mode: "real" });
   await assert.rejects(run(f), /mode must be synthetic/);
   await assert.rejects(readFile(f.calls, "utf8"), /ENOENT/, "renderer must not run");
+});
+
+test("detects persisted input changes instead of trusting stale hash evidence", async () => {
+  const f = await fixture();
+  const result = await run(f);
+  const executionDir = dirname(result.manifestPath);
+
+  await writeFile(join(executionDir, "draft-990001.yaml"), "mutated");
+  await assert.rejects(run(f), /input hash does not match/);
 });
 
 test("detects artifact changes instead of silently accepting a rerun", async () => {
