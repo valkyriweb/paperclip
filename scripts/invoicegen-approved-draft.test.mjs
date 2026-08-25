@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { mkdtemp, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 
 import { prepareApproval, runApprovedDraft } from "./invoicegen-approved-draft.mjs";
@@ -51,13 +52,21 @@ writeFileSync(output, Buffer.concat([Buffer.from("%PDF-approved-draft\\n"), read
       },
     }),
   );
-  const options = { requestPath, configPath, templateContractPath, invoicegenBin, registerPath, outputDir, paperclipaiBin, approvalId: "approval-1", paperclipProfile: "bermont", companyId: "bermont-company", approvalRecordPath, testOnlyUseFixtureContract: true };
+  const options = { requestPath, configPath, templateContractPath, invoicegenBin, registerPath, outputDir, testOnlyPaperclipaiBin: paperclipaiBin, approvalId: "approval-1", companyId: "bermont-company", approvalRecordPath, testOnlyUseFixtureContract: true };
   const payload = await prepareApproval(options);
   Object.assign(payload.numberReservation, { reservedBy: "Luke", reservedAt: "2026-08-25T13:29:00Z", evidenceReference: "BER-400 human handoff", iqHandoff: "human-verified" });
   await writeFile(approvalRecordPath, JSON.stringify({ id: "approval-1", type: "request_board_approval", status: "approved", companyId: "bermont-company", decidedByUserId: "luke-user", decidedAt: "2026-08-25T13:30:00Z", payload }));
   await writeFile(paperclipaiBin, `#!/usr/bin/env node\nimport { readFileSync } from "node:fs";\nprocess.stdout.write(readFileSync(${JSON.stringify(approvalRecordPath)}, "utf8"));\n`, { mode: 0o755 });
   return options;
 }
+
+test("CLI rejects approval executable and profile overrides", () => {
+  for (const option of ["--paperclipai-bin", "--paperclip-profile"]) {
+    const result = spawnSync(process.execPath, [resolve("scripts/invoicegen-approved-draft.mjs"), "render", option, "untrusted"], { encoding: "utf8" });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /unsupported render option/);
+  }
+});
 
 test("prepares an approval packet bound to request, config, renderer, and template", async () => {
   const f = await fixture();

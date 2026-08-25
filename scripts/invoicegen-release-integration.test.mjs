@@ -23,9 +23,8 @@ test("pinned Invoicegen release renders visible draft markings", { skip: !render
     invoicegenBin: resolve(renderer),
     registerPath: join(root, "register.json"),
     outputDir: join(root, "out"),
-    paperclipaiBin,
+    testOnlyPaperclipaiBin: paperclipaiBin,
     approvalId: "release-integration-approval",
-    paperclipProfile: "bermont",
     companyId: "bermont-company",
   };
   await mkdir(options.outputDir);

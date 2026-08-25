@@ -109,9 +109,11 @@ function validateApprovalPayload(payload, hashes, request) {
 }
 
 function fetchPaperclipApproval(options) {
-  const binary = options.paperclipaiBin ?? "paperclipai";
-  const args = ["approval", "get", options.approvalId, "--profile", options.paperclipProfile ?? "bermont", "--json"];
-  const result = spawnSync(binary, args, { encoding: "utf8", timeout: 15_000 });
+  const cliScript = process.env.NODE_TEST_CONTEXT && options.testOnlyPaperclipaiBin
+    ? options.testOnlyPaperclipaiBin
+    : "/app/cli/dist/index.js";
+  const args = [cliScript, "approval", "get", options.approvalId, "--profile", "bermont", "--json"];
+  const result = spawnSync(process.execPath, args, { encoding: "utf8", timeout: 15_000 });
   if (result.error || result.status !== 0) fail(result.error ? `could not query Paperclip approval: ${result.error.message}` : `Paperclip approval query exited ${result.status}`);
   try {
     return JSON.parse(result.stdout);
@@ -304,12 +306,20 @@ export async function runApprovedDraft(options) {
 
 function parseArgs(argv) {
   const command = argv.shift();
+  const common = ["request-path", "config-path", "invoicegen-bin", "template-contract-path"];
+  const allowed = new Set(command === "prepare-approval"
+    ? common
+    : command === "render"
+      ? [...common, "approval-id", "company-id", "register-path", "output-dir"]
+      : []);
   const options = {};
   for (let index = 0; index < argv.length; index += 2) {
     const key = argv[index];
     const value = argv[index + 1];
     if (!key?.startsWith("--") || value == null) fail("arguments must use --name value pairs");
-    options[key.slice(2).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = value;
+    const name = key.slice(2);
+    if (!allowed.has(name)) fail(`unsupported ${command ?? "unknown"} option --${name}`);
+    options[name.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = value;
   }
   return { command, options };
 }

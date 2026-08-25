@@ -64,7 +64,7 @@ paperclipai approval create --profile bermont \
   --issue-ids <paperclip-issue-uuid>
 ```
 
-The board must approve that Paperclip record. An editable local JSON file is not approval.
+The board must approve that Paperclip record. An editable local JSON file is not approval. Rendering queries the image's trusted `/app/cli/dist/index.js` CLI through the fixed `bermont` profile; callers cannot override the approval executable or profile.
 
 Changing the request, config, renderer, or template after board approval invalidates the packet.
 
@@ -74,7 +74,6 @@ Changing the request, config, renderer, or template after board approval invalid
 node scripts/invoicegen-approved-draft.mjs render \
   --request-path request.json \
   --approval-id <approved-paperclip-approval-id> \
-  --paperclip-profile bermont \
   --company-id 5d217ebe-1844-4d6e-bfef-06ee0c541750 \
   --register-path /paperclip/shared/invoicegen/number-register.json \
   --output-dir /paperclip/shared/invoicegen/drafts \
