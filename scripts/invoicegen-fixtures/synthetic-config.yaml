@@ -1,0 +1,11 @@
+sender:
+  name: SYNTHETIC TEST SENDER
+  address: |
+    TEST DATA ONLY
+    NOT A REAL BUSINESS
+
+defaults:
+  currency: ZAR
+  date_format: '%Y-%m-%d'
+  tax_rate: 0
+  tax_note: SYNTHETIC TEST ONLY
