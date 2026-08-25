@@ -88,8 +88,8 @@ function validateRequest(request) {
 function validateTemplateContract(contract, rendererSha256, testOnly = false) {
   exactKeys(contract, ["rendererRepo", "rendererVersion", "rendererCommit", "linuxAmd64ArchiveSha256", "linuxAmd64BinarySha256", "embeddedTemplatePath", "embeddedTemplateSha256"], "templateContract");
   if (testOnly && process.env.NODE_TEST_CONTEXT && contract.linuxAmd64BinarySha256 === rendererSha256) return;
-  if (contract.rendererRepo !== "valkyriweb/invoicegen" || contract.rendererVersion !== "v0.1.2-bermont.2" || contract.rendererCommit !== "94471d568faee158473afeadf7f43804cb86e832") fail("template contract does not identify the approved Invoicegen release");
-  if (contract.linuxAmd64ArchiveSha256 !== "8c6943a4cf14d3f9f5971cf925e387edc15e0a89949b83277d0cbd9d455628f8" || contract.embeddedTemplateSha256 !== "3940eee903d905c614144ffcc7e5dc657a44ace84427743914ccf2c8684f171a") fail("template contract hashes do not match the approved release");
+  if (contract.rendererRepo !== "valkyriweb/invoicegen" || contract.rendererVersion !== "v0.1.2-bermont.3" || contract.rendererCommit !== "af2fb920801fe016e54da384d145da5fd1e67c41") fail("template contract does not identify the approved Invoicegen release");
+  if (contract.linuxAmd64ArchiveSha256 !== "dd18719fc46c0bf26c0934445187942c591ceda5d714a020dc0effbbaeda0bee" || contract.embeddedTemplateSha256 !== "d028fab9b96c14881708175d00cd5d29647afd2cd7f106f0748b62c53785e159") fail("template contract hashes do not match the approved release");
   if (contract.linuxAmd64BinarySha256 !== rendererSha256) fail("renderer binary does not match the approved template contract");
 }
 

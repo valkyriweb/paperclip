@@ -1,9 +1,9 @@
 {
   "rendererRepo": "valkyriweb/invoicegen",
-  "rendererVersion": "v0.1.2-bermont.2",
-  "rendererCommit": "94471d568faee158473afeadf7f43804cb86e832",
-  "linuxAmd64ArchiveSha256": "8c6943a4cf14d3f9f5971cf925e387edc15e0a89949b83277d0cbd9d455628f8",
-  "linuxAmd64BinarySha256": "7ecf38d6b1f4744da9260141390945b501d058a855e5a4686c08e2ef934c3946",
+  "rendererVersion": "v0.1.2-bermont.3",
+  "rendererCommit": "af2fb920801fe016e54da384d145da5fd1e67c41",
+  "linuxAmd64ArchiveSha256": "dd18719fc46c0bf26c0934445187942c591ceda5d714a020dc0effbbaeda0bee",
+  "linuxAmd64BinarySha256": "907ce7ce767e82bbc9fd9d8a3dc1cf9cdf8c0d6dfe32e184aec9e161f0675ba5",
   "embeddedTemplatePath": "templates/invoice-minimal.typ",
-  "embeddedTemplateSha256": "3940eee903d905c614144ffcc7e5dc657a44ace84427743914ccf2c8684f171a"
+  "embeddedTemplateSha256": "d028fab9b96c14881708175d00cd5d29647afd2cd7f106f0748b62c53785e159"
 }
