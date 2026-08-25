@@ -3,6 +3,7 @@ import {
   buildAgentParams,
   classifyGatewayFailure,
   connectRetryDelayMs,
+  DEFAULT_CONNECT_MAX_ATTEMPTS,
   DEFAULT_CONNECT_TIMEOUT_MS,
   resolveConnectTimeoutMs,
   MIN_PROTOCOL_VERSION,
@@ -177,6 +178,36 @@ describe("classifyGatewayFailure", () => {
     }
   });
 
+  it("retries every signal a restarting gateway emits", () => {
+    // These are the four messages the Smilerite board bridge actually recorded
+    // across the 2026-08-24 rollouts. Three of them used to be terminal, so a
+    // single restart permanently killed the agent until someone cleared the
+    // error by hand.
+    for (const message of [
+      "agent.wait unavailable during gateway restart",
+      "gateway closed (1012): service restart",
+      "Unexpected server response: 503",
+      "connect ECONNREFUSED 10.43.150.250:18789",
+    ]) {
+      expect(classifyGatewayFailure(message), message).toMatchObject({
+        phase: "connect",
+        timedOut: false,
+        retryable: true,
+        errorCode: "openclaw_gateway_connect_timeout",
+      });
+    }
+  });
+
+  it("still treats a genuine agent.wait overrun as a terminal run timeout", () => {
+    // The restart check must not swallow this one: no restart marker, so it is
+    // a real run overrun and retrying it would just burn the budget again.
+    expect(classifyGatewayFailure("gateway request timeout (agent.wait)")).toMatchObject({
+      phase: "run",
+      timedOut: true,
+      retryable: false,
+    });
+  });
+
   it("leaves unrelated failures as plain request failures", () => {
     expect(classifyGatewayFailure("pairing required")).toMatchObject({
       phase: "other",
@@ -193,6 +224,17 @@ describe("connectRetryDelayMs", () => {
     expect(connectRetryDelayMs(2)).toBe(4_000);
     expect(connectRetryDelayMs(3)).toBe(8_000);
     expect(connectRetryDelayMs(10)).toBe(30_000);
+  });
+
+  it("budgets enough total backoff to outlast a gateway boot", () => {
+    // A gateway loading its full plugin set takes 40-56s to start listening.
+    // The default retry budget has to cover that or a rollout kills the agent.
+    const retries = DEFAULT_CONNECT_MAX_ATTEMPTS - 1;
+    let total = 0;
+    for (let attempt = 1; attempt <= retries; attempt += 1) {
+      total += connectRetryDelayMs(attempt);
+    }
+    expect(total).toBeGreaterThanOrEqual(60_000);
   });
 });
 

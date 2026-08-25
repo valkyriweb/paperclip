@@ -1704,10 +1704,15 @@ export function attentionService(db: Db, serviceOptions: AttentionServiceOptions
             .select({
               agentId: heartbeatRuns.agentId,
               createdAt: heartbeatRuns.createdAt,
-              // Project just the ids readRunIssueId needs; pulling the whole
+              // Project just the id readRunIssueId needs; pulling the whole
               // context_snapshot detoasts megabytes per feed build.
-              runIssueId: sql<string | null>`${heartbeatRuns.contextSnapshot} ->> 'issueId'`,
-              runTaskId: sql<string | null>`${heartbeatRuns.contextSnapshot} ->> 'taskId'`,
+              //
+              // coalesce, not two separate ->> projections: jsonb has no detoast
+              // cache, so each ->> decompresses context_snapshot again. Two of
+              // them cost twice, and readRunIssueId collapses the pair into one
+              // value below anyway. coalesce short-circuits once issueId is
+              // present, which it is for ~60% of matched rows.
+              runIssueKey: sql<string | null>`coalesce(${heartbeatRuns.contextSnapshot} ->> 'issueId', ${heartbeatRuns.contextSnapshot} ->> 'taskId')`,
             })
             .from(heartbeatRuns)
             .where(and(
@@ -1719,7 +1724,7 @@ export function attentionService(db: Db, serviceOptions: AttentionServiceOptions
       ]);
       const latestRunCreatedAtByKey = new Map<string, Date>();
       for (const newerRun of newerRuns) {
-        const newerRunIssueId = readRunIssueId({ issueId: newerRun.runIssueId, taskId: newerRun.runTaskId });
+        const newerRunIssueId = readRunIssueId({ issueId: newerRun.runIssueKey });
         const newerRunKey = `${newerRun.agentId}:${newerRunIssueId ?? ""}`;
         const latestCreatedAt = latestRunCreatedAtByKey.get(newerRunKey);
         if (!latestCreatedAt || newerRun.createdAt > latestCreatedAt) {

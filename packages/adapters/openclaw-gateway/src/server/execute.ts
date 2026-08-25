@@ -120,7 +120,14 @@ function parseOptionalPositiveInteger(value: unknown): number | null {
 }
 
 export const DEFAULT_CONNECT_TIMEOUT_MS = 15_000;
-export const DEFAULT_CONNECT_MAX_ATTEMPTS = 3;
+/**
+ * Enough attempts to outlast a gateway restart. With the 2s base delay the
+ * backoff schedule is 2+4+8+16+30+30 = 90s across six retries; an OpenClaw
+ * gateway loading its full plugin set takes 40-56s to start listening, so the
+ * previous value of 3 (a 6s budget) could never survive one. Every rollout
+ * permanently killed whichever bridges happened to be mid-run.
+ */
+export const DEFAULT_CONNECT_MAX_ATTEMPTS = 7;
 export const DEFAULT_CONNECT_RETRY_BASE_DELAY_MS = 2_000;
 
 /**
@@ -155,6 +162,32 @@ export type GatewayFailureClassification = {
  */
 export function classifyGatewayFailure(message: string): GatewayFailureClassification {
   const lower = message.toLowerCase();
+
+  // Restart-phase first: these are the signals a gateway emits while it is
+  // going down or coming back up, and every one of them is worth retrying.
+  // They must be tested before the run-phase check below, because the gateway
+  // reports its own restart through the very call we were waiting on
+  // ("agent.wait unavailable during gateway restart") and that string would
+  // otherwise be read as a run overrun and retired as terminal.
+  //
+  // 1012 is the WebSocket Service Restart close code -- the least ambiguous
+  // "come back shortly" a server can send. A 502/503/504 on the handshake is
+  // the same story from a gateway that is listening but not yet ready.
+  const restarting =
+    lower.includes("service restart") ||
+    lower.includes("(1012") ||
+    lower.includes("during gateway restart") ||
+    lower.includes("unexpected server response: 502") ||
+    lower.includes("unexpected server response: 503") ||
+    lower.includes("unexpected server response: 504");
+  if (restarting) {
+    return {
+      phase: "connect",
+      timedOut: false,
+      retryable: true,
+      errorCode: "openclaw_gateway_connect_timeout",
+    };
+  }
 
   // Run-phase: the agent was accepted and we waited on it.
   const runOverrun =

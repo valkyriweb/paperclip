@@ -671,7 +671,7 @@ export function executionWorkspaceRoutes(db: Db, opts: { pluginWorkerManager?: P
         await stopRuntimeServicesForExecutionWorkspace({
           db,
           executionWorkspaceId: existing.id,
-          workspaceCwd: existing.cwd,
+          workspaceCwd: existing.mode === "shared_workspace" ? null : existing.cwd,
         });
         const projectWorkspace = existing.projectWorkspaceId
           ? await db
@@ -702,6 +702,7 @@ export function executionWorkspaceRoutes(db: Db, opts: { pluginWorkerManager?: P
           projectWorkspace,
           teardownCommand: configForCleanup?.teardownCommand ?? projectPolicy?.workspaceStrategy?.teardownCommand ?? null,
           cleanupCommand: configForCleanup?.cleanupCommand ?? null,
+          runCleanupCommands: existing.mode !== "shared_workspace",
           recorder: workspaceOperationsSvc.createRecorder({
             companyId: existing.companyId,
             executionWorkspaceId: existing.id,

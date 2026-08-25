@@ -27,6 +27,7 @@ const mockHeartbeatService = vi.hoisted(() => ({
   getRun: vi.fn(async () => null),
   getActiveRunForAgent: vi.fn(async () => null),
   cancelRun: vi.fn(async () => null),
+  cancelIssueInvocations: vi.fn(async () => ({ runIds: [], wakeupIds: [] })),
 }));
 
 const mockAgentService = vi.hoisted(() => ({
@@ -280,6 +281,7 @@ describe.sequential("issue comment reopen routes", () => {
     mockHeartbeatService.getRun.mockReset();
     mockHeartbeatService.getActiveRunForAgent.mockReset();
     mockHeartbeatService.cancelRun.mockReset();
+    mockHeartbeatService.cancelIssueInvocations.mockReset();
     mockAgentService.getById.mockReset();
     mockAgentService.list.mockReset();
     mockAgentService.resolveByReference.mockReset();
@@ -320,6 +322,7 @@ describe.sequential("issue comment reopen routes", () => {
     mockHeartbeatService.getRun.mockResolvedValue(null);
     mockHeartbeatService.getActiveRunForAgent.mockResolvedValue(null);
     mockHeartbeatService.cancelRun.mockResolvedValue(null);
+    mockHeartbeatService.cancelIssueInvocations.mockResolvedValue({ runIds: [], wakeupIds: [] });
     mockExternalObjectService.syncCommentSafely.mockResolvedValue(undefined);
     mockExternalObjectService.syncIssueSafely.mockResolvedValue(undefined);
     mockObserveCrossIssueInfluence.mockResolvedValue({
@@ -2076,6 +2079,85 @@ describe.sequential("issue comment reopen routes", () => {
     },
   );
 
+  // SMI-4015 acceptance: an unassigned timer-wake heartbeat (run context has
+  // no issueId/taskId) must be able to comment on an issue assigned to the
+  // calling agent. The guard module is mocked in this file, so wire the real
+  // `observeCrossIssueInfluence` against a minimal db fake.
+  async function installRealCrossIssueGuard(agentId: string, runId: string, targetAssigneeAgentId: string | null) {
+    const { observeCrossIssueInfluence: realObserveCrossIssueInfluence } = await vi.importActual<
+      typeof import("../services/cross-issue-influence-limit.js")
+    >("../services/cross-issue-influence-limit.js");
+    const inserted: Array<Record<string, unknown>> = [];
+    const tx = {
+      select: (selection: Record<string, unknown>) => ({
+        from: () => ({
+          where: () => {
+            if (Object.keys(selection).includes("assigneeAgentId")) {
+              return {
+                then: (resolve: (rows: unknown[]) => unknown) =>
+                  resolve(targetAssigneeAgentId === null ? [] : [{ assigneeAgentId: targetAssigneeAgentId }]),
+              };
+            }
+            return {
+              for: () => ({
+                then: (resolve: (rows: unknown[]) => unknown) => resolve([{
+                  id: runId,
+                  companyId: "company-1",
+                  agentId,
+                  responsibleUserId: null,
+                  contextSnapshot: null,
+                }]),
+              }),
+            };
+          },
+        }),
+      }),
+      insert: () => ({
+        values: async (value: Record<string, unknown>) => {
+          inserted.push(value);
+        },
+      }),
+    };
+    const fakeDb = {
+      transaction: async (callback: (value: typeof tx) => Promise<unknown>) => callback(tx),
+    };
+    mockObserveCrossIssueInfluence.mockImplementation((_db: unknown, input: unknown) =>
+      realObserveCrossIssueInfluence(fakeDb as never, input as never));
+    return inserted;
+  }
+
+  it("accepts an assignee's own-issue comment from a run with no source issue in its context snapshot", async () => {
+    const agentA = "44444444-4444-4444-8444-444444444444";
+    const runId = "66666666-6666-4666-8666-666666666666";
+    mockIssueService.getById.mockResolvedValue({ ...makeIssue("todo"), assigneeAgentId: agentA });
+    const inserted = await installRealCrossIssueGuard(agentA, runId, agentA);
+
+    const res = await request(await installActor(createApp(), { ...agentActor(agentA), runId }))
+      .post("/api/issues/11111111-1111-4111-8111-111111111111/comments")
+      .send({ body: "timer-wake progress note" });
+
+    expect(res.status).toBe(201);
+    expect(mockIssueService.addComment).toHaveBeenCalled();
+    // Allowed and not counted: no cross-issue influence activity is recorded.
+    expect(inserted).toEqual([]);
+  });
+
+  it("still rejects a context-less run commenting on another agent's issue", async () => {
+    const agentA = "44444444-4444-4444-8444-444444444444";
+    const agentB = "22222222-2222-4222-8222-222222222222";
+    const runId = "66666666-6666-4666-8666-666666666666";
+    mockIssueService.getById.mockResolvedValue({ ...makeIssue("todo"), assigneeAgentId: agentB });
+    await installRealCrossIssueGuard(agentA, runId, agentB);
+
+    const res = await request(await installActor(createApp(), { ...agentActor(agentA), runId }))
+      .post("/api/issues/11111111-1111-4111-8111-111111111111/comments")
+      .send({ body: "cross-issue write from a context-less run" });
+
+    expect(res.status).toBe(403);
+    expect(res.body.details).toMatchObject({ code: "cross_issue_influence_run_context_required" });
+    expect(mockIssueService.addComment).not.toHaveBeenCalled();
+  });
+
   it("rejects explicit resume intent under an active pause hold", async () => {
     mockIssueService.getById.mockResolvedValue(makeIssue("done"));
     mockIssueTreeControlService.getActivePauseHoldGate.mockResolvedValue({
@@ -2195,17 +2277,9 @@ describe.sequential("issue comment reopen routes", () => {
       ...issue,
       ...patch,
     }));
-    mockHeartbeatService.getRun.mockResolvedValue({
-      id: "run-1",
-      companyId: "company-1",
-      agentId: "22222222-2222-4222-8222-222222222222",
-      status: "running",
-    });
-    mockHeartbeatService.cancelRun.mockResolvedValue({
-      id: "run-1",
-      companyId: "company-1",
-      agentId: "22222222-2222-4222-8222-222222222222",
-      status: "cancelled",
+    mockHeartbeatService.cancelIssueInvocations.mockResolvedValue({
+      runIds: ["run-1"],
+      wakeupIds: ["wakeup-1"],
     });
 
     const res = await request(await installActor(createApp()))
@@ -2213,8 +2287,11 @@ describe.sequential("issue comment reopen routes", () => {
       .send({ status: "cancelled" });
 
     expect(res.status).toBe(200);
-    expect(mockHeartbeatService.getRun).toHaveBeenCalledWith("run-1");
-    expect(mockHeartbeatService.cancelRun).toHaveBeenCalledWith("run-1");
+    expect(mockHeartbeatService.cancelIssueInvocations).toHaveBeenCalledWith(
+      "company-1",
+      "11111111-1111-4111-8111-111111111111",
+      "Cancelled because issue reached terminal status",
+    );
     expect(mockLogActivity).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -2222,6 +2299,15 @@ describe.sequential("issue comment reopen routes", () => {
         details: expect.objectContaining({
           source: "issue_status_cancelled",
           issueId: "11111111-1111-4111-8111-111111111111",
+        }),
+      }),
+    );
+    expect(mockLogActivity).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: "heartbeat.wakeups_cancelled",
+        details: expect.objectContaining({
+          wakeupIds: ["wakeup-1"],
         }),
       }),
     );
@@ -2250,6 +2336,7 @@ describe.sequential("issue comment reopen routes", () => {
 
     expect(res.status).toBe(200);
     expect(mockHeartbeatService.cancelRun).not.toHaveBeenCalled();
+    expect(mockHeartbeatService.cancelIssueInvocations).not.toHaveBeenCalled();
   });
 
   it("writes decision ids into executionState and inserts the decision inside the transaction", async () => {

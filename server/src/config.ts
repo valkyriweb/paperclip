@@ -1,9 +1,10 @@
 import { readConfigFile } from "./config-file.js";
 import { execFileSync } from "node:child_process";
-import { existsSync, realpathSync } from "node:fs";
-import { resolve } from "node:path";
-import { config as loadDotenv } from "dotenv";
-import { resolvePaperclipEnvPath } from "./paths.js";
+import {
+  loadDatabaseEnvironment,
+  resolveDatabaseEnvironment,
+  resolveDefinedDatabaseUrl,
+} from "@paperclipai/db/runtime-config";
 import { maybeRepairLegacyWorktreeConfigAndEnvFiles } from "./worktree-config.js";
 import {
   AUTH_BASE_URL_MODES,
@@ -22,6 +23,7 @@ import {
   resolveRuntimeBind,
   validateConfiguredBindMode,
 } from "@paperclipai/shared";
+import { resolveMigrationConfig, type DeploymentProfile } from "@paperclipai/db/migration-config";
 import {
   resolveDefaultBackupDir,
   resolveDefaultEmbeddedPostgresDir,
@@ -30,39 +32,54 @@ import {
   resolveHomeAwarePath,
 } from "./home-paths.js";
 
-const PAPERCLIP_ENV_FILE_PATH = resolvePaperclipEnvPath();
-if (existsSync(PAPERCLIP_ENV_FILE_PATH)) {
-  loadDotenv({ path: PAPERCLIP_ENV_FILE_PATH, override: false, quiet: true });
-}
-
-const CWD_ENV_PATH = resolve(process.cwd(), ".env");
-const isSameFile = existsSync(CWD_ENV_PATH) && existsSync(PAPERCLIP_ENV_FILE_PATH)
-  ? realpathSync(CWD_ENV_PATH) === realpathSync(PAPERCLIP_ENV_FILE_PATH)
-  : CWD_ENV_PATH === PAPERCLIP_ENV_FILE_PATH;
-if (!isSameFile && existsSync(CWD_ENV_PATH)) {
-  loadDotenv({ path: CWD_ENV_PATH, override: false, quiet: true });
-}
-
+loadDatabaseEnvironment();
 maybeRepairLegacyWorktreeConfigAndEnvFiles();
 
 const TAILSCALE_DETECT_TIMEOUT_MS = 3000;
 
 /**
- * Parse an integer config knob, clamped to `[min, ∞)`. Rejects anything that is
- * not a finite integer — `Infinity`, `NaN`, and non-integers like `1.5` all
- * fall back to `def` — so a fat-fingered env value can't produce a nonsensical
- * sweep interval / budget.
+ * Parse an integer config knob, clamped to `[min, max]` (`max` optional,
+ * defaulting to unbounded). Rejects anything that is not a finite integer —
+ * `Infinity`, `NaN`, and non-integers like `1.5` all fall back to `def` — so a
+ * fat-fingered env value can't produce a nonsensical sweep interval / budget.
  */
-function clampIntEnv(raw: string | undefined, def: number, min: number): number {
+function clampIntEnv(
+  raw: string | undefined,
+  def: number,
+  min: number,
+  max = Number.POSITIVE_INFINITY,
+): number {
   if (raw == null || raw.trim() === "") return def;
   const parsed = Number(raw);
   if (!Number.isInteger(parsed)) return def;
-  return Math.max(min, parsed);
+  return Math.min(max, Math.max(min, parsed));
 }
 
+/**
+ * Ceiling on `PAPERCLIP_RUN_RESULT_RETENTION_BATCH_SIZE`.
+ *
+ * The retention sweeper binds one query parameter per candidate id, and
+ * PostgreSQL's wire protocol caps a statement at 65,535 of them. A batch size
+ * above that makes every `trimResultJson` call throw — and because the paging
+ * cursor is function-local, the throw kills it, so the next tick restarts from
+ * the beginning and dies at exactly the same point. The result is not a slow
+ * sweeper but a permanently wedged one: it logs an error every 24h and trims
+ * nothing, while the table it exists to bound keeps growing.
+ *
+ * The realistic route there is an operator impatient with the backlog setting
+ * this to something like 100000 to "just do it all at once". Clamping turns
+ * that into a large-but-working batch instead of a silent no-op. 5,000 is 25x
+ * the default with an order of magnitude of headroom under the protocol limit,
+ * and keeps a single batch's transaction — and its WAL burst — bounded.
+ */
+const RUN_RESULT_RETENTION_MAX_BATCH_SIZE = 5_000;
+
 type DatabaseMode = "embedded-postgres" | "postgres";
+export type { DeploymentProfile } from "@paperclipai/db/migration-config";
 
 export interface Config {
+  deploymentProfile: DeploymentProfile;
+  migrationLockTimeoutMs: number;
   deploymentMode: DeploymentMode;
   deploymentExposure: DeploymentExposure;
   bind: BindMode;
@@ -99,6 +116,11 @@ export interface Config {
   runLogCompanyBudgetBytes: number;
   runLogSweepIntervalMs: number;
   runLogSweepItemLimit: number;
+  runResultRetentionEnabled: boolean;
+  runResultRetentionDays: number;
+  runResultRetentionIntervalMs: number;
+  runResultRetentionBatchSize: number;
+  runResultRetentionItemLimit: number;
   feedbackExportBackendUrl: string | undefined;
   feedbackExportBackendToken: string | undefined;
   heartbeatSchedulerEnabled: boolean;
@@ -193,6 +215,36 @@ export function loadConfig(): Config {
   const runLogSweepItemLimit = clampIntEnv(
     process.env.PAPERCLIP_RUN_LOG_SWEEP_ITEM_LIMIT,
     200,
+    1,
+  );
+  // `heartbeat_runs.result_json` retention. Trims oversized stdout/stderr in
+  // place on runs past the window; see services/heartbeat-result-retention.ts
+  // for why the column is trimmed rather than nulled. Daily is deliberate — the
+  // work is proportional to what aged past the cutoff since the last sweep, and
+  // each batch detoasts multi-megabyte values.
+  // Opt-out, not opt-in: the bloat it prevents is unbounded, and it only trims
+  // output the API has never served. `=== "false"` rather than `!== "true"` so a
+  // typo'd value leaves the sweeper running rather than silently off.
+  const runResultRetentionEnabled = process.env.PAPERCLIP_RUN_RESULT_RETENTION_ENABLED !== "false";
+  const runResultRetentionDays = clampIntEnv(
+    process.env.PAPERCLIP_RUN_RESULT_RETENTION_DAYS,
+    30,
+    1,
+  );
+  const runResultRetentionIntervalMs = clampIntEnv(
+    process.env.PAPERCLIP_RUN_RESULT_RETENTION_INTERVAL_MS,
+    24 * 60 * 60 * 1000,
+    60_000,
+  );
+  const runResultRetentionBatchSize = clampIntEnv(
+    process.env.PAPERCLIP_RUN_RESULT_RETENTION_BATCH_SIZE,
+    200,
+    1,
+    RUN_RESULT_RETENTION_MAX_BATCH_SIZE,
+  );
+  const runResultRetentionItemLimit = clampIntEnv(
+    process.env.PAPERCLIP_RUN_RESULT_RETENTION_ITEM_LIMIT,
+    2000,
     1,
   );
   const feedbackExportBackendUrl =
@@ -312,6 +364,19 @@ export function loadConfig(): Config {
       fileDatabaseBackup?.dir ??
       resolveDefaultBackupDir(),
   );
+  const databaseEnvironment = resolveDatabaseEnvironment();
+  const databaseUrl = resolveDefinedDatabaseUrl(databaseEnvironment, "DATABASE_URL") ?? fileDbUrl;
+  const databaseMigrationUrl = resolveDefinedDatabaseUrl(
+    databaseEnvironment,
+    "DATABASE_MIGRATION_URL",
+  );
+  const migrationConfig = resolveMigrationConfig(
+    databaseEnvironment,
+    databaseUrl,
+    databaseMigrationUrl,
+  );
+  const { deploymentProfile, lockTimeoutMs: migrationLockTimeoutMs } = migrationConfig;
+
   const bindValidationErrors = validateConfiguredBindMode({
     deploymentMode,
     deploymentExposure,
@@ -333,6 +398,8 @@ export function loadConfig(): Config {
   }
 
   return {
+    deploymentProfile,
+    migrationLockTimeoutMs,
     deploymentMode,
     deploymentExposure,
     bind: resolvedBind.bind,
@@ -344,8 +411,8 @@ export function loadConfig(): Config {
     authPublicBaseUrl,
     authDisableSignUp,
     databaseMode: fileDatabaseMode,
-    databaseUrl: process.env.DATABASE_URL ?? fileDbUrl,
-    databaseMigrationUrl: process.env.DATABASE_MIGRATION_URL,
+    databaseUrl,
+    databaseMigrationUrl,
     embeddedPostgresDataDir: resolveHomeAwarePath(
       fileConfig?.database.embeddedPostgresDataDir ?? resolveDefaultEmbeddedPostgresDir(),
     ),
@@ -379,6 +446,11 @@ export function loadConfig(): Config {
     runLogCompanyBudgetBytes,
     runLogSweepIntervalMs,
     runLogSweepItemLimit,
+    runResultRetentionEnabled,
+    runResultRetentionDays,
+    runResultRetentionIntervalMs,
+    runResultRetentionBatchSize,
+    runResultRetentionItemLimit,
     feedbackExportBackendUrl,
     feedbackExportBackendToken,
     heartbeatSchedulerEnabled: process.env.HEARTBEAT_SCHEDULER_ENABLED !== "false",

@@ -1,0 +1,33 @@
+-- valuesForIssue (server/src/services/run-secret-redaction.ts) ORs two JSONB paths:
+--   company_id = $1 AND ( context_snapshot->>'issueId' = $2
+--                      OR context_snapshot->'paperclipIssue'->>'id' = $3 )
+-- Branch 1 has heartbeat_runs_company_ctx_issue_created_idx (0212). Branch 2 had
+-- nothing, and a single unindexed OR branch disqualifies the entire predicate from
+-- a BitmapOr, so the planner fell back to a full Seq Scan and evaluated the filter
+-- by detoasting context_snapshot on every row that cleared the company check.
+--
+-- redactForIssue sits on hot read paths (issue fetch, comment list, comment create,
+-- heartbeat wake context), so every issue detail view triggered a full table scan.
+--
+-- Measured on prod before the fix: plain EXPLAIN gave Seq Scan cost 0.00..3453.55.
+-- With this index: Bitmap Heap Scan cost 8.74..20.53 over a BitmapOr of the two
+-- expression indexes. Isolating the branches proves the mechanism -- branch 1 alone
+-- planned at 11.81, branch 2 alone at 3374.64.
+--
+-- Column order (company_id, expr) matches every other index on this table and makes
+-- the pair structurally symmetric, so the BitmapOr combines two identically-shaped
+-- scans. Both predicates are equality, so the order does not change selectivity.
+-- No created_at: valuesForIssue has no ORDER BY and no LIMIT.
+--
+-- The OR branch is deliberately kept rather than deleted. It is 99.88% redundant
+-- with branch 1 (10,292 rows carry paperclipIssue.id; 12 differ from issueId; none
+-- have it while issueId is null), but this code resolves secret material for
+-- redaction before responses go to API clients, and register() is wired to live
+-- routes. Preserving semantics on a security path is worth an index this small.
+--
+-- IF NOT EXISTS: applied out-of-band on prod (2026-08-22) with CONCURRENTLY to stop
+-- the scans immediately. Migrations here run inside a transaction
+-- (client.ts applyPendingMigrationsManually), so CONCURRENTLY is unavailable; on a
+-- 3,059-page heap the plain build is milliseconds. Built index size: 384 kB.
+CREATE INDEX IF NOT EXISTS "heartbeat_runs_company_ctx_paperclip_issue_idx"
+  ON "heartbeat_runs" ("company_id", (("context_snapshot" -> 'paperclipIssue') ->> 'id'));

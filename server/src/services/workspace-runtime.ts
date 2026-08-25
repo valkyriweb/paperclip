@@ -3331,6 +3331,7 @@ export async function cleanupExecutionWorkspaceArtifacts(input: {
     projectId: string | null;
     projectWorkspaceId: string | null;
     sourceIssueId: string | null;
+    mode?: string | null;
     metadata?: Record<string, unknown> | null;
   };
   projectWorkspace?: {
@@ -3348,6 +3349,7 @@ export async function cleanupExecutionWorkspaceArtifacts(input: {
 }) {
   const warnings: string[] = [];
   const workspacePath = input.workspace.providerRef ?? input.workspace.cwd;
+  const ownsItsDirectory = input.workspace.mode !== "shared_workspace";
   const repoRoot = input.workspace.providerType === "git_worktree" && workspacePath
     ? await resolveGitRepoRootForWorkspaceCleanup(
       workspacePath,
@@ -3504,7 +3506,9 @@ export async function cleanupExecutionWorkspaceArtifacts(input: {
           projectWorkspaceCwd.startsWith(`${resolvedWorkspacePath}${path.sep}`)
         )
       : false;
-    if (containsProjectWorkspace) {
+    if (!ownsItsDirectory) {
+      warnings.push(`Refusing to remove path "${workspacePath}" because a shared workspace session does not own its directory.`);
+    } else if (containsProjectWorkspace) {
       warnings.push(`Refusing to remove path "${workspacePath}" because it contains the project workspace.`);
     } else {
       await input.assertSafeToCleanup?.();
@@ -3529,6 +3533,7 @@ export async function cleanupExecutionWorkspaceArtifacts(input: {
   }
 
   const cleaned =
+    !ownsItsDirectory ||
     !workspacePath ||
     !(await directoryExists(workspacePath));
 

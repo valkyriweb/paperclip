@@ -10,16 +10,35 @@ import {
 function counterDb(
   initialCount = 0,
   runOverrides: Record<string, unknown> | null = {},
+  issueOverrides: Record<string, unknown> | null | undefined = undefined,
 ) {
   let observedCount = initialCount;
   const inserted: Array<Record<string, unknown>> = [];
+  let issueLookups = 0;
+  // Default: the target issue exists and is assigned to an agent that is NOT
+  // the caller, so context-less runs stay fail-closed unless a test opts in.
+  const issueRow = issueOverrides === null
+    ? null
+    : {
+        assigneeAgentId: "99999999-9999-4999-8999-999999999999",
+        ...(issueOverrides ?? {}),
+      };
   const tx = {
     select: (selection: Record<string, unknown>) => ({
       from: () => ({
         where: () => {
-          if (Object.keys(selection).includes("count")) {
+          const selectionKeys = Object.keys(selection);
+          if (selectionKeys.includes("count")) {
             return {
               then: (resolve: (rows: unknown[]) => unknown) => resolve([{ count: observedCount }]),
+            };
+          }
+          if (selectionKeys.includes("assigneeAgentId")) {
+            return {
+              then: (resolve: (rows: unknown[]) => unknown) => {
+                issueLookups += 1;
+                return resolve(issueRow ? [issueRow] : []);
+              },
             };
           }
           return {
@@ -49,6 +68,9 @@ function counterDb(
       transaction: async (callback: (value: typeof tx) => Promise<unknown>) => callback(tx),
     },
     inserted,
+    get issueLookups() {
+      return issueLookups;
+    },
     get observedCount() {
       return observedCount;
     },
@@ -175,7 +197,7 @@ describe("cross-issue influence limit rollout", () => {
     expect(fake.inserted).toEqual([]);
   });
 
-  it("fails closed when the persisted run has no source issue", async () => {
+  it("fails closed when the persisted run has no source issue and the caller is not the target's assignee", async () => {
     const fake = counterDb(0, { contextSnapshot: {} });
 
     await expect(observeCrossIssueInfluence(fake.db as never, {
@@ -189,5 +211,68 @@ describe("cross-issue influence limit rollout", () => {
       details: { code: "cross_issue_influence_run_context_required" },
     });
     expect(fake.inserted).toEqual([]);
+  });
+
+  it("allows a context-less run to write to an issue assigned to the calling agent without counting it", async () => {
+    const fake = counterDb(0, { contextSnapshot: null }, {
+      assigneeAgentId: "33333333-3333-4333-8333-333333333333",
+    });
+
+    await expect(observeCrossIssueInfluence(fake.db as never, {
+      companyId: "22222222-2222-4222-8222-222222222222",
+      runId: "11111111-1111-4111-8111-111111111111",
+      agentId: "33333333-3333-4333-8333-333333333333",
+      targetIssueId: "55555555-5555-4555-8555-555555555555",
+      kind: "comment",
+    })).resolves.toBeNull();
+
+    // Same semantics as the same-issue bypass: working your own issue is not
+    // cross-issue influence, so nothing is observed or counted.
+    expect(fake.issueLookups).toBe(1);
+    expect(fake.inserted).toEqual([]);
+    expect(fake.observedCount).toBe(0);
+  });
+
+  it.each([
+    ["assigned to another agent", { assigneeAgentId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }],
+    ["unassigned", { assigneeAgentId: null }],
+    ["missing", null],
+  ] as const)(
+    "fails closed for a context-less run when the target issue is %s",
+    async (_label, issueOverrides) => {
+      const fake = counterDb(0, { contextSnapshot: null }, issueOverrides);
+
+      await expect(observeCrossIssueInfluence(fake.db as never, {
+        companyId: "22222222-2222-4222-8222-222222222222",
+        runId: "11111111-1111-4111-8111-111111111111",
+        agentId: "33333333-3333-4333-8333-333333333333",
+        targetIssueId: "55555555-5555-4555-8555-555555555555",
+        kind: "comment",
+      })).rejects.toMatchObject({
+        status: 403,
+        details: { code: "cross_issue_influence_run_context_required" },
+      });
+      expect(fake.inserted).toEqual([]);
+    },
+  );
+
+  it("does not consult the target issue when the run context carries a source issue", async () => {
+    const fake = counterDb(0, {}, {
+      assigneeAgentId: "33333333-3333-4333-8333-333333333333",
+    });
+
+    // A context-carrying run writing cross-issue is still counted, even when
+    // the target happens to be assigned to the caller: the assignee fallback
+    // only applies when the run context has no source issue at all.
+    await expect(observeCrossIssueInfluence(fake.db as never, {
+      companyId: "22222222-2222-4222-8222-222222222222",
+      runId: "11111111-1111-4111-8111-111111111111",
+      agentId: "33333333-3333-4333-8333-333333333333",
+      targetIssueId: "55555555-5555-4555-8555-555555555555",
+      kind: "comment",
+      now: new Date(CROSS_ISSUE_INFLUENCE_ENFORCE_AT.getTime() - 1),
+    })).resolves.toMatchObject({ count: 1, allowed: true });
+    expect(fake.issueLookups).toBe(0);
+    expect(fake.observedCount).toBe(1);
   });
 });
