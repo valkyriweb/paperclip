@@ -17,8 +17,9 @@ RUN usermod -u $USER_UID --non-unique node \
 # Built from valkyriweb/invoicegen, a fork of upstream github.com/raine/invoicegen
 # pinned at v0.1.2. Upstream cannot render our invoices: it supports EUR/USD/GBP/JPY
 # only (no ZAR) and hardcodes `paper: "us-letter"` in its embedded Typst template,
-# neither of which is reachable from config. The fork adds ZAR and switches the
-# template to A4; it carries no other divergence.
+# neither of which is reachable from config. The fork adds ZAR, switches the
+# template to A4, supports invoice-number prefixes, and makes `draft: true`
+# visibly render `DRAFT — NOT ISSUED` on every page.
 #
 # Only a linux-amd64 asset is published, matching upstream and matching the pod.
 # The paperclip pod runs linux/amd64 today, so we install the real binary there and,
@@ -27,8 +28,8 @@ RUN usermod -u $USER_UID --non-unique node \
 FROM base AS invoicegen
 ARG TARGETARCH
 ARG INVOICEGEN_REPO=valkyriweb/invoicegen
-ARG INVOICEGEN_VERSION=v0.1.2-bermont.1
-ARG INVOICEGEN_LINUX_AMD64_SHA256=2e5d32a4efcc8f2c0ffc48e07528fbf155e1a997a3955cd40076c57046685f36
+ARG INVOICEGEN_VERSION=v0.1.2-bermont.3
+ARG INVOICEGEN_LINUX_AMD64_SHA256=dd18719fc46c0bf26c0934445187942c591ceda5d714a020dc0effbbaeda0bee
 WORKDIR /tmp/invoicegen
 RUN set -eu; \
   if [ "$TARGETARCH" = "amd64" ]; then \

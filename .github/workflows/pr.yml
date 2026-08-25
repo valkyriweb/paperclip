@@ -79,6 +79,22 @@ jobs:
       - name: Test standalone package build concurrency
         run: node --test ./scripts/__tests__/build-standalone-concurrency.test.mjs
 
+      - name: Test approved Invoicegen draft workflow
+        if: github.repository_owner == 'valkyriweb'
+        run: pnpm test:invoicegen-approved-draft
+
+      - name: Verify pinned Invoicegen release integration
+        if: github.repository_owner == 'valkyriweb'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq poppler-utils
+          curl --fail --location --silent --show-error \
+            -o /tmp/invoicegen.tar.gz \
+            https://github.com/valkyriweb/invoicegen/releases/download/v0.1.2-bermont.3/invoicegen-linux-amd64.tar.gz
+          echo 'dd18719fc46c0bf26c0934445187942c591ceda5d714a020dc0effbbaeda0bee  /tmp/invoicegen.tar.gz' | sha256sum --check
+          tar -xzf /tmp/invoicegen.tar.gz -C /tmp
+          INVOICEGEN_INTEGRATION_BIN=/tmp/invoicegen pnpm test:invoicegen-release-integration
+
       - name: Validate release package manifest
         # Fork: skip upstream @paperclipai/* release-registry checks.
         if: github.repository_owner == 'paperclipai'

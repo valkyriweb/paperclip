@@ -1,65 +1,112 @@
-# Invoicegen synthetic draft workflow
+# Invoicegen approved draft workflow
 
-This milestone proves an outside-IQ Invoicegen path with synthetic data only. It cannot approve, issue, or send an invoice. It does not access IQ Retail or the shared Windows server.
+This workflow generates usable Bermont invoice PDF drafts with real approved invoice details. It does not access IQ Retail, issue an invoice, or send email.
 
-## Safety contract
+## Required human steps
 
-`scripts/invoicegen-draft-workflow.mjs` accepts only requests with all of these properties:
+Before rendering, a human must:
 
-- `mode` is `synthetic`.
-- `state` is `draft`.
-- The number is in the isolated `990000`–`999999` synthetic range.
-- The sender, client, notes, tax fields, and line item match the exact checked-in synthetic fixture.
-- The config hash matches the exact checked-in ZAR synthetic config.
-- The renderer binary hash matches an approved binary from the pinned release.
-- The request has no email address or send, approval, or issuance field at any nesting depth.
+1. Review the client, amount, VAT, date, line items, and recipient details.
+2. Check IQ Retail directly and reserve the `INVBD` number in the coordinated register.
+3. Record the reservation evidence in the approval packet.
+4. Approve PDF draft generation only.
 
-The tool invokes only `invoicegen generate`. It has no approve, issue, send, email, IQ, or server integration. Any `approved`, `issued`, or `sent` state fails before the renderer starts.
+A Paperclip agent must not perform the IQ check or number reservation.
 
-## Dry run
+## Request format
 
-Use an empty operator-controlled directory. Do not put production client data in the request.
+Create a JSON request with `state: "draft"`, a stable idempotency key, and normal Invoicegen invoice data. Bermont invoices require `number_prefix: "INVBD"`.
+
+```json
+{
+  "schemaVersion": 1,
+  "state": "draft",
+  "idempotencyKey": "invbd348-client-cycle-2026-08",
+  "invoice": {
+    "number": 348,
+    "number_prefix": "INVBD",
+    "draft": true,
+    "date": "2026-08-25",
+    "client": {
+      "bill_to": "Approved Client\nApproved address",
+      "ship_to": "",
+      "default_rate": 100
+    },
+    "po_number": null,
+    "notes": "Approved invoice notes",
+    "tax_rate": 15,
+    "tax_note": "VAT 15%",
+    "items": [
+      { "description": "Approved service", "quantity": 1, "rate": 100 }
+    ]
+  }
+}
+```
+
+## Prepare the approval packet
 
 ```sh
-work_dir="$(mktemp -d)"
-node scripts/invoicegen-draft-workflow.mjs \
-  --request-path scripts/invoicegen-fixtures/synthetic-request.json \
-  --register-path "$work_dir/number-register.json" \
-  --output-dir "$work_dir/drafts" \
-  --config-path scripts/invoicegen-fixtures/synthetic-config.yaml \
-  --template-contract-path scripts/invoicegen-fixtures/template-contract.json \
+node scripts/invoicegen-approved-draft.mjs prepare-approval \
+  --request-path request.json \
+  --config-path /paperclip/.config/invoicegen/config.yaml \
+  --template-contract-path scripts/invoicegen-template-contract.json \
+  --invoicegen-bin /usr/local/bin/invoicegen \
+  > approval-payload.json
+```
+
+This packet binds the exact request, sender config, renderer, and template contract hashes. It also exposes the reviewed config identity (`senderName`, `currency`, `numberPrefix`, and `logoSha256`); the workflow requires a Bermont Digital sender, `ZAR`, and `INVBD`. If the managed logo is present, it is hash-bound to approval, copied into the execution directory, and the staged config is rewritten to that immutable copy. A human fills in `reservedBy`, `reservedAt`, `evidenceReference`, and `iqHandoff: "human-verified"`. The operator then creates a Paperclip approval:
+
+```sh
+paperclipai approval create --profile bermont \
+  -C 5d217ebe-1844-4d6e-bfef-06ee0c541750 \
+  --type request_board_approval \
+  --payload "$(jq -c . approval-payload.json)" \
+  --issue-ids <paperclip-issue-uuid>
+```
+
+The board must approve that Paperclip record. An editable local JSON file is not approval. Rendering queries the fixed `http://127.0.0.1:3100` Paperclip API endpoint directly with `PAPERCLIP_API_KEY`. Callers cannot override the approval endpoint, executable, profile, or context.
+
+Changing the request, config, renderer, or template after board approval invalidates the packet.
+
+## Render the approved draft
+
+```sh
+node scripts/invoicegen-approved-draft.mjs render \
+  --request-path request.json \
+  --approval-id <approved-paperclip-approval-id> \
+  --company-id 5d217ebe-1844-4d6e-bfef-06ee0c541750 \
+  --register-path /paperclip/shared/invoicegen/number-register.json \
+  --output-dir /paperclip/shared/invoicegen/drafts \
+  --config-path /paperclip/.config/invoicegen/config.yaml \
+  --template-contract-path scripts/invoicegen-template-contract.json \
   --invoicegen-bin /usr/local/bin/invoicegen
 ```
 
-The output directory contains the canonical input, draft PDF, and `audit-manifest.json`. The workflow stages private copies of the config and renderer, hashes the copies it uses, renders to a temporary path, requires a PDF header, and only then promotes the artifact. The manifest records exact SHA-256 hashes for the request, config, embedded template source, template contract, renderer binary, canonical input, and artifact. The checked-in template contract pins fork tag `v0.1.2-bermont.1`, commit `1929e7ba9536c8801ddcd039d07ebd446b5b8b09`, and its embedded template source hash.
+The output is named `INVBD<number>-DRAFT.pdf`. Every page is visibly marked `DRAFT — NOT ISSUED`, and the renderer uses `Draft Invoice` and `DRAFT DATE` labels. The audit manifest records approval identity and exact hashes. Repeating the same approved request is idempotent. Reusing a number or idempotency key with different content fails closed.
 
-A repeated command with identical inputs returns `idempotent: true` and does not render again. The coordinated JSON register binds each synthetic number and idempotency key under an atomic directory lock. Each lock records its owner process. A later run reclaims the lock only when that process is demonstrably absent. Reusing either identity with different content fails closed. A renderer failure leaves the number reserved so an operator can retry the same request without creating a duplicate.
+## Lock diagnosis
 
-## Human handoff for any future real invoice
+The number register and execution locks end in `.lock`. They contain only PID, hostname, and an ownership token. If the process crashes, the lock remains deliberately fail-closed.
 
-This milestone does **not** support real invoices. Before extending it, a human must complete and record all of these steps in the Paperclip issue:
+Before manual cleanup:
 
-1. Review the real client, recipient, line items, amount, VAT treatment, and invoice date.
-2. Inspect IQ Retail directly and reserve the real `INVBD` number in the single coordinated production register. No Paperclip agent performs this step.
-3. Record the human approver, approval time, reservation evidence, and exact approved input hashes.
-4. Approve a separate implementation that preserves distinct `draft`, `approved`, `issued`, and `sent` states. State transitions must be explicit and audited.
-5. Keep issuance and sending as separate human actions. A draft approval must never imply issue or send.
+1. Confirm the recorded pod or hostname no longer exists.
+2. Confirm the recorded PID is not running on that host.
+3. Confirm no approved-draft process is active in any Paperclip pod.
+4. Preserve the register, request, approval, PDF, and manifest.
+5. Remove only the stale `.lock` file.
+6. Retry with the same request and idempotency key.
 
-Do not copy the synthetic register into a production number register. Do not treat a synthetic PDF as an invoice.
+A renderer failure leaves the approved number reserved and removes temporary PDF output.
 
 ## Verification
 
 ```sh
-node --test scripts/invoicegen-draft-workflow.test.mjs
+pnpm test:invoicegen-approved-draft
 ```
 
-The tests use a fake local renderer. They do not contain client data. They do not issue or send an invoice.
+Tests use approved example client data and a fake local renderer. They do not access IQ, issue invoices, or send messages.
 
 ## Rollback
 
-1. Stop invoking the wrapper. It has no background service.
-2. Preserve `audit-manifest.json` and `number-register.json` as audit evidence.
-3. Remove the generated synthetic draft directory if it is no longer needed.
-4. Revert the wrapper, fixtures, test, and this runbook from source control.
-
-Rollback requires no IQ change, credential change, service restart, image change, deployment, or client communication.
+Stop invoking the CLI and preserve the number register and audit manifests. Reverting the script requires no IQ change, credential change, email, deployment restart, or client communication.
