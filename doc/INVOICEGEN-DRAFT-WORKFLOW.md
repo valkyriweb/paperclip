@@ -9,9 +9,10 @@ This milestone proves an outside-IQ Invoicegen path with synthetic data only. It
 - `mode` is `synthetic`.
 - `state` is `draft`.
 - The number is in the isolated `990000`–`999999` synthetic range.
-- The sender and client use the exact synthetic markers.
-- The request has no email address or send, approval, or issuance field.
-- The synthetic subtotal is at most ZAR 100.
+- The sender, client, notes, tax fields, and line item match the exact checked-in synthetic fixture.
+- The config hash matches the exact checked-in ZAR synthetic config.
+- The renderer binary hash matches an approved binary from the pinned release.
+- The request has no email address or send, approval, or issuance field at any nesting depth.
 
 The tool invokes only `invoicegen generate`. It has no approve, issue, send, email, IQ, or server integration. Any `approved`, `issued`, or `sent` state fails before the renderer starts.
 

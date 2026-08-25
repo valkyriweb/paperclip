@@ -21,6 +21,11 @@ const SYNTHETIC_NUMBER_MIN = 990000;
 const SYNTHETIC_NUMBER_MAX = 999999;
 const PINNED_RENDERER_COMMIT = "1929e7ba9536c8801ddcd039d07ebd446b5b8b09";
 const PINNED_TEMPLATE_SHA256 = "3940eee903d905c614144ffcc7e5dc657a44ace84427743914ccf2c8684f171a";
+const PINNED_SYNTHETIC_CONFIG_SHA256 = "d4890cdda15d0741bc2a7d65cb1bf54b8a5e9975b7f70a05d4a9a942ecf99709";
+const APPROVED_RENDERER_SHA256 = new Set([
+  "eacc1bcc910408c4fd9e62cf435f22750f8e480a430ae05234f9127095d8e6af", // linux-amd64 production image
+  "9f5341d0085ba7d0dca731aef9ef1742d619f411d2507491dabf859cce5b88c9", // macOS operator binary
+]);
 const LOCK_RETRIES = 1_400;
 const LOCK_DELAY_MS = 25;
 
@@ -108,27 +113,31 @@ function validateRequest(request) {
     fail(`synthetic invoice number must be an integer from ${SYNTHETIC_NUMBER_MIN} to ${SYNTHETIC_NUMBER_MAX}`);
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(invoice.date ?? "")) fail("invoice date must use YYYY-MM-DD");
-  if (invoice.sender?.name !== "SYNTHETIC TEST SENDER") fail("sender must be SYNTHETIC TEST SENDER");
-  if (!String(invoice.client?.bill_to ?? "").startsWith("SYNTHETIC TEST CLIENT\n")) {
-    fail("bill_to must start with the synthetic client marker");
+  if (invoice.sender?.name !== "SYNTHETIC TEST SENDER" || invoice.sender?.address !== "TEST DATA ONLY\nNOT A REAL BUSINESS") {
+    fail("sender must match the exact synthetic fixture");
   }
-  if (!String(invoice.client?.ship_to ?? "").startsWith("SYNTHETIC TEST CLIENT\n")) {
-    fail("ship_to must start with the synthetic client marker");
+  if (invoice.client?.bill_to !== "SYNTHETIC TEST CLIENT\nNOT A REAL RECIPIENT") {
+    fail("bill_to must match the exact synthetic fixture");
   }
-  if (!String(invoice.notes ?? "").includes("NOT FOR ISSUE OR SEND")) {
-    fail("notes must include NOT FOR ISSUE OR SEND");
+  if (invoice.client?.ship_to !== "SYNTHETIC TEST CLIENT\nNOT A REAL RECIPIENT") {
+    fail("ship_to must match the exact synthetic fixture");
   }
-  if (!Array.isArray(invoice.items) || invoice.items.length === 0) fail("at least one synthetic line item is required");
-
-  let subtotal = 0;
-  for (const item of invoice.items) {
-    if (!String(item.description ?? "").toLowerCase().includes("synthetic")) fail("every item description must be synthetic");
-    if (!Number.isFinite(item.quantity) || item.quantity <= 0 || !Number.isFinite(item.rate) || item.rate < 0) {
-      fail("synthetic item quantity and rate must be finite non-negative numbers");
-    }
-    subtotal += item.quantity * item.rate;
+  if (invoice.client?.default_rate !== 1) fail("default_rate must match the exact synthetic fixture");
+  if (invoice.notes !== "DRAFT — SYNTHETIC TEST DATA — NOT FOR ISSUE OR SEND") {
+    fail("notes must match the exact synthetic fixture");
   }
-  if (subtotal > 100) fail("synthetic subtotal must not exceed 100");
+  if (invoice.tax_rate !== 0 || invoice.tax_note !== "SYNTHETIC TEST ONLY") {
+    fail("tax fields must match the exact synthetic fixture");
+  }
+  if (
+    !Array.isArray(invoice.items) ||
+    invoice.items.length !== 1 ||
+    invoice.items[0]?.description !== "Synthetic service fixture" ||
+    invoice.items[0]?.quantity !== 1 ||
+    invoice.items[0]?.rate !== 1
+  ) {
+    fail("line items must match the exact synthetic fixture");
+  }
 
   const serialized = canonicalJson(request);
   if (/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(serialized)) fail("synthetic requests must not contain email addresses");
@@ -272,6 +281,13 @@ export async function runDraftWorkflow(options) {
       rendererSha256: await sha256File(invoicegenBin),
       inputSha256: sha256Bytes(invoiceInput),
     };
+    if (hashes.configSha256 !== PINNED_SYNTHETIC_CONFIG_SHA256) {
+      fail("config does not match the pinned synthetic fixture");
+    }
+    const testRendererAllowed = options.testOnlyAllowUnpinnedRenderer === true && Boolean(env.NODE_TEST_CONTEXT);
+    if (!APPROVED_RENDERER_SHA256.has(hashes.rendererSha256) && !testRendererAllowed) {
+      fail("renderer binary SHA-256 is not approved for the pinned Invoicegen release");
+    }
 
     try {
       const manifest = await readJson(manifestPath, "existing audit manifest");

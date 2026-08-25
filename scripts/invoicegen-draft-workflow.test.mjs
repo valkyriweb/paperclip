@@ -29,7 +29,10 @@ writeFileSync(output, Buffer.concat([Buffer.from("%PDF-synthetic\\n"), readFileS
 `,
     { mode: 0o755 },
   );
-  await writeFile(config, "sender:\n  name: SYNTHETIC TEST SENDER\ndefaults:\n  currency: ZAR\n");
+  await writeFile(
+    config,
+    "sender:\n  name: SYNTHETIC TEST SENDER\n  address: |\n    TEST DATA ONLY\n    NOT A REAL BUSINESS\n\ndefaults:\n  currency: ZAR\n  date_format: '%Y-%m-%d'\n  tax_rate: 0\n  tax_note: SYNTHETIC TEST ONLY\n",
+  );
   await writeFile(
     templateContract,
     JSON.stringify({
@@ -50,7 +53,7 @@ writeFileSync(output, Buffer.concat([Buffer.from("%PDF-synthetic\\n"), readFileS
       invoice: {
         number: 990001,
         date: "2026-08-25",
-        sender: { name: "SYNTHETIC TEST SENDER", address: "TEST DATA ONLY" },
+        sender: { name: "SYNTHETIC TEST SENDER", address: "TEST DATA ONLY\nNOT A REAL BUSINESS" },
         client: {
           bill_to: "SYNTHETIC TEST CLIENT\nNOT A REAL RECIPIENT",
           ship_to: "SYNTHETIC TEST CLIENT\nNOT A REAL RECIPIENT",
@@ -77,6 +80,7 @@ async function run(f) {
     templateContractPath: f.templateContract,
     invoicegenBin: f.bin,
     env: { ...process.env, FAKE_CALLS: f.calls },
+    testOnlyAllowUnpinnedRenderer: true,
   });
 }
 
@@ -138,6 +142,15 @@ test("fails closed for non-draft states and non-synthetic data", async () => {
   await assert.rejects(readFile(f.calls, "utf8"), /ENOENT/, "renderer must not run");
 });
 
+test("rejects real-looking text appended to synthetic fixture fields", async () => {
+  const f = await fixture();
+  const request = JSON.parse(await readFile(f.request, "utf8"));
+  request.invoice.client.bill_to += "\nReal Customer Ltd";
+  await writeFile(f.request, JSON.stringify(request));
+
+  await assert.rejects(run(f), /bill_to must match the exact synthetic fixture/);
+});
+
 test("rejects forbidden workflow fields at any nesting depth", async () => {
   const f = await fixture();
   const request = JSON.parse(await readFile(f.request, "utf8"));
@@ -146,6 +159,29 @@ test("rejects forbidden workflow fields at any nesting depth", async () => {
 
   await assert.rejects(run(f), /field approvedAt is not allowed/);
   await assert.rejects(readFile(f.calls, "utf8"), /ENOENT/, "renderer must not run");
+});
+
+test("rejects config that differs from the pinned synthetic fixture", async () => {
+  const f = await fixture();
+  await writeFile(f.config, "sender:\n  name: Real Business\ndefaults:\n  currency: USD\n");
+
+  await assert.rejects(run(f), /config does not match the pinned synthetic fixture/);
+});
+
+test("rejects an unapproved renderer binary outside the test-only path", async () => {
+  const f = await fixture();
+  await assert.rejects(
+    runDraftWorkflow({
+      requestPath: f.request,
+      registerPath: f.register,
+      outputDir: f.outputDir,
+      configPath: f.config,
+      templateContractPath: f.templateContract,
+      invoicegenBin: f.bin,
+      env: { ...process.env, NODE_TEST_CONTEXT: "" },
+    }),
+    /renderer binary SHA-256 is not approved/,
+  );
 });
 
 test("rejects template provenance that differs from the pinned release", async () => {
@@ -185,6 +221,7 @@ process.exit(0);
       templateContractPath: options.templateContract,
       invoicegenBin: options.bin,
       env: { ...process.env, FAILURE_MARKER: marker },
+      testOnlyAllowUnpinnedRenderer: true,
     });
 
   await assert.rejects(runStale(), /renderer exited with status 1/);
