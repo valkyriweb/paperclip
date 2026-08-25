@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -159,6 +159,43 @@ test("rejects forbidden workflow fields at any nesting depth", async () => {
 
   await assert.rejects(run(f), /field approvedAt is not allowed/);
   await assert.rejects(readFile(f.calls, "utf8"), /ENOENT/, "renderer must not run");
+});
+
+test("rejects every unknown field instead of forwarding it to the renderer", async () => {
+  for (const mutate of [
+    (request) => (request.invoice.po_number = "REAL-PO"),
+    (request) => (request.invoice.sender.logo = "/private/real-logo.svg"),
+    (request) => (request.invoice.items[0].metadata = { customer: "real" }),
+  ]) {
+    const f = await fixture();
+    const request = JSON.parse(await readFile(f.request, "utf8"));
+    mutate(request);
+    await writeFile(f.request, JSON.stringify(request));
+    await assert.rejects(run(f), /unknown field/);
+  }
+});
+
+test("reclaims a lock whose recorded owner process is dead", async () => {
+  const f = await fixture();
+  await mkdir(`${f.register}.lock`);
+  await writeFile(
+    join(`${f.register}.lock`, "owner.json"),
+    JSON.stringify({ schemaVersion: 1, pid: 2_147_483_647, hostname: "test-host" }),
+  );
+
+  const result = await run(f);
+  assert.equal(result.idempotent, false);
+});
+
+test("reclaims an old ownerless lock left between lock creation and owner write", async () => {
+  const f = await fixture();
+  const lockPath = `${f.register}.lock`;
+  await mkdir(lockPath);
+  const old = new Date(Date.now() - 120_000);
+  await utimes(lockPath, old, old);
+
+  const result = await run(f);
+  assert.equal(result.idempotent, false);
 });
 
 test("rejects config that differs from the pinned synthetic fixture", async () => {

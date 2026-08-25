@@ -12,6 +12,7 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
+import { hostname } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -28,6 +29,7 @@ const APPROVED_RENDERER_SHA256 = new Set([
 ]);
 const LOCK_RETRIES = 1_400;
 const LOCK_DELAY_MS = 25;
+const OWNERLESS_LOCK_STALE_MS = 60_000;
 
 function fail(message) {
   throw new Error(`invoicegen draft workflow: ${message}`);
@@ -99,7 +101,17 @@ function rejectForbiddenWorkflowFields(value) {
   }
 }
 
+function assertExactKeys(value, allowedKeys, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) fail(`${label} must be an object`);
+  const allowed = new Set(allowedKeys);
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) fail(`unknown field ${label}.${key} is not allowed in a synthetic draft`);
+  }
+}
+
 function validateRequest(request) {
+  rejectForbiddenWorkflowFields(request);
+  assertExactKeys(request, ["schemaVersion", "mode", "state", "idempotencyKey", "invoice"], "request");
   if (request.schemaVersion !== REQUEST_SCHEMA_VERSION) fail("request schemaVersion must be 1");
   if (request.mode !== "synthetic") fail("mode must be synthetic; real client data requires a separate human-approved workflow");
   if (request.state !== "draft") fail("state must be draft; this tool cannot approve, issue, or send invoices");
@@ -108,7 +120,9 @@ function validateRequest(request) {
   }
 
   const invoice = request.invoice;
-  if (!invoice || typeof invoice !== "object") fail("invoice is required");
+  assertExactKeys(invoice, ["number", "date", "sender", "client", "notes", "tax_rate", "tax_note", "items"], "invoice");
+  assertExactKeys(invoice.sender, ["name", "address"], "invoice.sender");
+  assertExactKeys(invoice.client, ["bill_to", "ship_to", "default_rate"], "invoice.client");
   if (!Number.isInteger(invoice.number) || invoice.number < SYNTHETIC_NUMBER_MIN || invoice.number > SYNTHETIC_NUMBER_MAX) {
     fail(`synthetic invoice number must be an integer from ${SYNTHETIC_NUMBER_MIN} to ${SYNTHETIC_NUMBER_MAX}`);
   }
@@ -129,9 +143,11 @@ function validateRequest(request) {
   if (invoice.tax_rate !== 0 || invoice.tax_note !== "SYNTHETIC TEST ONLY") {
     fail("tax fields must match the exact synthetic fixture");
   }
+  if (!Array.isArray(invoice.items) || invoice.items.length !== 1) {
+    fail("line items must match the exact synthetic fixture");
+  }
+  assertExactKeys(invoice.items[0], ["description", "quantity", "rate"], "invoice.items[0]");
   if (
-    !Array.isArray(invoice.items) ||
-    invoice.items.length !== 1 ||
     invoice.items[0]?.description !== "Synthetic service fixture" ||
     invoice.items[0]?.quantity !== 1 ||
     invoice.items[0]?.rate !== 1
@@ -141,7 +157,6 @@ function validateRequest(request) {
 
   const serialized = canonicalJson(request);
   if (/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(serialized)) fail("synthetic requests must not contain email addresses");
-  rejectForbiddenWorkflowFields(request);
 }
 
 function validateTemplateContract(contract) {
@@ -166,20 +181,54 @@ async function hasPdfHeader(path) {
   }
 }
 
+function processIsAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error.code === "ESRCH") return false;
+    return true;
+  }
+}
+
+async function reclaimDeadOwnerLock(lockPath) {
+  let owner;
+  try {
+    owner = JSON.parse(await readFile(join(lockPath, "owner.json"), "utf8"));
+  } catch {
+    const lockStat = await stat(lockPath).catch(() => null);
+    if (!lockStat || Date.now() - lockStat.mtimeMs < OWNERLESS_LOCK_STALE_MS) return false;
+    await rm(lockPath, { recursive: true, force: true });
+    return true;
+  }
+  if (owner.schemaVersion !== 1 || processIsAlive(owner.pid)) return false;
+  await rm(lockPath, { recursive: true, force: true });
+  return true;
+}
+
 async function withLock(registerPath, action) {
   const lockPath = `${registerPath}.lock`;
   await mkdir(dirname(registerPath), { recursive: true });
   for (let attempt = 0; attempt < LOCK_RETRIES; attempt += 1) {
     try {
       await mkdir(lockPath);
-      try {
-        return await action();
-      } finally {
-        await rm(lockPath, { recursive: true, force: true });
-      }
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
+      if (await reclaimDeadOwnerLock(lockPath)) continue;
       await new Promise((resolveDelay) => setTimeout(resolveDelay, LOCK_DELAY_MS));
+      continue;
+    }
+
+    try {
+      await writeFile(
+        join(lockPath, "owner.json"),
+        canonicalJson({ schemaVersion: 1, pid: process.pid, hostname: hostname() }),
+        { mode: 0o600 },
+      );
+      return await action();
+    } finally {
+      await rm(lockPath, { recursive: true, force: true });
     }
   }
   fail(`timed out acquiring coordinated number-register lock ${lockPath}`);
