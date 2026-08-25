@@ -10,14 +10,17 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "approved-invoice-"));
   const requestPath = join(root, "request.json");
   const approvalRecordPath = join(root, "approval-record.json");
+  const approvalTracePath = join(root, "approval-trace.json");
   const paperclipaiBin = join(root, "paperclipai.mjs");
   const configPath = join(root, "config.yaml");
+  const logoPath = join(root, "logo.svg");
   const templateContractPath = join(root, "template.json");
   const invoicegenBin = join(root, "invoicegen.mjs");
   const registerPath = join(root, "register.json");
   const outputDir = join(root, "out");
   await mkdir(outputDir);
-  await writeFile(configPath, "sender:\n  name: Bermont Digital\ndefaults:\n  currency: ZAR\n  number_prefix: INVBD\n");
+  await writeFile(logoPath, "<svg xmlns=\"http://www.w3.org/2000/svg\"><text>Bermont</text></svg>");
+  await writeFile(configPath, `sender:\n  name: Bermont Digital\n  logo: ${logoPath}\ndefaults:\n  currency: ZAR\n  number_prefix: INVBD\n`);
   await writeFile(
     invoicegenBin,
     `#!/usr/bin/env node
@@ -53,6 +56,8 @@ writeFileSync(output, Buffer.concat([Buffer.from("%PDF-approved-draft\\n"), read
   const workflowPath = join(root, "invoicegen-approved-draft.mjs");
   const source = (await readFile(resolve("scripts/invoicegen-approved-draft.mjs"), "utf8"))
     .replace('const cliScript = "/app/cli/dist/index.js";', `const cliScript = ${JSON.stringify(paperclipaiBin)};`)
+    .replace('cwd: "/app"', `cwd: ${JSON.stringify(root)}`)
+    .replaceAll("/paperclip/.config/invoicegen/logo.svg", logoPath)
     .replace("907ce7ce767e82bbc9fd9d8a3dc1cf9cdf8c0d6dfe32e184aec9e161f0675ba5", rendererSha256);
   await writeFile(workflowPath, source);
   const workflow = await import(workflowPath);
@@ -60,8 +65,8 @@ writeFileSync(output, Buffer.concat([Buffer.from("%PDF-approved-draft\\n"), read
   const payload = await workflow.prepareApproval(options);
   Object.assign(payload.numberReservation, { reservedBy: "Luke", reservedAt: "2026-08-25T13:29:00Z", evidenceReference: "BER-400 human handoff", iqHandoff: "human-verified" });
   await writeFile(approvalRecordPath, JSON.stringify({ id: "approval-1", type: "request_board_approval", status: "approved", companyId: "bermont-company", decidedByUserId: "luke-user", decidedAt: "2026-08-25T13:30:00Z", payload }));
-  await writeFile(paperclipaiBin, `#!/usr/bin/env node\nimport { readFileSync } from "node:fs";\nprocess.stdout.write(readFileSync(${JSON.stringify(approvalRecordPath)}, "utf8"));\n`, { mode: 0o755 });
-  return { ...options, ...workflow };
+  await writeFile(paperclipaiBin, `#!/usr/bin/env node\nimport { readFileSync, writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(approvalTracePath)}, JSON.stringify({ argv: process.argv.slice(2), apiUrl: process.env.PAPERCLIP_API_URL ?? null, context: process.env.PAPERCLIP_CONTEXT ?? null, cwd: process.cwd() }));\nprocess.stdout.write(readFileSync(${JSON.stringify(approvalRecordPath)}, "utf8"));\n`, { mode: 0o755 });
+  return { ...options, approvalTracePath, logoPath, ...workflow };
 }
 
 test("CLI rejects approval executable and profile overrides", () => {
@@ -70,6 +75,32 @@ test("CLI rejects approval executable and profile overrides", () => {
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /unsupported render option/);
   }
+});
+
+test("approval lookup ignores redirecting environment and uses the trusted API base", async () => {
+  const f = await fixture();
+  const previous = {
+    url: process.env.PAPERCLIP_API_URL,
+    context: process.env.PAPERCLIP_CONTEXT,
+    key: process.env.PAPERCLIP_API_KEY,
+  };
+  Object.assign(process.env, {
+    PAPERCLIP_API_URL: "http://attacker.invalid",
+    PAPERCLIP_CONTEXT: "/tmp/attacker-context.json",
+    PAPERCLIP_API_KEY: "untrusted-key-cannot-change-the-endpoint",
+  });
+  try {
+    await f.runApprovedDraft(f);
+  } finally {
+    for (const [name, value] of [["PAPERCLIP_API_URL", previous.url], ["PAPERCLIP_CONTEXT", previous.context], ["PAPERCLIP_API_KEY", previous.key]]) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+  const trace = JSON.parse(await readFile(f.approvalTracePath, "utf8"));
+  assert.equal(trace.apiUrl, null);
+  assert.equal(trace.context, null);
+  assert.deepEqual(trace.argv.slice(3, 5), ["--api-base", "http://127.0.0.1:3100"]);
 });
 
 test("prepares an approval packet bound to request, config, renderer, and template", async () => {
@@ -124,6 +155,12 @@ test("requires the reviewed Bermont ZAR and INVBD config identity", async () => 
     await writeFile(f.configPath, config.replace(from, to));
     await assert.rejects(f.prepareApproval(f), expected);
   }
+});
+
+test("rejects logo changes after approval", async () => {
+  const f = await fixture();
+  await writeFile(f.logoPath, "<svg>changed after approval</svg>");
+  await assert.rejects(f.runApprovedDraft(f), /logoSha256 does not match/);
 });
 
 test("requires approval from the configured company", async () => {

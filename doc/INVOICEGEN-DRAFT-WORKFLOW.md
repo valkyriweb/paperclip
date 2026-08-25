@@ -54,7 +54,7 @@ node scripts/invoicegen-approved-draft.mjs prepare-approval \
   > approval-payload.json
 ```
 
-This packet binds the exact request, sender config, renderer, and template contract hashes. It also exposes the reviewed config identity (`senderName`, `currency`, and `numberPrefix`); the workflow requires a Bermont Digital sender, `ZAR`, and `INVBD`. A human fills in `reservedBy`, `reservedAt`, `evidenceReference`, and `iqHandoff: "human-verified"`. The operator then creates a Paperclip approval:
+This packet binds the exact request, sender config, renderer, and template contract hashes. It also exposes the reviewed config identity (`senderName`, `currency`, `numberPrefix`, and `logoSha256`); the workflow requires a Bermont Digital sender, `ZAR`, and `INVBD`. If the managed logo is present, it is hash-bound to approval, copied into the execution directory, and the staged config is rewritten to that immutable copy. A human fills in `reservedBy`, `reservedAt`, `evidenceReference`, and `iqHandoff: "human-verified"`. The operator then creates a Paperclip approval:
 
 ```sh
 paperclipai approval create --profile bermont \
@@ -64,7 +64,7 @@ paperclipai approval create --profile bermont \
   --issue-ids <paperclip-issue-uuid>
 ```
 
-The board must approve that Paperclip record. An editable local JSON file is not approval. Rendering queries the image's trusted `/app/cli/dist/index.js` CLI through the fixed `bermont` profile; callers cannot override the approval executable or profile.
+The board must approve that Paperclip record. An editable local JSON file is not approval. Rendering queries the image's trusted `/app/cli/dist/index.js` CLI through the fixed `bermont` profile and `http://127.0.0.1:3100` endpoint. The subprocess uses a sanitized environment and fixed working directory; callers cannot override the approval executable, endpoint, profile, or context.
 
 Changing the request, config, renderer, or template after board approval invalidates the packet.
 

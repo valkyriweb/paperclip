@@ -46,7 +46,8 @@ test("pinned Invoicegen release renders visible draft markings", { skip: !render
   }));
   const workflowPath = join(root, "invoicegen-approved-draft.mjs");
   const source = (await readFile(resolve("scripts/invoicegen-approved-draft.mjs"), "utf8"))
-    .replace('const cliScript = "/app/cli/dist/index.js";', `const cliScript = ${JSON.stringify(paperclipaiBin)};`);
+    .replace('const cliScript = "/app/cli/dist/index.js";', `const cliScript = ${JSON.stringify(paperclipaiBin)};`)
+    .replace('cwd: "/app"', `cwd: ${JSON.stringify(root)}`);
   await writeFile(workflowPath, source);
   const { prepareApproval, runApprovedDraft } = await import(workflowPath);
   const payload = await prepareApproval(options);
