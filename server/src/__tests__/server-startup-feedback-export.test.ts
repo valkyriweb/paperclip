@@ -29,6 +29,7 @@ const {
   issueThreadInteractionServiceFactoryMock,
   issueThreadInteractionServiceMock,
   loadConfigMock,
+  publishDatabaseBackupMock,
   resolveHeartbeatSchedulingSuppressionMock,
   routineServiceFactoryMock,
   routineServiceMock,
@@ -122,6 +123,7 @@ const {
     close: vi.fn(),
   };
   const loadConfigMock = vi.fn();
+  const publishDatabaseBackupMock = vi.fn();
 
   return {
     createAppMock,
@@ -143,6 +145,7 @@ const {
     issueThreadInteractionServiceFactoryMock,
     issueThreadInteractionServiceMock,
     loadConfigMock,
+    publishDatabaseBackupMock,
     resolveHeartbeatSchedulingSuppressionMock,
     routineServiceFactoryMock,
     routineServiceMock,
@@ -319,7 +322,15 @@ vi.mock("../services/secret-proposals.js", () => ({
 }));
 
 vi.mock("../storage/index.js", () => ({
-  createStorageServiceFromConfig: vi.fn(() => ({ id: "storage-service" })),
+  createSharedObjectStoreFromConfig: vi.fn((config: { storageProvider?: string }) =>
+    config.storageProvider === "s3" ? { id: "shared-object-store" } : null,
+  ),
+  initializeRunLogArchiveObjectStore: vi.fn(() => ({ id: "run-log-object-store" })),
+  initializeStorageService: vi.fn(() => ({ id: "storage-service" })),
+}));
+
+vi.mock("../services/database-backup-object-store.js", () => ({
+  publishDatabaseBackup: publishDatabaseBackupMock,
 }));
 
 vi.mock("../services/feedback-share-client.js", () => ({
@@ -464,6 +475,39 @@ describe("startServer feedback export wiring", () => {
       storageService: { id: "storage-service" },
       serverPort: 3210,
     });
+  });
+
+  it("publishes a completed manual backup before returning its shared reference", async () => {
+    const backupFile = "/tmp/paperclip-test-backups/paperclip.sql.gz";
+    const sharedObject = {
+      objectKey: "system/database-backups/paperclip-id.sql.gz",
+      manifestKey: "system/database-backups/paperclip-id.sql.gz.manifest.json",
+      byteSize: 12,
+      sha256: "a".repeat(64),
+    };
+    loadConfigMock.mockReturnValue(buildTestConfig({
+      storageProvider: "s3",
+      runLogArchiveMode: "off",
+    }));
+    const dbModule = await import("@paperclipai/db");
+    vi.mocked(dbModule.runDatabaseBackup).mockResolvedValue({
+      backupFile,
+      sizeBytes: 12,
+      prunedCount: 0,
+    });
+    publishDatabaseBackupMock.mockResolvedValue(sharedObject);
+    await startServer();
+    const appOptions = createAppMock.mock.calls[0]?.[1] as {
+      databaseBackupService: { runManualBackup(): Promise<Record<string, unknown>> };
+    };
+
+    const result = await appOptions.databaseBackupService.runManualBackup();
+
+    expect(publishDatabaseBackupMock).toHaveBeenCalledWith(expect.objectContaining({
+      store: { id: "shared-object-store" },
+      backupFile,
+    }));
+    expect(result).toMatchObject({ backupFile, sharedObject });
   });
 
   // startServer registers several intervals (heartbeat scheduler, database

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
+import { Readable } from "node:stream";
 import { createLocalDiskStorageProvider } from "../storage/local-disk-provider.js";
 import { createStorageService } from "../storage/service.js";
 
@@ -76,6 +77,53 @@ describe("local disk storage provider", () => {
     });
 
     await expect(service.getObject("company-b", stored.objectKey)).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("removes partial bytes after an interrupted streamed upload", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-storage-"));
+    tempRoots.push(root);
+    const provider = createLocalDiskStorageProvider(root);
+    const interrupted = new Readable({
+      read() {
+        this.push(Buffer.from("partial"));
+        this.destroy(new Error("upload interrupted"));
+      },
+    });
+
+    await expect(provider.putObject({
+      objectKey: "company-1/assets/object-1",
+      body: interrupted,
+      contentType: "application/octet-stream",
+      contentLength: 20,
+      ifNoneMatch: true,
+    })).rejects.toThrow("upload interrupted");
+
+    expect(await provider.headObject({ objectKey: "company-1/assets/object-1" })).toEqual({ exists: false });
+    expect(await fs.readdir(path.join(root, "company-1/assets"))).toEqual([]);
+  });
+
+  it("preserves an existing object on a conditional conflict", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-storage-"));
+    tempRoots.push(root);
+    const provider = createLocalDiskStorageProvider(root);
+    await provider.putObject({
+      objectKey: "company-1/assets/object-1",
+      body: Buffer.from("original"),
+      contentType: "application/octet-stream",
+      contentLength: 8,
+      ifNoneMatch: true,
+    });
+
+    await expect(provider.putObject({
+      objectKey: "company-1/assets/object-1",
+      body: Buffer.from("replacement"),
+      contentType: "application/octet-stream",
+      contentLength: 11,
+      ifNoneMatch: true,
+    })).rejects.toMatchObject({ status: 409 });
+
+    const stored = await provider.getObject({ objectKey: "company-1/assets/object-1" });
+    expect((await readStreamToBuffer(stored.stream)).toString()).toBe("original");
   });
 
   it("delete is idempotent", async () => {

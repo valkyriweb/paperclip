@@ -11,6 +11,11 @@ import {
   resolveRunLogBasePath,
   type RunLogArchiveSource,
 } from "./run-log-store.js";
+import {
+  createDrizzleDurableObjectMetadataStore,
+  createObjectStore,
+  type ObjectStore,
+} from "../storage/object-store.js";
 import { getRunLogArchiveStorageProvider } from "../storage/index.js";
 
 /**
@@ -19,8 +24,8 @@ import { getRunLogArchiveStorageProvider } from "../storage/index.js";
  * Steps 1+2 gave us compress-on-complete (~88x) + a per-run size cap. Step 3
  * closes the lifecycle: keep the (now tiny) compressed logs hot for
  * `hotRetentionDays`, then move older *terminal* runs to object storage keyed
- * `run-logs/<companyId>/<agentId>/<runId>.ndjson.gz`, verify the upload, flip
- * the DB tier pointer to `s3`, and delete the hot copy. A per-company fairness
+ * `<companyId>/run-logs/<agentId>/<runId>.ndjson.gz`, commit verified integrity
+ * metadata, flip the DB tier pointer to `s3`, and delete the hot copy. A per-company fairness
  * budget archives a noisy tenant's oldest terminal runs early so one company
  * cannot starve the shared volume between age sweeps.
  *
@@ -76,16 +81,17 @@ export interface RunLogArchiverDb {
   markMissing(runId: string, now: Date): Promise<number>;
 }
 
-/** Object-storage port (raw provider, system-scoped keys — not company-prefixed). */
+/** Durable object-storage port for immutable, company-scoped run-log archives. */
 export interface RunLogArchiverStorage {
-  putObject(input: {
+  put(input: {
+    companyId: string;
     objectKey: string;
     // Streamed (not buffered) so a large capped gz isn't held whole in RAM.
     body: Buffer | Readable;
     contentType: string;
     contentLength: number;
+    sha256: string;
   }): Promise<void>;
-  headObject(input: { objectKey: string }): Promise<{ exists: boolean; contentLength?: number }>;
 }
 
 /** Filesystem port over the on-disk run-log tree. */
@@ -219,31 +225,16 @@ export function createRunLogArchiver(deps: RunLogArchiverDeps): RunLogArchiver {
     try {
       // Stream the gz straight from disk instead of buffering it in RAM: a
       // capped run can still be hundreds of MB compressed if incompressible.
-      // contentLength comes from prepareArchiveSource's stat, so S3 PutObject
-      // gets the exact length it needs up front.
-      await deps.storage.putObject({
+      // The durable store performs conditional upload, version/checksum HEAD
+      // verification, and metadata commit before this call returns.
+      await deps.storage.put({
+        companyId: row.companyId,
         objectKey: source.objectKey,
         body: createReadStream(source.absPath),
         contentType: GZIP_CONTENT_TYPE,
         contentLength: source.bytes,
+        sha256: source.sha256,
       });
-
-      // Verify-before-delete: only trust the upload once HEAD confirms the
-      // object exists AND its size matches the local gz byte-for-byte.
-      const head = await deps.storage.headObject({ objectKey: source.objectKey });
-      if (!head.exists || head.contentLength !== source.bytes) {
-        log.warn(
-          {
-            runId: row.id,
-            objectKey: source.objectKey,
-            expectedBytes: source.bytes,
-            headBytes: head.contentLength,
-            headExists: head.exists,
-          },
-          "run-log archive: upload verification failed; keeping local copy",
-        );
-        return { outcome: "failed", freed: 0 };
-      }
 
       // Conditional flip: only if the row is still local_file. If another
       // worker already moved it (0 rows updated), the local file is no longer
@@ -531,23 +522,34 @@ export function createNodeRunLogArchiverFs(baseDir: string): RunLogArchiverFs {
   };
 }
 
-/** Wrap the raw {@link getRunLogArchiveStorageProvider} into the archiver's storage port. */
-export function createProviderRunLogArchiverStorage(): RunLogArchiverStorage {
+/** Adapt the shared durable object store to the archiver's narrow storage port. */
+export function createObjectStoreRunLogArchiverStorage(store: ObjectStore): RunLogArchiverStorage {
   return {
-    putObject: (input) => getRunLogArchiveStorageProvider().putObject(input),
-    async headObject(input) {
-      const head = await getRunLogArchiveStorageProvider().headObject({ objectKey: input.objectKey });
-      return { exists: head.exists, contentLength: head.contentLength };
+    async put(input) {
+      await store.put({
+        companyId: input.companyId,
+        kind: "run_log",
+        objectKey: input.objectKey,
+        body: input.body,
+        contentType: input.contentType,
+        contentLength: input.contentLength,
+        sha256: input.sha256,
+      });
     },
   };
 }
 
-/** Production wiring: bind the archiver to Drizzle, the storage provider, and disk. */
+/** Production wiring: bind the archiver to Drizzle, durable object storage, and disk. */
 export function createRunLogArchiverFromRuntime(db: Db, config: Config): RunLogArchiver {
   const baseDir = resolveRunLogBasePath();
+  const provider = getRunLogArchiveStorageProvider();
+  const objectStore = createObjectStore({
+    provider,
+    metadata: createDrizzleDurableObjectMetadataStore(db),
+  });
   return createRunLogArchiver({
     db: createDrizzleRunLogArchiverDb(db),
-    storage: createProviderRunLogArchiverStorage(),
+    storage: createObjectStoreRunLogArchiverStorage(objectStore),
     files: createNodeRunLogArchiverFs(baseDir),
     config: resolveRunLogArchiverConfig(config),
     now: () => new Date(),

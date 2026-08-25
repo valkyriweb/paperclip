@@ -373,7 +373,7 @@ describe("run-log-store size cap", () => {
 });
 
 describe("run-log-store s3 (cold) read path", () => {
-  const KEY = "run-logs/company-1/agent-1/run-1.ndjson.gz";
+  const KEY = "company-1/run-logs/agent-1/run-1.ndjson.gz";
 
   function s3Store(raw: string) {
     const gz = gzipSync(Buffer.from(raw, "utf8"));

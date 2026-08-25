@@ -37,16 +37,17 @@ tier a log currently lives in**:
 
 2. **Cold (S3), after `hotRetentionDays` (default 30).** A periodic in-process
    sweeper (`run-log-archiver.ts`) moves older **terminal** runs to object storage:
-   - **Key schema:** `run-logs/<companyId>/<agentId>/<runId>.ndjson.gz`. Stable,
-     per-run addressable, groups by tenant then agent.
+   - **Key schema:** `<companyId>/run-logs/<agentId>/<runId>.ndjson.gz`. Stable,
+     per-run addressable, groups by tenant then agent, and satisfies the durable
+     object store's company-scope contract.
    - **`log_store` is a tier pointer.** On archive the row is flipped to
      `log_store = 's3'` and `log_ref` is repointed at the S3 object key.
      `log_bytes`/`log_sha256` continue to describe the original uncompressed content.
-   - **Verify-before-delete.** Upload → `headObject` must confirm the object exists
-     **and** its content length equals the local `.gz` size. Only then is the row
-     flipped and the hot copy unlinked (empty agent/company dirs pruned). Any single
-     run's failure is logged and skipped; it stays `local_file` and is retried next
-     sweep. Ordering guarantees we never delete a hot copy we cannot read back.
+   - **Verify-before-delete.** Conditional upload → version/checksum `HEAD` →
+     `durable_objects` metadata commit must complete before the run row is flipped
+     and the hot copy unlinked (empty agent/company dirs pruned). Any single run's
+     failure is logged and skipped; it stays `local_file` and is retried next sweep.
+     Ordering guarantees we never delete a hot copy we cannot read back.
 
 3. **Fairness budget.** Before the age pass, the sweeper walks the on-disk tree to
    compute per-company hot bytes. A company over `companyBudgetBytes` (default 5 GiB)
@@ -54,12 +55,10 @@ tier a log currently lives in**:
    is back under budget. Runs whose status is `queued`/`running` are never selected,
    so a live run is never touched regardless of size.
 
-**Storage access** goes through the existing provider abstraction (`StorageProvider`
-via `getStorageProvider()`), never the AWS SDK directly, so the tier stays
-provider-swappable (local_disk ↔ s3). The system-scoped archiver deliberately uses
-the raw provider rather than the company-scoped `StorageService` facade, because that
-facade enforces a `<companyId>/` object-key prefix appropriate for tenant-facing
-requests but incompatible with the `run-logs/...` system key schema.
+**Storage access** goes through the provider abstraction and metadata-backed durable
+object store, never the AWS SDK directly. Archive keys are company-scoped, and
+PostgreSQL records the exact verified compressed bytes, backend identity, and object
+version before `heartbeat_runs.log_ref` is published.
 
 **Age signal:** `coalesce(finished_at, updated_at)`. `finished_at` is set when a run
 reaches a terminal status, making it the authoritative completion time; `started_at`

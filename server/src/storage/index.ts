@@ -1,4 +1,10 @@
+import type { Db } from "@paperclipai/db";
 import { loadConfig, type Config } from "../config.js";
+import {
+  createDrizzleDurableObjectMetadataStore,
+  createObjectStore,
+  type ObjectStore,
+} from "./object-store.js";
 import { createS3StorageProviderFromConfig, createStorageProviderFromConfig } from "./provider-registry.js";
 import { createStorageService } from "./service.js";
 import type { StorageProvider, StorageService } from "./types.js";
@@ -9,6 +15,8 @@ let cachedStorageProvider: StorageProvider | null = null;
 let cachedProviderSignature: string | null = null;
 let cachedArchiveProvider: StorageProvider | null = null;
 let cachedArchiveSignature: string | null = null;
+let cachedArchiveObjectStore: ObjectStore | null = null;
+let cachedArchiveObjectStoreSignature: string | null = null;
 
 function signatureForConfig(config: Config): string {
   return JSON.stringify({
@@ -22,8 +30,33 @@ function signatureForConfig(config: Config): string {
   });
 }
 
-export function createStorageServiceFromConfig(config: Config): StorageService {
-  return createStorageService(createStorageProviderFromConfig(config));
+export function createStorageServiceFromConfig(config: Config, db?: Db): StorageService {
+  const provider = createStorageProviderFromConfig(config);
+  const durableStore = db
+    ? createObjectStore({
+        provider,
+        metadata: createDrizzleDurableObjectMetadataStore(db),
+      })
+    : undefined;
+  return createStorageService(provider, durableStore);
+}
+
+export function createObjectStoreFromConfig(config: Config, db: Db): ObjectStore {
+  return createObjectStore({
+    provider: createStorageProviderFromConfig(config),
+    metadata: createDrizzleDurableObjectMetadataStore(db),
+  });
+}
+
+export function createSharedObjectStoreFromConfig(config: Config, db: Db): ObjectStore | null {
+  if (config.storageProvider !== "s3") return null;
+  return createObjectStoreFromConfig(config, db);
+}
+
+export function initializeStorageService(config: Config, db: Db): StorageService {
+  cachedStorageService = createStorageServiceFromConfig(config, db);
+  cachedSignature = signatureForConfig(config);
+  return cachedStorageService;
 }
 
 export function getStorageService(): StorageService {
@@ -39,11 +72,9 @@ export function getStorageService(): StorageService {
 /**
  * The raw, non-company-scoped {@link StorageProvider} behind the facade. The
  * company-scoped {@link StorageService} enforces a `<companyId>/` object-key
- * prefix, which is the right guard for tenant-facing artifact requests but not
- * for system-level keys like the run-log archive
- * (`run-logs/<companyId>/<agentId>/<runId>.ndjson.gz`). System sweepers/readers
- * use this provider directly; it stays provider-swappable (local_disk ↔ s3) and
- * never leaks the underlying SDK.
+ * prefix for tenant-facing artifact requests. Internal callers that need the
+ * provider facade without the file-service API use this accessor; durable
+ * run-log archives use their metadata-backed object store instead.
  */
 export function getStorageProvider(): StorageProvider {
   const config = loadConfig();
@@ -72,6 +103,26 @@ export function getRunLogArchiveStorageProvider(): StorageProvider {
     cachedArchiveSignature = signature;
   }
   return cachedArchiveProvider;
+}
+
+export function initializeRunLogArchiveObjectStore(config: Config, db: Db): ObjectStore {
+  const signature = signatureForConfig(config);
+  const provider = config.runLogArchiveMode === "s3"
+    ? createS3StorageProviderFromConfig(config)
+    : createStorageProviderFromConfig(config);
+  cachedArchiveObjectStore = createObjectStore({
+    provider,
+    metadata: createDrizzleDurableObjectMetadataStore(db),
+  });
+  cachedArchiveObjectStoreSignature = signature;
+  return cachedArchiveObjectStore;
+}
+
+export function getRunLogArchiveObjectStore(): ObjectStore | null {
+  const config = loadConfig();
+  const signature = signatureForConfig(config);
+  if (cachedArchiveObjectStoreSignature !== signature) return null;
+  return cachedArchiveObjectStore;
 }
 
 export type { StorageProvider, StorageService, PutFileResult } from "./types.js";

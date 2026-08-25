@@ -11862,24 +11862,35 @@ export function issueRoutes(
     const actor = getActorInfo(req);
     const stored = await storage.putFile({
       companyId,
+      durableKind: "asset",
       namespace: `issues/${issueId}`,
       originalFilename: file.originalname || null,
       contentType,
       body: file.buffer,
     });
 
-    const attachment = await svc.createAttachment({
-      issueId,
-      issueCommentId: parsedMeta.data.issueCommentId ?? null,
-      provider: stored.provider,
-      objectKey: stored.objectKey,
-      contentType: stored.contentType,
-      byteSize: stored.byteSize,
-      sha256: stored.sha256,
-      originalFilename: stored.originalFilename,
-      createdByAgentId: actor.agentId,
-      createdByUserId: actor.actorType === "user" ? actor.actorId : null,
-    });
+    let attachment;
+    try {
+      attachment = await svc.createAttachment({
+        issueId,
+        issueCommentId: parsedMeta.data.issueCommentId ?? null,
+        provider: stored.provider,
+        objectKey: stored.objectKey,
+        contentType: stored.contentType,
+        byteSize: stored.byteSize,
+        sha256: stored.sha256,
+        originalFilename: stored.originalFilename,
+        createdByAgentId: actor.agentId,
+        createdByUserId: actor.actorType === "user" ? actor.actorId : null,
+      });
+    } catch (error) {
+      try {
+        await storage.deleteObject(companyId, stored.objectKey);
+      } catch (cleanupError) {
+        logger.warn({ cleanupError, objectKey: stored.objectKey }, "storage cleanup failed after attachment create failure");
+      }
+      throw error;
+    }
 
     await logActivity(db, {
       companyId,

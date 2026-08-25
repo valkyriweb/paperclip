@@ -7,7 +7,10 @@ import type { Readable } from "node:stream";
 import { notFound } from "../errors.js";
 import { resolvePaperclipInstanceRoot } from "../home-paths.js";
 import { logger } from "../middleware/logger.js";
-import { getRunLogArchiveStorageProvider } from "../storage/index.js";
+import {
+  getRunLogArchiveObjectStore,
+  getRunLogArchiveStorageProvider,
+} from "../storage/index.js";
 
 /**
  * Storage tier a run-log currently lives in.
@@ -21,8 +24,8 @@ import { getRunLogArchiveStorageProvider } from "../storage/index.js";
  */
 export type RunLogStoreType = "local_file" | "s3" | "missing";
 
-/** Object-key prefix for archived run-logs: `run-logs/<companyId>/<agentId>/<runId>.ndjson.gz`. */
-export const RUN_LOG_S3_KEY_PREFIX = "run-logs";
+/** Object-key namespace for archived run-logs: `<companyId>/run-logs/<agentId>/<runId>.ndjson.gz`. */
+export const RUN_LOG_OBJECT_NAMESPACE = "run-logs";
 
 /** Minimal storage surface the store needs to stream an archived (s3) run-log back. */
 export interface RunLogS3Reader {
@@ -233,15 +236,27 @@ function toPosixKey(relPath: string): string {
   return relPath.split(path.sep).join("/");
 }
 
+async function sha256File(filePath: string): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const hash = createHash("sha256");
+    const stream = createReadStream(filePath);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("error", reject);
+    stream.on("end", () => resolve(hash.digest("hex")));
+  });
+}
+
 export interface RunLogArchiveSource {
   /** Absolute path to the gzip file to upload. */
   absPath: string;
   /** Relative path (posix) under the base dir, e.g. `<companyId>/<agentId>/<runId>.ndjson.gz`. */
   relPath: string;
-  /** Full S3 object key: `run-logs/<companyId>/<agentId>/<runId>.ndjson.gz`. */
+  /** Company-scoped durable key: `<companyId>/run-logs/<agentId>/<runId>.ndjson.gz`. */
   objectKey: string;
   /** On-disk (compressed) size in bytes. */
   bytes: number;
+  /** SHA-256 of the exact compressed bytes uploaded. */
+  sha256: string;
 }
 
 /**
@@ -285,11 +300,16 @@ export async function prepareRunLogArchiveSource(
   const stat = await fs.stat(gzAbs).catch(() => null);
   if (!stat) throw notFound("Run log not found");
   const relPath = toPosixKey(path.relative(basePath, gzAbs));
+  const [companyId, ...companyRelativePath] = relPath.split("/");
+  if (!companyId || companyRelativePath.length === 0) {
+    throw new Error("Invalid company-scoped run-log path");
+  }
   return {
     absPath: gzAbs,
     relPath,
-    objectKey: `${RUN_LOG_S3_KEY_PREFIX}/${relPath}`,
+    objectKey: `${companyId}/${RUN_LOG_OBJECT_NAMESPACE}/${companyRelativePath.join("/")}`,
     bytes: stat.size,
+    sha256: await sha256File(gzAbs),
   };
 }
 
@@ -374,16 +394,6 @@ export function createLocalFileRunLogStore(
     const exists = await fs.stat(filePath).catch(() => null);
     if (!exists) throw notFound("Run log not found");
     return readGunzipRange(createReadStream(filePath), offset, limitBytes);
-  }
-
-  async function sha256File(filePath: string): Promise<string> {
-    return new Promise<string>((resolve, reject) => {
-      const hash = createHash("sha256");
-      const stream = createReadStream(filePath);
-      stream.on("data", (chunk) => hash.update(chunk));
-      stream.on("error", reject);
-      stream.on("end", () => resolve(hash.digest("hex")));
-    });
   }
 
   /**
@@ -577,7 +587,15 @@ export function getRunLogStore() {
   // still transparently readable when object storage is configured.
   cachedStore = createLocalFileRunLogStore(basePath, {
     s3Reader: {
-      getObject: (input) => getRunLogArchiveStorageProvider().getObject({ objectKey: input.objectKey }),
+      async getObject(input) {
+        const objectStore = getRunLogArchiveObjectStore();
+        const metadata = await objectStore?.find(input.objectKey);
+        if (objectStore?.shared) {
+          if (!metadata) throw notFound("Run log not found");
+          return { stream: await objectStore.get(metadata) };
+        }
+        return getRunLogArchiveStorageProvider().getObject({ objectKey: input.objectKey });
+      },
     },
   });
   return cachedStore;
