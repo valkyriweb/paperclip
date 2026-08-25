@@ -271,6 +271,41 @@ async function atomicWriteJson(path, value) {
   await chmod(path, 0o600);
 }
 
+function validateRegisterReservations(reservations) {
+  const invoiceNumbers = new Set();
+  const idempotencyKeys = new Set();
+  for (const reservation of reservations) {
+    assertExactKeys(
+      reservation,
+      [
+        "invoiceNumber",
+        "idempotencyKey",
+        "requestSha256",
+        "reservationKind",
+        "state",
+        "humanHandoffRequiredForRealUse",
+      ],
+      "number register reservation",
+    );
+    if (
+      !Number.isInteger(reservation.invoiceNumber) ||
+      reservation.invoiceNumber < SYNTHETIC_NUMBER_MIN ||
+      reservation.invoiceNumber > SYNTHETIC_NUMBER_MAX ||
+      !/^synthetic-[a-z0-9-]{8,80}$/.test(reservation.idempotencyKey ?? "") ||
+      !/^[a-f0-9]{64}$/.test(reservation.requestSha256 ?? "") ||
+      reservation.reservationKind !== "synthetic-only" ||
+      reservation.state !== "reserved" ||
+      reservation.humanHandoffRequiredForRealUse !== true
+    ) {
+      fail("number register reservation has invalid field types or values");
+    }
+    if (invoiceNumbers.has(reservation.invoiceNumber)) fail("number register reservation invoice numbers must be unique");
+    if (idempotencyKeys.has(reservation.idempotencyKey)) fail("number register reservation idempotency keys must be unique");
+    invoiceNumbers.add(reservation.invoiceNumber);
+    idempotencyKeys.add(reservation.idempotencyKey);
+  }
+}
+
 async function reserveSyntheticNumber(registerPath, request, requestSha256) {
   return withLock(registerPath, async () => {
     let register;
@@ -292,6 +327,7 @@ async function reserveSyntheticNumber(registerPath, request, requestSha256) {
     if (register.schemaVersion !== REGISTER_SCHEMA_VERSION || register.namespace !== "invoicegen-synthetic-v1" || !Array.isArray(register.reservations)) {
       fail("number register has an unsupported schema or namespace");
     }
+    validateRegisterReservations(register.reservations);
 
     const numberMatch = register.reservations.find((entry) => entry.invoiceNumber === request.invoice.number);
     const keyMatch = register.reservations.find((entry) => entry.idempotencyKey === request.idempotencyKey);
@@ -320,6 +356,32 @@ async function reserveSyntheticNumber(registerPath, request, requestSha256) {
     await atomicWriteJson(registerPath, register);
     return reservation;
   });
+}
+
+function buildAuditManifest({ request, templateContract, inputPath, artifactPath, renderedArtifactPath, hashes }) {
+  return {
+    schemaVersion: 1,
+    workflowState: "draft",
+    idempotencyKey: request.idempotencyKey,
+    invoiceNumber: request.invoice.number,
+    renderer: {
+      repository: templateContract.rendererRepo,
+      version: templateContract.rendererVersion,
+      commit: templateContract.rendererCommit,
+      invocation: ["generate", basename(inputPath), "-o", basename(renderedArtifactPath)],
+    },
+    safety: {
+      mode: "synthetic",
+      iqAccess: "forbidden",
+      realNumberReservation: "forbidden",
+      approvalCapability: "absent",
+      issuanceCapability: "absent",
+      sendCapability: "absent",
+      humanHandoffRequiredForRealUse: true,
+    },
+    hashes,
+    files: { input: basename(inputPath), artifact: basename(artifactPath) },
+  };
 }
 
 export async function runDraftWorkflow(options) {
@@ -389,6 +451,18 @@ export async function runDraftWorkflow(options) {
       if (manifest.hashes?.artifactSha256 !== artifactSha256) {
         fail("existing artifact hash does not match its audit manifest");
       }
+      hashes.artifactSha256 = artifactSha256;
+      const expectedManifest = buildAuditManifest({
+        request,
+        templateContract,
+        inputPath,
+        artifactPath,
+        renderedArtifactPath,
+        hashes,
+      });
+      if (canonicalJson(manifest) !== canonicalJson(expectedManifest)) {
+        fail("existing audit manifest metadata does not match this execution");
+      }
       return { artifactPath, manifestPath, idempotent: true };
     } catch (error) {
       if (!error.message.includes("cannot read existing audit manifest") || !error.message.includes("ENOENT")) throw error;
@@ -432,29 +506,14 @@ export async function runDraftWorkflow(options) {
     hashes.artifactSha256 = await sha256File(renderedArtifactPath);
     await rename(renderedArtifactPath, artifactPath);
 
-    const manifest = {
-      schemaVersion: 1,
-      workflowState: "draft",
-      idempotencyKey: request.idempotencyKey,
-      invoiceNumber: request.invoice.number,
-      renderer: {
-        repository: templateContract.rendererRepo,
-        version: templateContract.rendererVersion,
-        commit: templateContract.rendererCommit,
-        invocation: ["generate", basename(inputPath), "-o", basename(renderedArtifactPath)],
-      },
-      safety: {
-        mode: "synthetic",
-        iqAccess: "forbidden",
-        realNumberReservation: "forbidden",
-        approvalCapability: "absent",
-        issuanceCapability: "absent",
-        sendCapability: "absent",
-        humanHandoffRequiredForRealUse: true,
-      },
+    const manifest = buildAuditManifest({
+      request,
+      templateContract,
+      inputPath,
+      artifactPath,
+      renderedArtifactPath,
       hashes,
-      files: { input: basename(inputPath), artifact: basename(artifactPath) },
-    };
+    });
     await atomicWriteJson(manifestPath, manifest);
     return { artifactPath, manifestPath, idempotent: false };
   });

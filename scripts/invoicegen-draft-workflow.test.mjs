@@ -131,6 +131,55 @@ test("rejects number and idempotency collisions", async () => {
   await assert.rejects(run(f), /idempotency key .* is already bound/);
 });
 
+test("rejects malformed and duplicate reservation entries", async () => {
+  for (const reservations of [
+    [
+      {
+        invoiceNumber: "990001",
+        idempotencyKey: "synthetic-old-entry",
+        requestSha256: "0".repeat(64),
+        reservationKind: "synthetic-only",
+        state: "reserved",
+        humanHandoffRequiredForRealUse: true,
+      },
+    ],
+    [
+      {
+        invoiceNumber: 990002,
+        idempotencyKey: "synthetic-old-entry",
+        requestSha256: "0".repeat(64),
+        reservationKind: "synthetic-only",
+        state: "reserved",
+        humanHandoffRequiredForRealUse: true,
+      },
+      {
+        invoiceNumber: 990002,
+        idempotencyKey: "synthetic-other-entry",
+        requestSha256: "1".repeat(64),
+        reservationKind: "synthetic-only",
+        state: "reserved",
+        humanHandoffRequiredForRealUse: true,
+      },
+    ],
+  ]) {
+    const f = await fixture();
+    await writeFile(
+      f.register,
+      JSON.stringify({
+        schemaVersion: 1,
+        namespace: "invoicegen-synthetic-v1",
+        policy: {
+          iqAccess: "human-only",
+          realNumberReservation: "forbidden",
+          handoff: "A human must reconcile any future real number in IQ before a separate approved workflow exists.",
+        },
+        reservations,
+      }),
+    );
+    await assert.rejects(run(f), /number register reservation/);
+  }
+});
+
 test("fails closed for non-draft states and non-synthetic data", async () => {
   for (const state of ["approved", "issued", "sent"]) {
     const f = await fixture({ state });
@@ -305,6 +354,22 @@ test("detects persisted input, config, and renderer changes", async () => {
   const stagedRendererPath = join(executionDir, ".bin", "invoicegen");
   await writeFile(stagedRendererPath, "mutated");
   await assert.rejects(run(f), /renderer hash does not match/);
+});
+
+test("rejects changed manifest identity, state, safety, or unknown metadata", async () => {
+  for (const mutate of [
+    (manifest) => (manifest.workflowState = "approved"),
+    (manifest) => (manifest.idempotencyKey = "synthetic-other-key"),
+    (manifest) => (manifest.safety.sendCapability = "present"),
+    (manifest) => (manifest.unexpected = true),
+  ]) {
+    const f = await fixture();
+    const result = await run(f);
+    const manifest = JSON.parse(await readFile(result.manifestPath, "utf8"));
+    mutate(manifest);
+    await writeFile(result.manifestPath, JSON.stringify(manifest));
+    await assert.rejects(run(f), /existing audit manifest metadata does not match/);
+  }
 });
 
 test("detects artifact changes instead of silently accepting a rerun", async () => {
