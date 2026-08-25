@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { Readable } from "node:stream";
 import { buffer as readStreamToBuffer } from "node:stream/consumers";
@@ -112,15 +113,11 @@ function fakeStorage(over?: Partial<RunLogArchiverStorage>): FakeStorage {
   const objects = new Map<string, Buffer>();
   return {
     objects,
-    putObject: vi.fn(async ({ objectKey, body }) => {
-      // The archiver now streams the gz (a Readable) rather than buffering it.
-      // Consume the stream so the stored object is byte-for-byte the upload.
+    put: vi.fn(async ({ objectKey, body }) => {
+      // The archiver streams the gz rather than buffering it. Consume the stream
+      // so the stored object is byte-for-byte the upload.
       const buf = body instanceof Readable ? await readStreamToBuffer(body) : Buffer.from(body);
       objects.set(objectKey, buf);
-    }),
-    headObject: vi.fn(async ({ objectKey }) => {
-      const buf = objects.get(objectKey);
-      return buf ? { exists: true, contentLength: buf.length } : { exists: false };
     }),
     ...over,
   };
@@ -158,9 +155,15 @@ describe("run-log-archiver archive flow", () => {
     expect(res.ageArchived).toBe(1);
     expect(res.failed).toBe(0);
 
-    const expectedKey = "run-logs/company-1/agent-1/run-1.ndjson.gz";
-    expect(storage.putObject).toHaveBeenCalledTimes(1);
-    expect(storage.headObject).toHaveBeenCalledTimes(1);
+    const expectedKey = "company-1/run-logs/agent-1/run-1.ndjson.gz";
+    expect(storage.put).toHaveBeenCalledTimes(1);
+    const uploaded = storage.objects.get(expectedKey)!;
+    expect(storage.put).toHaveBeenCalledWith(expect.objectContaining({
+      companyId: "company-1",
+      objectKey: expectedKey,
+      contentLength: uploaded.length,
+      sha256: createHash("sha256").update(uploaded).digest("hex"),
+    }));
     expect(storage.objects.has(expectedKey)).toBe(true);
     // Uploaded object decompresses to the original content.
     expect(gunzipSync(storage.objects.get(expectedKey)!).toString("utf8")).toBe(content);
@@ -175,12 +178,13 @@ describe("run-log-archiver archive flow", () => {
     expect(await exists("company-1")).toBe(false);
   });
 
-  it("verify-failure (head size mismatch) keeps the local file and leaves the DB unchanged", async () => {
+  it("verification failure keeps the local file and leaves the DB unchanged", async () => {
     const logRef = await seedGzLog("company-1", "agent-1", "run-1", "payload\n");
     const rows = [makeRow({ id: "run-1", logRef })];
     const storage = fakeStorage({
-      // Report a wrong length so verify-before-delete refuses to flip the row.
-      headObject: vi.fn(async () => ({ exists: true, contentLength: 999_999 })),
+      put: vi.fn(async () => {
+        throw new Error("durable object verification failed");
+      }),
     });
     const archiver = createRunLogArchiver({
       db: fakeDb(rows),
@@ -200,11 +204,11 @@ describe("run-log-archiver archive flow", () => {
     expect(await exists(logRef)).toBe(true);
   });
 
-  it("verify-failure (head throws) is swallowed: local kept, sweep continues", async () => {
+  it("durable-store failure is swallowed: local kept, sweep continues", async () => {
     const logRef = await seedGzLog("company-1", "agent-1", "run-1", "payload\n");
     const rows = [makeRow({ id: "run-1", logRef })];
     const storage = fakeStorage({
-      headObject: vi.fn(async () => {
+      put: vi.fn(async () => {
         throw new Error("network blip");
       }),
     });
@@ -249,7 +253,7 @@ describe("run-log-archiver age gate", () => {
 
     expect(res.ageArchived).toBe(0);
     expect(res.fairnessArchived).toBe(0);
-    expect(storage.putObject).not.toHaveBeenCalled();
+    expect(storage.put).not.toHaveBeenCalled();
     expect(rows.every((r) => r.logStore === "local_file")).toBe(true);
     expect(await exists(recentRef)).toBe(true);
     expect(await exists(runningRef)).toBe(true);
@@ -329,13 +333,14 @@ describe("run-log-archiver failure budgeting (Fix 4)", () => {
     ];
 
     const storage = fakeStorage();
-    const okHead = storage.headObject;
+    const okPut = storage.put;
     // company-1 uploads always verify-fail; company-2 verifies normally.
-    storage.headObject = vi.fn(async (input) =>
-      input.objectKey.includes("company-1")
-        ? { exists: true, contentLength: 999_999 }
-        : okHead(input),
-    );
+    storage.put = vi.fn(async (input) => {
+      if (input.companyId === "company-1") {
+        throw new Error("durable object verification failed");
+      }
+      return okPut(input);
+    });
 
     const archiver = createRunLogArchiver({
       db: fakeDb(rows),
@@ -363,7 +368,9 @@ describe("run-log-archiver failure budgeting (Fix 4)", () => {
       rows.push(makeRow({ id: `r${i}`, logRef: ref, finishedAt: daysAgo(40 + i) }));
     }
     const storage = fakeStorage({
-      headObject: vi.fn(async () => ({ exists: false })),
+      put: vi.fn(async () => {
+        throw new Error("durable object verification failed");
+      }),
     });
     const archiver = createRunLogArchiver({
       db: fakeDb(rows),
@@ -400,7 +407,7 @@ describe("run-log-archiver missing-file rows (stall fix)", () => {
     expect(res.missing).toBe(1);
     expect(res.failed).toBe(0);
     expect(res.ageArchived).toBe(0);
-    expect(storage.putObject).not.toHaveBeenCalled();
+    expect(storage.put).not.toHaveBeenCalled();
     expect(rows[0]!.logStore).toBe("missing");
 
     // It leaves the candidate pool: a follow-up sweep examines nothing.
@@ -511,7 +518,7 @@ describe("run-log-archiver disabled", () => {
 
     expect(res.skipped).toBe(true);
     expect(res.reason).toBe("storage_unavailable");
-    expect(storage.putObject).not.toHaveBeenCalled();
+    expect(storage.put).not.toHaveBeenCalled();
     expect(rows[0]!.logStore).toBe("local_file");
     expect(await exists(logRef)).toBe(true);
   });
@@ -532,7 +539,7 @@ describe("run-log-archiver disabled", () => {
     const res = await archiver.runSweep();
     expect(res.skipped).toBe(true);
     expect(res.reason).toBe("mode_off");
-    expect(storage.putObject).not.toHaveBeenCalled();
+    expect(storage.put).not.toHaveBeenCalled();
   });
 });
 

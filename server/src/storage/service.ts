@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
+import type { ObjectStore } from "./object-store.js";
 import type { StorageService, StorageProvider, PutFileInput, PutFileResult } from "./types.js";
 import { badRequest, forbidden, unprocessable } from "../errors.js";
 
@@ -87,44 +88,103 @@ function assertPutFileInput(input: PutFileInput): void {
   }
 }
 
-export function createStorageService(provider: StorageProvider): StorageService {
+export function createStorageService(
+  provider: StorageProvider,
+  durableStore?: ObjectStore,
+): StorageService {
   return {
     provider: provider.id,
+    shared: provider.shared,
 
     async putFile(input: PutFileInput): Promise<PutFileResult> {
       assertPutFileInput(input);
       const objectKey = buildObjectKey(input.companyId, input.namespace, input.originalFilename);
       const byteSize = input.body.length;
       const contentType = input.contentType.trim().toLowerCase();
-      await provider.putObject({
-        objectKey,
-        body: input.body,
-        contentType,
-        contentLength: byteSize,
-      });
+      const sha256 = hashBuffer(input.body);
+      if (input.durableKind && provider.shared && !durableStore) {
+        throw new Error("Durable object metadata store is not configured");
+      }
+      const durableObject = input.durableKind && provider.shared
+        ? await durableStore!.put({
+            companyId: input.companyId,
+            kind: input.durableKind,
+            objectKey,
+            contentType,
+            body: input.body,
+            contentLength: byteSize,
+            sha256,
+          })
+        : undefined;
+      if (!durableObject) {
+        await provider.putObject({
+          objectKey,
+          body: input.body,
+          contentType,
+          contentLength: byteSize,
+        });
+      }
 
       return {
         provider: provider.id,
         objectKey,
         contentType,
         byteSize,
-        sha256: hashBuffer(input.body),
+        sha256,
         originalFilename: input.originalFilename,
+        durableObject,
       };
     },
 
     async getObject(companyId: string, objectKey: string, options) {
       ensureCompanyPrefix(companyId, objectKey);
-      return provider.getObject({ objectKey, range: options?.range });
+      const metadata = durableStore && provider.shared
+        ? await durableStore.find(objectKey)
+        : null;
+      if (metadata) {
+        if (metadata.status !== "committed") {
+          throw new Error(`Durable object is ${metadata.status}`);
+        }
+        if (!options?.range) {
+          return {
+            stream: await durableStore!.get(metadata),
+            contentType: metadata.contentType,
+            contentLength: metadata.byteSize,
+            etag: metadata.etag ?? undefined,
+            version: metadata.version ?? undefined,
+          };
+        }
+      }
+      return provider.getObject({
+        objectKey,
+        version: metadata?.version ?? undefined,
+        range: options?.range,
+      });
     },
 
     async headObject(companyId: string, objectKey: string) {
       ensureCompanyPrefix(companyId, objectKey);
-      return provider.headObject({ objectKey });
+      const metadata = durableStore && provider.shared
+        ? await durableStore.find(objectKey)
+        : null;
+      if (metadata && metadata.status !== "committed") {
+        return { exists: false };
+      }
+      return provider.headObject({
+        objectKey,
+        version: metadata?.version ?? undefined,
+      });
     },
 
     async deleteObject(companyId: string, objectKey: string) {
       ensureCompanyPrefix(companyId, objectKey);
+      const metadata = durableStore && provider.shared
+        ? await durableStore.find(objectKey)
+        : null;
+      if (metadata) {
+        await durableStore!.delete(metadata);
+        return;
+      }
       await provider.deleteObject({ objectKey });
     },
   };

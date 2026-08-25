@@ -76,12 +76,17 @@ import {
 import { createFeedbackTraceShareClientFromConfig } from "./services/feedback-share-client.js";
 import { buildRuntimeApiCandidateUrls, choosePrimaryRuntimeApiUrl } from "./runtime-api.js";
 import { createPluginWorkerManager } from "./services/plugin-worker-manager.js";
-import { createStorageServiceFromConfig } from "./storage/index.js";
+import {
+  createSharedObjectStoreFromConfig,
+  initializeRunLogArchiveObjectStore,
+  initializeStorageService,
+} from "./storage/index.js";
 import {
   createRunLogArchiverFromRuntime,
   resolveRunLogArchiverConfig,
 } from "./services/run-log-archiver.js";
 import { createHeartbeatResultRetentionFromRuntime } from "./services/heartbeat-result-retention.js";
+import { publishDatabaseBackup } from "./services/database-backup-object-store.js";
 import { printStartupBanner } from "./startup-banner.js";
 import { getBoardClaimWarningUrl, initializeBoardClaimChallenge } from "./board-claim.js";
 import { maybePersistWorktreeRuntimePorts } from "./worktree-config.js";
@@ -692,7 +697,9 @@ export async function startServer(): Promise<StartedServer> {
   }
 
   const uiMode = config.uiDevMiddleware ? "vite-dev" : config.serveUi ? "static" : "none";
-  const storageService = createStorageServiceFromConfig(config);
+  const storageService = initializeStorageService(config, db);
+  initializeRunLogArchiveObjectStore(config, db);
+  const sharedObjectStore = createSharedObjectStoreFromConfig(config, db);
   const feedback = feedbackService(db as any, {
     shareClient: createFeedbackTraceShareClientFromConfig(config),
   });
@@ -740,6 +747,13 @@ export async function startServer(): Promise<StartedServer> {
         filenamePrefix: "paperclip",
       });
       const finishedAt = new Date();
+      const sharedObject = sharedObjectStore
+        ? await publishDatabaseBackup({
+            store: sharedObjectStore,
+            backupFile: result.backupFile,
+            createdAt: finishedAt,
+          })
+        : undefined;
       const response: InstanceDatabaseBackupRunResult = {
         ...result,
         trigger,
@@ -748,6 +762,7 @@ export async function startServer(): Promise<StartedServer> {
         startedAt: startedAt.toISOString(),
         finishedAt: finishedAt.toISOString(),
         durationMs: Date.now() - startedAtMs,
+        sharedObject,
       };
       logger.info(
         {

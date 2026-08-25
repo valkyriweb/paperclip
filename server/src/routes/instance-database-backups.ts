@@ -13,6 +13,12 @@ export type InstanceDatabaseBackupRunResult = RunDatabaseBackupResult & {
   startedAt: string;
   finishedAt: string;
   durationMs: number;
+  sharedObject?: {
+    objectKey: string;
+    manifestKey: string;
+    byteSize: number;
+    sha256: string;
+  };
 };
 
 export type InstanceDatabaseBackupService = {

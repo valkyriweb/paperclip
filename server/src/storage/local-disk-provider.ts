@@ -1,7 +1,9 @@
 import { createReadStream, promises as fs } from "node:fs";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
+import { pipeline } from "node:stream/promises";
 import type { StorageProvider, GetObjectResult, HeadObjectResult } from "./types.js";
-import { notFound, badRequest } from "../errors.js";
+import { notFound, badRequest, conflict } from "../errors.js";
 
 function normalizeObjectKey(objectKey: string): string {
   const normalized = objectKey.replace(/\\/g, "/").trim();
@@ -40,15 +42,43 @@ export function createLocalDiskStorageProvider(baseDir: string): StorageProvider
 
   return {
     id: "local_disk",
+    backendId: `local_disk:${root}`,
+    shared: false,
 
     async putObject(input) {
       const targetPath = resolveWithin(root, input.objectKey);
       const dir = path.dirname(targetPath);
       await fs.mkdir(dir, { recursive: true });
 
-      const tempPath = `${targetPath}.tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      await fs.writeFile(tempPath, input.body);
-      await fs.rename(tempPath, targetPath);
+      if (input.ifNoneMatch && await statOrNull(targetPath)) {
+        throw conflict("Object already exists");
+      }
+
+      const tempPath = `${targetPath}.tmp-${randomUUID()}`;
+      try {
+        if (Buffer.isBuffer(input.body)) {
+          await fs.writeFile(tempPath, input.body);
+        } else {
+          await pipeline(input.body, (await fs.open(tempPath, "wx")).createWriteStream());
+        }
+        if (input.ifNoneMatch) {
+          try {
+            await fs.link(tempPath, targetPath);
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+              throw conflict("Object already exists");
+            }
+            throw error;
+          }
+          await fs.unlink(tempPath);
+        } else {
+          await fs.rename(tempPath, targetPath);
+        }
+      } catch (error) {
+        await fs.unlink(tempPath).catch(() => undefined);
+        throw error;
+      }
+      return { checksumSha256: input.checksumSha256 };
     },
 
     async getObject(input): Promise<GetObjectResult> {

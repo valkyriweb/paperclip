@@ -251,9 +251,37 @@ plugin-owned database schemas. See `doc/DEVELOPING.md` for the current
 `paperclipai db:backup` / `pnpm db:backup` commands and backup retention
 configuration.
 
+Treat these logical dumps as a portable secondary recovery path, not as the primary
+production disaster-recovery system. Production PostgreSQL should use a database-native
+physical backup system with continuous WAL archiving, scheduled base backups, tested
+point-in-time recovery, and independently enforced retention. For example, a
+CloudNativePG deployment can use Barman Cloud to archive WAL and base backups to
+S3-compatible object storage. Physical backups plus WAL are more space- and
+recovery-efficient than repeatedly storing full logical dumps; the logical dump remains
+valuable as a provider-independent escape hatch and for selective inspection.
+
 Database backups do not include non-database instance files such as local-disk
 uploads, workspace files, or the local encrypted secrets master key. Back those paths
 up separately when you need full instance disaster recovery.
+
+When shared object storage is configured, each completed local dump is also published
+as an immutable system-scoped durable object followed by a verified JSON manifest. The
+manifest records the exact object key, compressed byte length, SHA-256, and creation
+time so another replica can materialize integrity-checked restore input without access
+to the producing replica's backup directory. This publication does not replace WAL,
+base-backup, or point-in-time-recovery tooling. Backup scheduling and retention ownership
+remain part of the later HA fencing work.
+
+## Durable object metadata
+
+Shared object bytes are coordinated through `durable_objects`. Each committed row records
+the configured backend identity, immutable object key, owning company or reserved system
+scope, content type, byte length, SHA-256, optional backend version/ETag, and verification
+state. Durable references may be published only after upload and verification commit.
+Integrity failures move a row to `corrupt` with a visible reason. Successful backend deletion leaves a `deleted` tombstone so stale references cannot fall through to unversioned bytes at the same key.
+
+See [Shared object storage](operations/object-storage.md) for provider requirements and the
+remaining paths that keep multi-replica deployment blocked.
 
 ## Secret storage
 

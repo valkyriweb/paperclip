@@ -7,7 +7,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { Readable } from "node:stream";
 import type { StorageProvider, GetObjectResult, HeadObjectResult } from "./types.js";
-import { notFound, unprocessable } from "../errors.js";
+import { conflict, notFound, unprocessable } from "../errors.js";
 
 interface S3ProviderConfig {
   bucket: string;
@@ -78,18 +78,36 @@ export function createS3StorageProvider(config: S3ProviderConfig): StorageProvid
 
   return {
     id: "s3",
+    backendId: `s3:${config.endpoint ?? "aws"}:${bucket}:${prefix}`,
+    shared: true,
 
     async putObject(input) {
       const key = buildKey(prefix, input.objectKey);
-      await client.send(
-        new PutObjectCommand({
-          Bucket: bucket,
-          Key: key,
-          Body: input.body,
-          ContentType: input.contentType,
-          ContentLength: input.contentLength,
-        }),
-      );
+      try {
+        const output = await client.send(
+          new PutObjectCommand({
+            Bucket: bucket,
+            Key: key,
+            Body: input.body,
+            ContentType: input.contentType,
+            ContentLength: input.contentLength,
+            ChecksumSHA256: input.checksumSha256,
+            IfNoneMatch: input.ifNoneMatch ? "*" : undefined,
+          }),
+        );
+        return {
+          etag: output.ETag,
+          version: output.VersionId,
+          checksumSha256: output.ChecksumSHA256 ?? input.checksumSha256,
+        };
+      } catch (err) {
+        const code = (err as { name?: string; $metadata?: { httpStatusCode?: number } }).name;
+        const status = (err as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
+        if (input.ifNoneMatch && (code === "PreconditionFailed" || status === 412)) {
+          throw conflict("Object already exists");
+        }
+        throw err;
+      }
     },
 
     async getObject(input): Promise<GetObjectResult> {
@@ -99,6 +117,7 @@ export function createS3StorageProvider(config: S3ProviderConfig): StorageProvid
           new GetObjectCommand({
             Bucket: bucket,
             Key: key,
+            VersionId: input.version,
             Range: input.range ? `bytes=${input.range.start}-${input.range.end}` : undefined,
           }),
         );
@@ -108,6 +127,8 @@ export function createS3StorageProvider(config: S3ProviderConfig): StorageProvid
           contentType: output.ContentType,
           contentLength: output.ContentLength,
           etag: output.ETag,
+          version: output.VersionId,
+          checksumSha256: output.ChecksumSHA256,
           lastModified: toDate(output.LastModified),
         };
       } catch (err) {
@@ -124,6 +145,8 @@ export function createS3StorageProvider(config: S3ProviderConfig): StorageProvid
           new HeadObjectCommand({
             Bucket: bucket,
             Key: key,
+            VersionId: input.version,
+            ChecksumMode: "ENABLED",
           }),
         );
 
@@ -132,6 +155,8 @@ export function createS3StorageProvider(config: S3ProviderConfig): StorageProvid
           contentType: output.ContentType,
           contentLength: output.ContentLength,
           etag: output.ETag,
+          version: output.VersionId,
+          checksumSha256: output.ChecksumSHA256,
           lastModified: toDate(output.LastModified),
         };
       } catch (err) {
@@ -147,6 +172,7 @@ export function createS3StorageProvider(config: S3ProviderConfig): StorageProvid
         new DeleteObjectCommand({
           Bucket: bucket,
           Key: key,
+          VersionId: input.version,
         }),
       );
     },
