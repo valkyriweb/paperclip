@@ -114,6 +114,7 @@ function sameFile(firstPath: string, secondPath: string): boolean {
 }
 
 export type DatabaseEnvironment = Record<string, string | undefined>;
+export type DatabaseUrlEnvironmentKey = "DATABASE_URL" | "DATABASE_MIGRATION_URL";
 
 export interface DatabaseEnvironmentLayers {
   configPath: string;
@@ -142,6 +143,30 @@ export function resolveDatabaseEnvironmentLayers(): DatabaseEnvironmentLayers {
     cwd,
     combined: { ...cwd, ...paperclip, ...processEntries },
   };
+}
+
+export function resolveDefinedDatabaseUrl(
+  environment: DatabaseEnvironment,
+  key: DatabaseUrlEnvironmentKey,
+): string | undefined {
+  const value = environment[key];
+  if (value === undefined) return undefined;
+
+  const normalized = value.trim();
+  if (!normalized) {
+    throw new Error(`${key} must not be blank when defined`);
+  }
+  return normalized;
+}
+
+function effectiveEnvironmentLayer(
+  layers: DatabaseEnvironmentLayers,
+  key: DatabaseUrlEnvironmentKey,
+): "process" | "paperclip" | "cwd" | undefined {
+  if (layers.process[key] !== undefined) return "process";
+  if (layers.paperclip[key] !== undefined) return "paperclip";
+  if (layers.cwd[key] !== undefined) return "cwd";
+  return undefined;
 }
 
 function migrateLegacyConfig(raw: unknown): PartialConfig | null {
@@ -236,34 +261,35 @@ export function loadDatabaseEnvironment(): DatabaseEnvironment {
   return environment;
 }
 
-export function resolveDatabaseTarget(options: { preferMigrationUrl?: boolean } = {}): ResolvedDatabaseTarget {
-  const layers = resolveDatabaseEnvironmentLayers();
+export function resolveDatabaseTarget(options: {
+  preferMigrationUrl?: boolean;
+  environmentLayers?: DatabaseEnvironmentLayers;
+} = {}): ResolvedDatabaseTarget {
+  const layers = options.environmentLayers ?? resolveDatabaseEnvironmentLayers();
   const { configPath, paperclipEnvPath: envPath } = layers;
 
   if (options.preferMigrationUrl) {
-    const migrationSources = [
-      [layers.process.DATABASE_MIGRATION_URL, "DATABASE_MIGRATION_URL"],
-      [layers.paperclip.DATABASE_MIGRATION_URL, "paperclip-env:DATABASE_MIGRATION_URL"],
-      [layers.cwd.DATABASE_MIGRATION_URL, "cwd-env:DATABASE_MIGRATION_URL"],
-    ] as const;
-    for (const [value, source] of migrationSources) {
-      const migrationUrl = value?.trim();
-      if (migrationUrl) {
-        return { mode: "postgres", connectionString: migrationUrl, source, configPath, envPath };
-      }
+    const migrationUrl = resolveDefinedDatabaseUrl(layers.combined, "DATABASE_MIGRATION_URL");
+    if (migrationUrl !== undefined) {
+      const layer = effectiveEnvironmentLayer(layers, "DATABASE_MIGRATION_URL");
+      const source = layer === "process"
+        ? "DATABASE_MIGRATION_URL"
+        : layer === "paperclip"
+          ? "paperclip-env:DATABASE_MIGRATION_URL"
+          : "cwd-env:DATABASE_MIGRATION_URL";
+      return { mode: "postgres", connectionString: migrationUrl, source, configPath, envPath };
     }
   }
 
-  const databaseSources = [
-    [layers.process.DATABASE_URL, "DATABASE_URL"],
-    [layers.paperclip.DATABASE_URL, "paperclip-env"],
-    [layers.cwd.DATABASE_URL, "cwd-env"],
-  ] as const;
-  for (const [value, source] of databaseSources) {
-    const databaseUrl = value?.trim();
-    if (databaseUrl) {
-      return { mode: "postgres", connectionString: databaseUrl, source, configPath, envPath };
-    }
+  const databaseUrl = resolveDefinedDatabaseUrl(layers.combined, "DATABASE_URL");
+  if (databaseUrl !== undefined) {
+    const layer = effectiveEnvironmentLayer(layers, "DATABASE_URL");
+    const source = layer === "process"
+      ? "DATABASE_URL"
+      : layer === "paperclip"
+        ? "paperclip-env"
+        : "cwd-env";
+    return { mode: "postgres", connectionString: databaseUrl, source, configPath, envPath };
   }
 
   const config = readConfig(configPath);

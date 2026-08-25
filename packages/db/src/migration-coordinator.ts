@@ -4,6 +4,7 @@ import postgres from "postgres";
 const DEFAULT_MIGRATION_LOCK_NAME = "paperclip:database-migrations:v1";
 const DEFAULT_MIGRATION_LOCK_TIMEOUT_MS = 10 * 60 * 1000;
 const DEFAULT_MIGRATION_LOCK_POLL_MS = 250;
+const MIGRATION_SESSION_END_TIMEOUT_SECONDS = 1;
 
 export type MigrationCoordinatorState =
   | "waiting_for_migration_lock"
@@ -117,7 +118,7 @@ export class MigrationCoordinator {
     const startedAt = Date.now();
     const deadline = startedAt + timeoutMs;
     let sessionClosed = false;
-    let closingSession = false;
+    let expectedSessionClose = false;
     let notifySessionLoss!: () => void;
     const sessionLost = new Promise<void>((resolve) => {
       notifySessionLoss = resolve;
@@ -129,9 +130,9 @@ export class MigrationCoordinator {
       prepare: false,
       onnotice: () => {},
       onclose: () => {
-        if (closingSession || sessionClosed) return;
+        if (sessionClosed) return;
         sessionClosed = true;
-        notifySessionLoss();
+        if (!expectedSessionClose) notifySessionLoss();
       },
     });
     let connection: MigrationConnection | undefined;
@@ -144,6 +145,10 @@ export class MigrationCoordinator {
     const reportCleanupError = (error: unknown) => options.onCleanupError?.(error);
     const timeoutError = () =>
       new Error(`Timed out after ${timeoutMs}ms waiting for migration lock ${this.lockId}`);
+    const endSession = async (closeIsExpected: boolean): Promise<void> => {
+      if (closeIsExpected) expectedSessionClose = true;
+      await sql.end({ timeout: MIGRATION_SESSION_END_TIMEOUT_SECONDS });
+    };
     const assertWithinDeadline = () => {
       if (Date.now() >= deadline) throw timeoutError();
       if (options.signal?.aborted) {
@@ -155,17 +160,26 @@ export class MigrationCoordinator {
       if (cleaned) return [];
       cleaned = true;
       const errors: unknown[] = [];
-      if (unlockHeld && sessionClosed) {
+      let ownershipReleased = !unlockHeld;
+      let ownershipFailureRecorded = false;
+      const recordOwnershipFailure = () => {
+        if (ownershipFailureRecorded) return;
+        ownershipFailureRecorded = true;
         errors.push(ownershipError());
+      };
+      if (unlockHeld && sessionClosed) {
+        recordOwnershipFailure();
       } else if (unlockHeld && connection) {
         let unlockFailed = false;
         try {
           await this.unlock(connection, () => sessionClosed);
+          ownershipReleased = true;
+          acquired = false;
         } catch (error) {
           unlockFailed = true;
           errors.push(error);
         }
-        if (sessionClosed && !unlockFailed) errors.push(ownershipError());
+        if (sessionClosed && !unlockFailed) recordOwnershipFailure();
       }
       if (!sessionClosed) {
         try {
@@ -174,12 +188,12 @@ export class MigrationCoordinator {
           errors.push(error);
         }
       }
-      closingSession = true;
       try {
-        await sql.end();
+        await endSession(ownershipReleased);
       } catch (error) {
         errors.push(error);
       }
+      if (unlockHeld && sessionClosed && !ownershipReleased) recordOwnershipFailure();
       return errors;
     };
 
@@ -200,9 +214,8 @@ export class MigrationCoordinator {
           } catch (error) {
             errors.push(error);
           }
-          closingSession = true;
           try {
-            await sql.end();
+            await endSession(true);
           } catch (error) {
             errors.push(error);
           }
@@ -213,9 +226,8 @@ export class MigrationCoordinator {
           cleanupDeferred = true;
         },
         async () => {
-          closingSession = true;
           try {
-            await sql.end();
+            await endSession(true);
           } catch (error) {
             reportCleanupError(error);
           }

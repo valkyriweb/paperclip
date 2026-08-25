@@ -5,7 +5,7 @@ import { ensurePostgresDatabase, getPostgresDataDirectory } from "./client.js";
 import { createEmbeddedPostgresLogBuffer, formatEmbeddedPostgresError } from "./embedded-postgres-error.js";
 import { prepareEmbeddedPostgresNativeRuntime } from "./embedded-postgres-native.js";
 import { resolveMigrationConfig } from "./migration-config.js";
-import { resolveDatabaseEnvironment, resolveDatabaseTarget } from "./runtime-config.js";
+import { resolveDatabaseEnvironmentLayers, resolveDatabaseTarget } from "./runtime-config.js";
 
 type EmbeddedPostgresInstance = {
   initialise(): Promise<void>;
@@ -189,9 +189,10 @@ async function ensureEmbeddedPostgresConnection(
 }
 
 export async function resolveMigrationConnection(): Promise<MigrationConnection> {
-  const env = resolveDatabaseEnvironment();
-  const runtimeTarget = resolveDatabaseTarget();
-  const target = resolveDatabaseTarget({ preferMigrationUrl: true });
+  const environmentLayers = resolveDatabaseEnvironmentLayers();
+  const env = environmentLayers.combined;
+  const runtimeTarget = resolveDatabaseTarget({ environmentLayers });
+  const target = resolveDatabaseTarget({ preferMigrationUrl: true, environmentLayers });
   const runtimeUrl = runtimeTarget.mode === "postgres" ? runtimeTarget.connectionString : undefined;
   const migrationUrl = target.mode === "postgres" ? target.connectionString : undefined;
   const migrationConfig = resolveMigrationConfig(

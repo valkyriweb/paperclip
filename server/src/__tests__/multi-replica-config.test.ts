@@ -21,6 +21,7 @@ function configureIsolatedHome() {
   process.env.PAPERCLIP_HOME = home;
   process.env.PAPERCLIP_CONFIG = path.join(home, "config.json");
   process.env.PAPERCLIP_DEPLOYMENT_PROFILE = "multi_replica";
+  return home;
 }
 
 describe("multi-replica database configuration", () => {
@@ -30,6 +31,24 @@ describe("multi-replica database configuration", () => {
     delete process.env.DATABASE_MIGRATION_URL;
 
     expect(() => loadConfig()).toThrow("multi_replica profile requires external PostgreSQL");
+  });
+
+  it.each([
+    { key: "DATABASE_URL", value: "" },
+    { key: "DATABASE_URL", value: "  \t  " },
+    { key: "DATABASE_MIGRATION_URL", value: "" },
+    { key: "DATABASE_MIGRATION_URL", value: "  \t  " },
+  ] as const)("fails closed for a defined-blank process $key", ({ key, value }) => {
+    const home = configureIsolatedHome();
+    fs.writeFileSync(
+      path.join(home, ".env"),
+      "DATABASE_URL=postgres://lower-runtime@runtime.example.test/paperclip\n" +
+        "DATABASE_MIGRATION_URL=postgres://lower-migration@migration.example.test/paperclip\n" +
+        "DATABASE_MIGRATION_SESSION_CAPABLE=true\n",
+    );
+    process.env[key] = value;
+
+    expect(() => loadConfig()).toThrow(`${key} must not be blank when defined`);
   });
 
   it("requires a direct migration URL", () => {

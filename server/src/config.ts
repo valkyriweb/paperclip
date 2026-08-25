@@ -1,6 +1,10 @@
 import { readConfigFile } from "./config-file.js";
 import { execFileSync } from "node:child_process";
-import { loadDatabaseEnvironment } from "@paperclipai/db/runtime-config";
+import {
+  loadDatabaseEnvironment,
+  resolveDatabaseEnvironment,
+  resolveDefinedDatabaseUrl,
+} from "@paperclipai/db/runtime-config";
 import { maybeRepairLegacyWorktreeConfigAndEnvFiles } from "./worktree-config.js";
 import {
   AUTH_BASE_URL_MODES,
@@ -360,9 +364,17 @@ export function loadConfig(): Config {
       fileDatabaseBackup?.dir ??
       resolveDefaultBackupDir(),
   );
-  const databaseUrl = process.env.DATABASE_URL ?? fileDbUrl;
-  const databaseMigrationUrl = process.env.DATABASE_MIGRATION_URL;
-  const migrationConfig = resolveMigrationConfig(process.env, databaseUrl, databaseMigrationUrl);
+  const databaseEnvironment = resolveDatabaseEnvironment();
+  const databaseUrl = resolveDefinedDatabaseUrl(databaseEnvironment, "DATABASE_URL") ?? fileDbUrl;
+  const databaseMigrationUrl = resolveDefinedDatabaseUrl(
+    databaseEnvironment,
+    "DATABASE_MIGRATION_URL",
+  );
+  const migrationConfig = resolveMigrationConfig(
+    databaseEnvironment,
+    databaseUrl,
+    databaseMigrationUrl,
+  );
   const { deploymentProfile, lockTimeoutMs: migrationLockTimeoutMs } = migrationConfig;
 
   const bindValidationErrors = validateConfiguredBindMode({
