@@ -30,7 +30,7 @@ interface ModelRates {
   cachedTokensIncludedInInput?: boolean;
   /**
    * Cache writes priced as a multiple of the input rate. Anthropic charges
-   * 1.25x; the OpenAI-lane models bill nothing for a cache write, so they set 0.
+   * 1.25x; models without a published cache-write charge set 0.
    * Kept as a multiplier rather than an absolute rate so it cannot drift out of
    * step with the input rate it derives from.
    */
@@ -39,6 +39,33 @@ interface ModelRates {
 
 /** Anthropic's published cache-write premium, and the sane default elsewhere. */
 const DEFAULT_CACHE_WRITE_MULTIPLIER = 1.25;
+
+/**
+ * ClawRouter keeps route pricing beside each provider model in
+ * `providers/*.provider.yaml`. Its bundled Terra manifest still carries the
+ * superseded July 9, 2026 rate, so Paperclip's zero-cost fallback is pinned to
+ * the official OpenAI model and pricing documentation effective July 30, 2026.
+ * Explicit cost reported by ClawRouter remains authoritative.
+ */
+export const CLAWROUTER_GPT_5_6_TERRA_PRICING: Readonly<{
+  pricingRef: string;
+  effectiveAt: string;
+  sources: readonly string[];
+  rates: ModelRates;
+}> = {
+  pricingRef: "openai-gpt-5.6-terra-standard-2026-07-30",
+  effectiveAt: "2026-07-30",
+  sources: [
+    "https://developers.openai.com/api/docs/models/gpt-5.6-terra/",
+    "https://developers.openai.com/api/docs/pricing/",
+  ],
+  rates: {
+    inputMicrosPerMillion: 2_000_000,
+    cachedInputMicrosPerMillion: 200_000,
+    outputMicrosPerMillion: 12_000_000,
+    cacheWriteMultiplier: 1.25,
+  },
+};
 
 const MODEL_RATES: Array<{ match: RegExp; rates: ModelRates }> = [
   {
@@ -89,12 +116,7 @@ const MODEL_RATES: Array<{ match: RegExp; rates: ModelRates }> = [
   },
   {
     match: /gpt-5\.6-terra/i,
-    rates: {
-      inputMicrosPerMillion: 2_500_000,
-      cachedInputMicrosPerMillion: 250_000,
-      outputMicrosPerMillion: 15_000_000,
-      cacheWriteMultiplier: 0,
-    },
+    rates: CLAWROUTER_GPT_5_6_TERRA_PRICING.rates,
   },
   {
     // sol, and the fallback for any unrecognised gpt-5.6 variant: price at the top

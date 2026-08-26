@@ -86,6 +86,13 @@ left runnable so they can be triggered manually if ever needed.
   bucket end to end. Prefer the cost the gateway reports: it takes ClawRouter's explicit
   per-call price when present (`readExplicitCostUsd`), which is the actual biller and beat our
   own table by 44% on a live run. Our rate table is a fallback, not the source of truth.
+  ClawRouter's canonical pricing surface is its provider manifest
+  (`providers/openai.provider.yaml`), where `pricingRef` and `effectiveAt` move together. As
+  verified on 2026-08-26, its bundled Terra entry still has the superseded July 9 values, so
+  Paperclip pins its zero-cost fallback to the official OpenAI model and pricing documentation:
+  `openai-gpt-5.6-terra-standard-2026-07-30` ($2.00/M input, $0.20/M cached input, $12.00/M
+  output; cache writes are $2.50/M). This changes only fallback cost valuation: monthly budget
+  ceilings and budget-policy amounts remain unchanged.
 
   Four traps worth keeping on OpenClaw upgrades. Under the `run` key strategy every run mints a
   fresh session key, so a pre-dispatch baseline asks about a session that does not exist yet

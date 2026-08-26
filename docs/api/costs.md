@@ -19,7 +19,14 @@ POST /api/companies/{companyId}/cost-events
 }
 ```
 
-Typically reported automatically by adapters after each heartbeat. For subscription or proxy-backed routes, adapters should keep `billingType`/`biller` accurate while still reporting the underlying model's equivalent cost in `costCents` when known. If a subscription-backed event reports tokens with zero cost for a known Anthropic/OpenAI model family, Paperclip estimates `costCents` from the underlying model pricing so budgets still apply.
+Typically reported automatically by adapters after each heartbeat. For subscription or proxy-backed routes, adapters should keep `billingType`/`biller` accurate while still reporting the underlying model's equivalent cost in `costCents` when known. If a subscription-backed event reports tokens with zero cost for a known Anthropic/OpenAI model family, Paperclip estimates `costCents` from the underlying model pricing so budgets still apply. Explicit proxy-reported cost always wins over this fallback.
+
+For `clawrouter/gpt-5.6-terra`, the fallback is pinned to OpenAI's July 30, 2026 pricing:
+$2.00/M fresh input, $0.20/M cached input, $2.50/M cache writes, and $12.00/M output.
+ClawRouter's provider manifests are its canonical router pricing surface; this fallback records the
+official provider rate while the installed manifest's older July 9 entry catches up. This is a
+valuation/recalculation change only: it does not modify `budgetMonthlyCents`, budget-policy
+amounts, or any monetary spend ceiling.
 
 ## Company Cost Summary
 
