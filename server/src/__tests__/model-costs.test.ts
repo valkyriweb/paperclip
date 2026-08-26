@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  CLAWROUTER_GPT_5_6_TERRA_PRICING,
   normalizeModelCostCents,
   resolveCostEventCostCents,
   resolveModelCostCents,
@@ -159,9 +160,54 @@ describe("fleet model rate coverage (fork)", () => {
         outputTokens: 1_000_000,
       });
     expect(cost("clawrouter/gpt-5.6-luna")).toBe(700);
-    expect(cost("clawrouter/gpt-5.6-terra")).toBe(1750);
+    expect(cost("clawrouter/gpt-5.6-terra")).toBe(1400);
     expect(cost("clawrouter/gpt-5.6-sol")).toBe(3500);
-    expect(cost("clawrouter/gpt-5.6-terra-pro")).toBe(1750);
+    expect(cost("clawrouter/gpt-5.6-terra-pro")).toBe(1400);
+  });
+
+  it("pins the Terra fallback to the official July 30, 2026 pricing", () => {
+    expect(CLAWROUTER_GPT_5_6_TERRA_PRICING).toMatchObject({
+      pricingRef: "openai-gpt-5.6-terra-standard-2026-07-30",
+      effectiveAt: "2026-07-30",
+      rates: {
+        inputMicrosPerMillion: 2_000_000,
+        cachedInputMicrosPerMillion: 200_000,
+        outputMicrosPerMillion: 12_000_000,
+        cacheWriteMultiplier: 1.25,
+      },
+    });
+    expect(CLAWROUTER_GPT_5_6_TERRA_PRICING.sources).toEqual([
+      "https://developers.openai.com/api/docs/models/gpt-5.6-terra/",
+      "https://developers.openai.com/api/docs/pricing/",
+    ]);
+  });
+
+  it("prices one million cached Terra input tokens at 20 cents", () => {
+    expect(
+      resolveCostEventCostCents({
+        costCents: 0,
+        billingType: "subscription_included",
+        provider: "clawrouter",
+        model: "clawrouter/gpt-5.6-terra",
+        inputTokens: 0,
+        cachedInputTokens: 1_000_000,
+        outputTokens: 0,
+      }),
+    ).toBe(20);
+  });
+
+  it("prices one million Terra cache-write tokens at 250 cents", () => {
+    expect(
+      resolveCostEventCostCents({
+        costCents: 0,
+        billingType: "subscription_included",
+        provider: "clawrouter",
+        model: "clawrouter/gpt-5.6-terra",
+        inputTokens: 0,
+        cacheCreationInputTokens: 1_000_000,
+        outputTokens: 0,
+      }),
+    ).toBe(250);
   });
 
   it("prices claude-opus-5-fast above standard opus-5", () => {

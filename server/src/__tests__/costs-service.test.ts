@@ -9,11 +9,14 @@ import {
   companies,
   agents,
   activityLog,
+  approvals,
   costEvents,
   financeEvents,
   heartbeatRuns,
   issues,
   projects,
+  budgetIncidents,
+  budgetPolicies,
 } from "@paperclipai/db";
 import { costService } from "../services/costs.ts";
 import { financeService } from "../services/finance.ts";
@@ -485,6 +488,9 @@ describeEmbeddedPostgres("cost and finance aggregate overflow handling", () => {
   afterEach(async () => {
     await db.delete(financeEvents);
     await db.delete(costEvents);
+    await db.delete(budgetIncidents);
+    await db.delete(approvals);
+    await db.delete(budgetPolicies);
     await db.delete(activityLog);
     await db.delete(heartbeatRuns);
     await db.delete(issues);
@@ -615,6 +621,87 @@ describeEmbeddedPostgres("cost and finance aggregate overflow handling", () => {
 
     const summary = await costs.summary(companyId);
     expect(summary.spendCents).toBe(520);
+  });
+
+  it("uses the Terra fallback estimate to enforce an unchanged hard-stop policy", async () => {
+    const companyId = randomUUID();
+    const agentId = randomUUID();
+    const runId = randomUUID();
+    const cancelWorkForScope = vi.fn().mockResolvedValue(undefined);
+    const enforcementCosts = costService(db, { cancelWorkForScope });
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "Terra Agent",
+      role: "engineer",
+      status: "active",
+      adapterType: "pi_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    });
+    await db.insert(heartbeatRuns).values({
+      id: runId,
+      companyId,
+      agentId,
+      status: "completed",
+      startedAt: new Date(),
+      finishedAt: new Date(),
+    });
+    await db.insert(budgetPolicies).values({
+      companyId,
+      scopeType: "agent",
+      scopeId: agentId,
+      metric: "billed_cents",
+      windowKind: "calendar_month_utc",
+      amount: 1_400,
+      warnPercent: 80,
+      hardStopEnabled: true,
+      notifyEnabled: false,
+      isActive: true,
+    });
+
+    const event = await enforcementCosts.createEvent(companyId, {
+      heartbeatRunId: runId,
+      agentId,
+      provider: "clawrouter",
+      biller: "clawrouter",
+      billingType: "subscription_included",
+      model: "clawrouter/gpt-5.6-terra",
+      inputTokens: 1_000_000,
+      cachedInputTokens: 0,
+      outputTokens: 1_000_000,
+      costCents: 0,
+      occurredAt: new Date(),
+    });
+
+    const [agent] = await db.select().from(agents).where(eq(agents.id, agentId));
+    const [company] = await db.select().from(companies).where(eq(companies.id, companyId));
+    const [incident] = await db.select().from(budgetIncidents).where(eq(budgetIncidents.companyId, companyId));
+
+    expect(event.costCents).toBe(1_400);
+    expect(agent).toMatchObject({ spentMonthlyCents: 1_400, status: "paused", pauseReason: "budget" });
+    expect(company).toMatchObject({ spentMonthlyCents: 1_400 });
+    expect(incident).toMatchObject({
+      scopeType: "agent",
+      scopeId: agentId,
+      thresholdType: "hard",
+      amountLimit: 1_400,
+      amountObserved: 1_400,
+      status: "open",
+    });
+    expect(cancelWorkForScope).toHaveBeenCalledWith({
+      companyId,
+      scopeType: "agent",
+      scopeId: agentId,
+    });
   });
 
   it("rejects createEvent when neither issueId nor heartbeatRunId is set", async () => {
