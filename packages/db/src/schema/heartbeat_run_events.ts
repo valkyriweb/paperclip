@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, integer, jsonb, index, bigserial } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, timestamp, integer, bigint, jsonb, index, bigserial } from "drizzle-orm/pg-core";
 import { companies } from "./companies.js";
 import { agents } from "./agents.js";
 import { heartbeatRuns } from "./heartbeat_runs.js";
@@ -17,6 +17,10 @@ export const heartbeatRunEvents = pgTable(
     color: text("color"),
     message: text("message"),
     payload: jsonb("payload").$type<Record<string, unknown>>(),
+    // Fence held by heartbeat_runs at the moment this event was accepted (see
+    // run-ownership-store.ts). Nullable: unclaimed/pre-fencing runs have no
+    // fence. An audit trail for reconciliation, not itself enforced on read.
+    fence: bigint("fence", { mode: "number" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
