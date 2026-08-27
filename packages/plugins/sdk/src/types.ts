@@ -238,6 +238,26 @@ export interface PluginJobContext {
   trigger: "schedule" | "manual" | "retry";
   /** ISO 8601 timestamp when the run was scheduled to start. */
   scheduledAt: string;
+  /**
+   * UUID of the durable, fenced claim (active-active reforge plan 004) that
+   * authorized this dispatch. Stable per logical execution — unlike
+   * `runId`, it is safe to use as an idempotency key for the plugin's own
+   * side effects, since the host never dispatches two live occurrences for
+   * the same due tick or manual trigger.
+   *
+   * Optional at the type level for SDK compatibility: this is a purely
+   * additive TS interface with no runtime wire validation (`handleRunJob`
+   * forwards `params.job` straight to the handler), and older test
+   * harnesses / hand-built `PluginJobContext` fixtures predating plan 004
+   * may not set it. The live host (`executeClaimedRun` in
+   * `plugin-job-scheduler.ts`) always populates it on the real wire.
+   */
+  occurrenceId?: string;
+  /**
+   * Monotonic fence minted for this occurrence's claim, for diagnostics.
+   * Optional for the same SDK-compatibility reason as `occurrenceId`.
+   */
+  fence?: number | null;
 }
 
 // ---------------------------------------------------------------------------

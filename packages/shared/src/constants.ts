@@ -1579,6 +1579,11 @@ export const PLUGIN_JOB_RUN_STATUSES = [
   "succeeded",
   "failed",
   "cancelled",
+  // Terminal outcome for a run whose worker RPC never resolved (crash,
+  // timeout, or its completion was rejected as a stale/fenced callback) —
+  // the plugin may or may not have actually performed its side effect.
+  // Never auto-replayed; surfaced for operator investigation only.
+  "unknown",
 ] as const;
 export type PluginJobRunStatus = (typeof PLUGIN_JOB_RUN_STATUSES)[number];
 
