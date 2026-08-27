@@ -24,6 +24,7 @@ import {
   updateIssueWorkProductSchema,
   type Issue,
   type IssueComment,
+  type IssueCommentResponse,
   upsertIssueDocumentSchema,
   upsertIssueFeedbackVoteSchema,
 } from "@paperclipai/shared";
@@ -347,7 +348,7 @@ export function registerIssueCommands(program: Command): void {
             hiddenAt: parseHiddenAt(opts.hiddenAt),
           });
 
-          const updated = await ctx.api.patch<Issue & { comment?: IssueComment | null }>(apiPath`/api/issues/${issueId}`, payload);
+          const updated = await ctx.api.patch<Issue & { comment?: IssueCommentResponse | null }>(apiPath`/api/issues/${issueId}`, payload);
           printOutput(updated, { json: ctx.json });
         } catch (err) {
           handleCommandError(err);
@@ -362,6 +363,7 @@ export function registerIssueCommands(program: Command): void {
       .argument("<issueId>", "Issue ID")
       .requiredOption("--body <text>", "Comment body")
       .option("--reopen", "Reopen if issue is done/cancelled")
+      .option("--no-reopen", "Do not implicitly reopen the issue from this comment")
       .option("--resume", "Request explicit follow-up and wake the assignee when resumable")
       .action(async (issueId: string, opts: IssueCommentOptions) => {
         try {
@@ -371,7 +373,7 @@ export function registerIssueCommands(program: Command): void {
             reopen: opts.reopen,
             resume: opts.resume,
           });
-          const comment = await ctx.api.post<IssueComment>(apiPath`/api/issues/${issueId}/comments`, payload);
+          const comment = await ctx.api.post<IssueCommentResponse>(apiPath`/api/issues/${issueId}/comments`, payload);
           printOutput(comment, { json: ctx.json });
         } catch (err) {
           handleCommandError(err);

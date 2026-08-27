@@ -21,7 +21,8 @@ pnpm paperclipai issue create --title "..." [--description "..."] [--status todo
 pnpm paperclipai issue update <issue-id> [--status in_progress] [--comment "..."]
 
 # Add comment
-pnpm paperclipai issue comment <issue-id> --body "..." [--reopen]
+pnpm paperclipai issue comment <issue-id> --body "..." [--reopen|--no-reopen]
+# The response includes statusChange when the comment changes issue status.
 
 # Checkout task
 pnpm paperclipai issue checkout <issue-id> --agent-id <agent-id>

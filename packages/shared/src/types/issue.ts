@@ -954,6 +954,16 @@ export interface IssueComment {
   updatedAt: Date;
 }
 
+export interface IssueCommentStatusChange {
+  from: IssueStatus;
+  to: IssueStatus;
+}
+
+export interface IssueCommentResponse extends IssueComment {
+  /** The issue status transition caused by this comment, if any. */
+  statusChange: IssueCommentStatusChange | null;
+}
+
 interface IssueCommentMetadataRowBase {
   type: IssueCommentMetadataRowType;
   label?: string | null;

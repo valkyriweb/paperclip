@@ -567,6 +567,7 @@ describe.sequential("issue comment reopen routes", () => {
       .send({ body: "hello" });
 
     expect(res.status).toBe(201);
+    expect(res.body.statusChange).toEqual({ from: "done", to: "todo" });
     expect(mockIssueService.update).toHaveBeenCalledWith(
       "11111111-1111-4111-8111-111111111111",
       { status: "todo" },
@@ -882,6 +883,7 @@ describe.sequential("issue comment reopen routes", () => {
       .send({ body: "please continue" });
 
     expect(res.status).toBe(201);
+    expect(res.body.statusChange).toEqual({ from: "blocked", to: "todo" });
     expect(mockIssueService.update).toHaveBeenCalledWith(
       "11111111-1111-4111-8111-111111111111",
       { status: "todo" },
@@ -903,6 +905,47 @@ describe.sequential("issue comment reopen routes", () => {
         }),
       }),
     ));
+  });
+
+  it("does not reopen a blocked issue via a POST comment when reopen is false", async () => {
+    const issue = makeIssue("blocked");
+    mockIssueService.getById.mockResolvedValue(issue);
+
+    const res = await request(await installActor(createApp()))
+      .post("/api/issues/11111111-1111-4111-8111-111111111111/comments")
+      .send({ body: "triage note", reopen: false });
+
+    expect(res.status).toBe(201);
+    expect(res.body.statusChange).toBeNull();
+    expect(mockIssueService.update).not.toHaveBeenCalled();
+    expect(mockHeartbeatService.wakeup).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ reason: "issue_reopened_via_comment" }),
+    );
+  });
+
+  it("does not reopen a blocked issue via a PATCH comment when reopen is false", async () => {
+    const issue = makeIssue("blocked");
+    mockIssueService.getById.mockResolvedValue(issue);
+    mockIssueService.update.mockImplementation(async (_id: string, patch: Record<string, unknown>) => ({
+      ...issue,
+      ...patch,
+    }));
+
+    const res = await request(await installActor(createApp()))
+      .patch("/api/issues/11111111-1111-4111-8111-111111111111")
+      .send({ comment: "triage note", reopen: false });
+
+    expect(res.status).toBe(200);
+    expect(res.body.comment.statusChange).toBeNull();
+    expect(mockIssueService.update).toHaveBeenCalledWith(
+      "11111111-1111-4111-8111-111111111111",
+      expect.not.objectContaining({ status: "todo" }),
+    );
+    expect(mockHeartbeatService.wakeup).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ reason: "issue_reopened_via_comment" }),
+    );
   });
 
   it("moves in-progress issues with a scheduled retry back to todo via POST human comments", async () => {

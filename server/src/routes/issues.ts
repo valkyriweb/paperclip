@@ -90,7 +90,10 @@ import {
   type IssueWakeDiagnosticsResponse,
   type IssueRelationIssueSummary,
   type IssueReviewPolicy,
+  type IssueComment,
+  type IssueCommentResponse,
   type IssueCommentPresentation,
+  type IssueStatus,
   type IssueWatchdogDiscoveryKind,
   type ProjectWorkspace,
   type SourceTrustMetadata,
@@ -1801,11 +1804,25 @@ function isClosedIssueStatus(status: string | null | undefined): status is "done
   return status === "done" || status === "cancelled";
 }
 
+function buildIssueCommentResponse(
+  comment: IssueComment,
+  previousStatus: string,
+  currentStatus: string,
+): IssueCommentResponse {
+  return {
+    ...comment,
+    statusChange: previousStatus === currentStatus
+      ? null
+      : { from: previousStatus as IssueStatus, to: currentStatus as IssueStatus },
+  };
+}
+
 function shouldImplicitlyMoveCommentedIssueToTodo(input: {
   issueStatus: string | null | undefined;
   assigneeAgentId: string | null | undefined;
   actorType: "agent" | "user";
   actorId: string;
+  allowImplicitReopen: boolean;
   actorRunId: string | null | undefined;
   checkoutRunId: string | null | undefined;
   executionRunId: string | null | undefined;
@@ -1823,6 +1840,7 @@ function shouldImplicitlyMoveCommentedIssueToTodo(input: {
   ) {
     return false;
   }
+  if (!input.allowImplicitReopen) return false;
   // Only human comments should implicitly reopen finished work.
   // Agent-authored comments remain communicative unless reopen was explicit.
   if (input.actorType !== "user") return false;
@@ -8578,6 +8596,7 @@ export function issueRoutes(
             assigneeAgentId: requestedAssigneeAgentId,
             actorType: actor.actorType,
             actorId: actor.actorId,
+            allowImplicitReopen: reopenRequested !== false,
             actorRunId: actor.runId,
             checkoutRunId: existing.checkoutRunId,
             executionRunId: existing.executionRunId,
@@ -9895,6 +9914,9 @@ export function issueRoutes(
     })();
 
     await queueTaskWatchdogEvaluation(issue, actor.runId);
+    const commentResponse = comment
+      ? buildIssueCommentResponse(comment, existing.status, issue.status)
+      : null;
     const changes = issueResponse.changes ?? {};
     if (prefersMinimalIssueUpdateResponse(req)) {
       res.setHeader("Preference-Applied", "return=minimal");
@@ -9903,11 +9925,11 @@ export function issueRoutes(
         identifier: issueResponse.identifier,
         updatedAt: issueResponse.updatedAt,
         changes,
-        comment,
+        comment: commentResponse,
       });
       return;
     }
-    res.json({ ...issueResponse, changes, comment });
+    res.json({ ...issueResponse, changes, comment: commentResponse });
   });
 
   router.delete("/issues/:id", async (req, res) => {
@@ -11008,6 +11030,7 @@ export function issueRoutes(
     const commentPresentation = req.body.presentation ??
       await deriveRecoveryCommentPresentation(req, issue.companyId, req.body.body);
     const reopenRequested = req.body.reopen === true;
+    const implicitReopenAllowed = req.body.reopen !== false;
     const resumeRequested = req.body.resume === true;
     const interruptRequested = req.body.interrupt === true;
     const isClosed = isClosedIssueStatus(issue.status);
@@ -11069,6 +11092,7 @@ export function issueRoutes(
           assigneeAgentId: issue.assigneeAgentId,
           actorType: actor.actorType,
           actorId: actor.actorId,
+          allowImplicitReopen: implicitReopenAllowed,
           actorRunId: actor.runId,
           checkoutRunId: issue.checkoutRunId,
           executionRunId: issue.executionRunId,
@@ -11671,7 +11695,7 @@ export function issueRoutes(
     })();
 
     await queueTaskWatchdogEvaluation(currentIssue, actor.runId);
-    res.status(201).json(comment);
+    res.status(201).json(buildIssueCommentResponse(comment, issue.status, currentIssue.status));
   });
 
   router.post("/issues/:id/feedback-votes", validate(upsertIssueFeedbackVoteSchema), async (req, res) => {
