@@ -13,6 +13,7 @@ import type {
   IssueAttachment,
   IssueCostSummary,
   IssueComment,
+  IssueCommentResponse,
   IssueDocument,
   IssueLabel,
   IssueRecoveryAction,
@@ -32,7 +33,7 @@ import type {
 import { api, type RequestOptions } from "./client";
 
 export type IssueUpdateResponse = Issue & {
-  comment?: IssueComment | null;
+  comment?: IssueCommentResponse | null;
   changes: IssueChanges;
   blockedByIssueIds?: string[];
 };
@@ -292,7 +293,7 @@ export const issuesApi = {
     },
   ) => api.post<FeedbackVote>(`/issues/${id}/feedback-votes`, data),
   addComment: (id: string, body: string, reopen?: boolean, interrupt?: boolean) =>
-    api.post<IssueComment>(
+    api.post<IssueCommentResponse>(
       `/issues/${id}/comments`,
       {
         body,

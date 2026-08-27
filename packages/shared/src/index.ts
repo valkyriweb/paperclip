@@ -981,6 +981,8 @@ export type {
   IssueExecutionStagePrincipal,
   IssueExecutionDecision,
   IssueComment,
+  IssueCommentResponse,
+  IssueCommentStatusChange,
   IssueCommentDerivedAuthorSource,
   IssueCommentMetadata,
   IssueCommentMetadataSection,
