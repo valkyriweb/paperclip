@@ -2591,6 +2591,8 @@ export function createTestHarness(options: TestHarnessOptions): TestHarness {
         runId: partial.runId ?? randomUUID(),
         trigger: partial.trigger ?? "manual",
         scheduledAt: partial.scheduledAt ?? new Date().toISOString(),
+        occurrenceId: partial.occurrenceId ?? randomUUID(),
+        fence: partial.fence ?? null,
       });
     },
     async getData<T = unknown>(key: string, params: Record<string, unknown> = {}) {

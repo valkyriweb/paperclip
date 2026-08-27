@@ -29,18 +29,47 @@
  *    scheduling when plugins start/stop. On registration, the scheduler
  *    computes `nextRunAt` for all active jobs that don't already have one.
  *
+ * 6. **Expiry reconciliation** — A second `setInterval` loop (default 60s,
+ *    independent of the tick loop) sweeps occurrences whose lease has
+ *    genuinely expired (DB clock, plus a grace period) and takes each one
+ *    over via `takeoverExpiredOccurrence`, settling it at the terminal
+ *    `"unknown"` outcome. This never re-dispatches the job — see
+ *    plugin-job-claims-store.ts's module doc for why blind replay is unsafe.
+ *    Without this sweep, an occurrence whose worker crashed mid-lease (no
+ *    completion write, no acknowledgement-revoke) would stay `running`
+ *    forever.
+ *
  * @see PLUGIN_SPEC.md §17 — Scheduled Jobs
  * @see ./plugin-job-store.ts — Persistence layer
  * @see ./cron.ts — Cron parsing utilities
  */
 
-import { and, eq, lte, or } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
-import { pluginJobs, pluginJobRuns } from "@paperclipai/db";
+import { pluginJobs } from "@paperclipai/db";
+import { and, eq, isNull } from "drizzle-orm";
 import type { PluginJobStore } from "./plugin-job-store.js";
 import type { PluginWorkerManager } from "./plugin-worker-manager.js";
 import { parseCron, nextCronTick, validateCron } from "./cron.js";
+import type pino from "pino";
 import { logger } from "../middleware/logger.js";
+import {
+  acknowledgeOccurrence,
+  claimDueOccurrences,
+  claimManualOccurrence,
+  completeOccurrence,
+  DEFAULT_OCCURRENCE_LEASE_TTL_MS,
+  describeStaleOccurrenceRejection,
+  findExpiredOccurrences,
+  isOccurrenceClaimStale,
+  renewOccurrenceLease,
+  revokeUnacknowledgedOccurrences,
+  takeoverExpiredOccurrence,
+  type ClaimedOccurrence,
+  type OccurrenceClaim,
+  type PluginJobOccurrenceRow,
+  type PluginJobRunRow,
+} from "./plugin-job-claims-store.js";
+import type { PluginJobRunStatus } from "@paperclipai/shared";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -54,6 +83,21 @@ const DEFAULT_JOB_TIMEOUT_MS = 5 * 60 * 1_000;
 
 /** Maximum number of concurrent job executions across all plugins. */
 const DEFAULT_MAX_CONCURRENT_JOBS = 10;
+
+/** Default interval between expiry-reconciliation sweeps (60 seconds). */
+const DEFAULT_RECONCILIATION_INTERVAL_MS = 60_000;
+
+/**
+ * Default grace period added on top of an occurrence's own lease expiry
+ * before reconciliation will take it over (30 seconds). This is slack for
+ * clock/scheduling jitter around the lease-renewal cadence
+ * (`leaseTtlMs / 3`, i.e. every ~30s for the default 90s TTL) — a genuinely
+ * healthy renewal that lands a beat late must not be raced by reconciliation.
+ */
+const DEFAULT_RECONCILIATION_GRACE_MS = 30_000;
+
+/** Bounded batch size per reconciliation sweep. */
+const DEFAULT_RECONCILIATION_BATCH_LIMIT = 100;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -75,6 +119,13 @@ export interface PluginJobSchedulerOptions {
   jobTimeoutMs?: number;
   /** Maximum number of concurrent job executions (default: 10). */
   maxConcurrentJobs?: number;
+  /** Interval between expiry-reconciliation sweeps in ms (default: 60s). */
+  reconciliationIntervalMs?: number;
+  /**
+   * Grace period beyond an occurrence's own lease expiry before
+   * reconciliation will take it over, in ms (default: 30s).
+   */
+  reconciliationGraceMs?: number;
 }
 
 /**
@@ -167,6 +218,15 @@ export interface PluginJobScheduler {
   tick(): Promise<void>;
 
   /**
+   * Run a single expiry-reconciliation sweep immediately (for testing).
+   * Also runs automatically on `reconciliationIntervalMs` once `start()` is
+   * called — see I7 in the active-active reforge remediation.
+   *
+   * @internal
+   */
+  reconcile(): Promise<void>;
+
+  /**
    * Get diagnostic information about the scheduler state.
    */
   diagnostics(): SchedulerDiagnostics;
@@ -210,6 +270,8 @@ export function createPluginJobScheduler(
     tickIntervalMs = DEFAULT_TICK_INTERVAL_MS,
     jobTimeoutMs = DEFAULT_JOB_TIMEOUT_MS,
     maxConcurrentJobs = DEFAULT_MAX_CONCURRENT_JOBS,
+    reconciliationIntervalMs = DEFAULT_RECONCILIATION_INTERVAL_MS,
+    reconciliationGraceMs = DEFAULT_RECONCILIATION_GRACE_MS,
   } = options;
 
   const log = logger.child({ service: "plugin-job-scheduler" });
@@ -220,6 +282,9 @@ export function createPluginJobScheduler(
 
   /** Timer handle for the tick loop. */
   let tickTimer: ReturnType<typeof setInterval> | null = null;
+
+  /** Timer handle for the expiry-reconciliation sweep. */
+  let reconciliationTimer: ReturnType<typeof setInterval> | null = null;
 
   /** Whether the scheduler is running. */
   let running = false;
@@ -236,12 +301,19 @@ export function createPluginJobScheduler(
   /** Guard against concurrent tick execution. */
   let tickInProgress = false;
 
+  /** Guard against concurrent reconciliation sweep execution. */
+  let reconciliationInProgress = false;
+
   // -----------------------------------------------------------------------
   // Core: tick
   // -----------------------------------------------------------------------
 
   /**
-   * A single scheduler tick. Queries for due jobs and dispatches them.
+   * A single scheduler tick. Atomically claims a bounded batch of due
+   * occurrences (durable, fenced — see plugin-job-claims-store.ts) and
+   * dispatches them. `nextRunAt` is reserved as part of the same claim
+   * transaction, so a crash between claiming and dispatching cannot lose or
+   * duplicate the schedule pointer advance.
    */
   async function tick(): Promise<void> {
     // Prevent overlapping ticks (in case a tick takes longer than the interval)
@@ -257,71 +329,56 @@ export function createPluginJobScheduler(
     try {
       const now = new Date();
 
-      // Query for jobs whose nextRunAt has passed and are active.
-      // We include jobs with null nextRunAt since they may have just been
-      // registered and need their first run calculated.
-      const dueJobs = await db
-        .select()
-        .from(pluginJobs)
-        .where(
-          and(
-            eq(pluginJobs.status, "active"),
-            lte(pluginJobs.nextRunAt, now),
-          ),
+      // Bounded durable-claim batch: the local concurrency cap and worker
+      // liveness are "local pressure" checks (this replica's own in-memory
+      // state), applied as an eligibility filter on locked candidate rows
+      // before any of them are claimed — see claimDueOccurrences's isEligible.
+      const capacity = maxConcurrentJobs - activeJobs.size;
+      if (capacity <= 0) {
+        log.warn(
+          { maxConcurrentJobs, activeJobCount: activeJobs.size },
+          "max concurrent jobs reached, skipping tick claim",
         );
-
-      if (dueJobs.length === 0) {
         return;
       }
 
-      log.debug({ count: dueJobs.length }, "found due jobs");
-
-      // Dispatch each due job (respecting concurrency limits)
-      const dispatches: Promise<void>[] = [];
-
-      for (const job of dueJobs) {
-        // Concurrency limit
-        if (activeJobs.size >= maxConcurrentJobs) {
-          log.warn(
-            { maxConcurrentJobs, activeJobCount: activeJobs.size },
-            "max concurrent jobs reached, deferring remaining jobs",
-          );
-          break;
-        }
-
-        // Overlap prevention: skip if this job is already running
-        if (activeJobs.has(job.id)) {
-          log.debug(
-            { jobId: job.id, jobKey: job.jobKey, pluginId: job.pluginId },
-            "skipping job — already running (overlap prevention)",
-          );
-          continue;
-        }
-
-        // Check if the worker is available
-        if (!workerManager.isRunning(job.pluginId)) {
-          log.debug(
-            { jobId: job.id, pluginId: job.pluginId },
-            "skipping job — worker not running",
-          );
-          continue;
-        }
-
-        // Validate cron expression before dispatching
-        if (!job.schedule) {
-          log.warn(
-            { jobId: job.id, jobKey: job.jobKey },
-            "skipping job — no schedule defined",
-          );
-          continue;
-        }
-
-        dispatches.push(dispatchJob(job));
+      let claims: ClaimedOccurrence[];
+      try {
+        claims = await claimDueOccurrences(db, {
+          now,
+          limit: capacity,
+          isEligible: (job) => {
+            if (activeJobs.has(job.id)) {
+              log.debug(
+                { jobId: job.id, jobKey: job.jobKey, pluginId: job.pluginId },
+                "skipping job — already running (overlap prevention)",
+              );
+              return false;
+            }
+            if (!workerManager.isRunning(job.pluginId)) {
+              log.debug({ jobId: job.id, pluginId: job.pluginId }, "skipping job — worker not running");
+              return false;
+            }
+            if (!job.schedule) {
+              log.warn({ jobId: job.id, jobKey: job.jobKey }, "skipping job — no schedule defined");
+              return false;
+            }
+            return true;
+          },
+          computeNextRunAt: (job) => computeNextRunAtForJob(job, now),
+        });
+      } catch (err) {
+        log.error({ err: err instanceof Error ? err.message : String(err) }, "failed to claim due occurrences");
+        return;
       }
 
-      if (dispatches.length > 0) {
-        await Promise.allSettled(dispatches);
+      if (claims.length === 0) {
+        return;
       }
+
+      log.debug({ count: claims.length }, "claimed due occurrences");
+
+      await Promise.allSettled(claims.map((claimed) => dispatchJob(claimed)));
     } catch (err) {
       log.error(
         { err: err instanceof Error ? err.message : String(err) },
@@ -333,103 +390,302 @@ export function createPluginJobScheduler(
   }
 
   // -----------------------------------------------------------------------
-  // Core: dispatch a single job
+  // Core: reconcile occurrences whose lease has genuinely expired
   // -----------------------------------------------------------------------
 
   /**
-   * Dispatch a single job run — create the run record, call the worker,
-   * record the result, and advance the schedule pointer.
+   * Bounded expiry-reconciliation sweep (I7). Finds occurrences whose lease
+   * has lapsed by more than `reconciliationGraceMs` and takes each over —
+   * this NEVER re-dispatches or replays the job; it settles the occurrence
+   * (and its run) at the terminal `"unknown"` outcome, per the module's
+   * never-blind-replay rule (see plugin-job-claims-store.ts's module doc and
+   * `takeoverExpiredOccurrence`). This is what actually recovers a job whose
+   * worker crashed, was killed, or whose replica died mid-lease — without
+   * this sweep, such an occurrence would sit `running` forever (nothing else
+   * in this scheduler ever un-claims a lease that hasn't been explicitly
+   * completed or acknowledgement-revoked).
+   *
+   * Runs on its own timer, independent of and non-blocking for the main tick
+   * loop. Bounded to `DEFAULT_RECONCILIATION_BATCH_LIMIT` rows per sweep;
+   * a backlog beyond that is picked up on the next sweep. Each takeover is
+   * independently try/caught so one failing row cannot block the rest of the
+   * batch, and the whole function never throws — it is driven by a bare
+   * `setInterval` callback with no caller to catch a rejection.
    */
-  async function dispatchJob(
-    job: typeof pluginJobs.$inferSelect,
+  async function reconcile(): Promise<void> {
+    if (reconciliationInProgress) {
+      log.debug("skipping reconciliation sweep — previous sweep still in progress");
+      return;
+    }
+    reconciliationInProgress = true;
+    try {
+      let expired: PluginJobOccurrenceRow[];
+      try {
+        expired = await findExpiredOccurrences(db, {
+          graceMs: reconciliationGraceMs,
+          limit: DEFAULT_RECONCILIATION_BATCH_LIMIT,
+        });
+      } catch (err) {
+        log.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          "failed to query expired occurrences for reconciliation",
+        );
+        return;
+      }
+
+      if (expired.length === 0) {
+        return;
+      }
+
+      log.warn({ count: expired.length }, "reconciling expired occurrence leases");
+
+      for (const occurrence of expired) {
+        try {
+          const result = await takeoverExpiredOccurrence(db, {
+            occurrenceId: occurrence.id,
+            graceMs: reconciliationGraceMs,
+          });
+          if (result) {
+            log.warn(
+              { occurrenceId: occurrence.id, jobId: occurrence.jobId, runId: result.run?.id ?? null },
+              "took over expired occurrence lease — marked unknown, not replayed",
+            );
+          }
+        } catch (err) {
+          log.error(
+            {
+              occurrenceId: occurrence.id,
+              jobId: occurrence.jobId,
+              err: err instanceof Error ? err.message : String(err),
+            },
+            "failed to take over expired occurrence",
+          );
+        }
+      }
+    } finally {
+      reconciliationInProgress = false;
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Core: renew an in-flight occurrence's lease while its RPC is pending
+  // -----------------------------------------------------------------------
+
+  /**
+   * Start periodic DB-clock lease renewal for an occurrence while its
+   * `runJob` RPC is in flight. Long-running jobs (up to `jobTimeoutMs`, by
+   * default well beyond the occurrence's lease TTL) must not have their
+   * lease reaped by reconciliation out from under them. Renewal failure
+   * (claim went stale — e.g. a reconciler already took the occurrence over)
+   * is logged, not thrown: the RPC call cannot be cancelled mid-flight, and
+   * the fenced `completeOccurrence` write at the end will reject on its own
+   * if ownership truly moved on.
+   */
+  function startLeaseRenewal(
+    occurrenceId: string,
+    claim: OccurrenceClaim,
+    leaseTtlMs: number,
+    jobLog: pino.Logger,
+  ): () => void {
+    const intervalMs = Math.max(5_000, Math.floor(leaseTtlMs / 3));
+    const timer = setInterval(() => {
+      // Renewal runs detached from any caller's await chain (the timer
+      // fires on its own), so a rejection here (DB connection error, etc.)
+      // would otherwise become an unhandled promise rejection — it MUST be
+      // caught, not just have its resolved-null case handled.
+      renewOccurrenceLease(db, { occurrenceId, claim, leaseTtlMs })
+        .then((renewed) => {
+          if (!renewed) {
+            const rejection = describeStaleOccurrenceRejection({ occurrenceId, claim, context: "lease_renewal" });
+            jobLog.warn(rejection.fields, rejection.event);
+          }
+        })
+        .catch((err: unknown) => {
+          jobLog.error(
+            { occurrenceId, err: err instanceof Error ? err.message : String(err) },
+            "lease renewal threw — will retry on next interval",
+          );
+        });
+    }, intervalMs);
+    return () => clearInterval(timer);
+  }
+
+  /**
+   * Report a rejected completion/acknowledge write. Gated on
+   * `isOccurrenceClaimStale` so the alert-worthy "stale_completion_rejected"
+   * warning is only fired for a genuine ownership dispute (claim no longer
+   * matches the row) — a 0-row CAS can also mean the occurrence id itself is
+   * gone, which is unexpected and escalated separately rather than folded
+   * into the same routine-sounding warning.
+   */
+  async function reportRejectedOccurrenceWrite(
+    jobLog: pino.Logger,
+    occurrenceId: string,
+    claim: OccurrenceClaim,
+    context: string,
   ): Promise<void> {
-    const { id: jobId, pluginId, jobKey, schedule } = job;
-    const jobLog = log.child({ jobId, pluginId, jobKey });
+    const rejection = describeStaleOccurrenceRejection({ occurrenceId, claim, context });
+    let stale: boolean;
+    try {
+      stale = await isOccurrenceClaimStale(db, { occurrenceId, claim });
+    } catch (err) {
+      jobLog.error(
+        { ...rejection.fields, err: err instanceof Error ? err.message : String(err) },
+        "failed to check claim staleness after rejected write",
+      );
+      return;
+    }
+    if (stale) {
+      jobLog.warn(rejection.fields, rejection.event);
+    } else {
+      jobLog.error(rejection.fields, `${rejection.event}:occurrence_missing`);
+    }
+  }
 
-    // Mark as active (overlap prevention)
+  /**
+   * Fenced completion write that can never throw out of the caller — this
+   * runs at the end of `executeClaimedRun`'s success path and inside its
+   * catch block, so a DB error here (not just a stale-claim null) must be
+   * swallowed-and-logged rather than propagate, or a fire-and-forget caller
+   * (`triggerJob`'s `void executeClaimedRun(...)`) would produce an
+   * unhandled rejection.
+   */
+  async function safeCompleteOccurrence(
+    jobLog: pino.Logger,
+    input: {
+      occurrenceId: string;
+      claim: OccurrenceClaim;
+      runId: string;
+      status: Extract<PluginJobRunStatus, "succeeded" | "failed">;
+      error?: string | null;
+      durationMs: number;
+    },
+  ): Promise<{ occurrence: unknown; run: PluginJobRunRow } | null> {
+    try {
+      const completed = await completeOccurrence(db, input);
+      if (!completed) {
+        // Another executor already resolved this occurrence (e.g.
+        // reconciliation took it over as "unknown" while this RPC was still
+        // in flight). Must not blindly overwrite whatever the current owner
+        // recorded.
+        await reportRejectedOccurrenceWrite(
+          jobLog,
+          input.occurrenceId,
+          input.claim,
+          input.status === "succeeded" ? "complete:succeeded" : "complete:failed",
+        );
+        return null;
+      }
+      return completed;
+    } catch (err) {
+      jobLog.error(
+        {
+          occurrenceId: input.occurrenceId,
+          runId: input.runId,
+          err: err instanceof Error ? err.message : String(err),
+        },
+        "failed to write occurrence completion",
+      );
+      return null;
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Core: execute a claimed occurrence
+  // -----------------------------------------------------------------------
+
+  /**
+   * Execute one already-claimed occurrence: acknowledge the claim (making
+   * it ineligible for lifecycle revoke), call the worker, and fence the
+   * completion write against the same claim captured at claim time.
+   *
+   * `nextRunAt` is NOT touched here — it was already reserved atomically in
+   * the same transaction that claimed the occurrence, so a crash at any
+   * point in this function cannot lose or duplicate the schedule advance.
+   */
+  async function executeClaimedRun(
+    claimed: ClaimedOccurrence,
+    trigger: "schedule" | "manual" | "retry",
+    scheduledAt: string,
+  ): Promise<void> {
+    const { job, run, occurrence, claim } = claimed;
+    const { id: jobId, pluginId, jobKey } = job;
+    const jobLog = log.child({ jobId, pluginId, jobKey, runId: run.id, occurrenceId: occurrence.id });
+
     activeJobs.add(jobId);
-
-    let runId: string | undefined;
     const startedAt = Date.now();
+    let stopRenewal: (() => void) | null = null;
 
     try {
-      // 1. Create run record
-      const run = await jobStore.createRun({
-        jobId,
-        pluginId,
-        trigger: "schedule",
-      });
-      runId = run.id;
+      await jobStore.markRunning(run.id);
 
-      jobLog.info({ runId }, "dispatching scheduled job");
+      // Acknowledge before dispatching: from this point on, lifecycle
+      // revoke (disable/unload) must leave this occurrence to drain rather
+      // than force-cancelling it. A null return means the claim already
+      // went stale before we ever called the worker — do NOT dispatch.
+      const acknowledged = await acknowledgeOccurrence(db, { occurrenceId: occurrence.id, claim });
+      if (!acknowledged) {
+        await reportRejectedOccurrenceWrite(jobLog, occurrence.id, claim, "dispatch:pre-ack");
+        return;
+      }
 
-      // 2. Mark run as running
-      await jobStore.markRunning(runId);
+      stopRenewal = startLeaseRenewal(occurrence.id, claim, DEFAULT_OCCURRENCE_LEASE_TTL_MS, jobLog);
 
-      // 3. Call worker via RPC
+      jobLog.info("dispatching job");
+
       await workerManager.call(
         pluginId,
         "runJob",
         {
           job: {
             jobKey,
-            runId,
-            trigger: "schedule" as const,
-            scheduledAt: (job.nextRunAt ?? new Date()).toISOString(),
+            runId: run.id,
+            trigger,
+            scheduledAt,
+            occurrenceId: occurrence.id,
+            fence: claim.fence,
           },
         },
         jobTimeoutMs,
       );
 
-      // 4. Mark run as succeeded
+      stopRenewal();
+      stopRenewal = null;
+
       const durationMs = Date.now() - startedAt;
-      await jobStore.completeRun(runId, {
+      const completed = await safeCompleteOccurrence(jobLog, {
+        occurrenceId: occurrence.id,
+        claim,
+        runId: run.id,
         status: "succeeded",
         durationMs,
       });
-
-      jobLog.info({ runId, durationMs }, "job completed successfully");
+      if (completed) {
+        jobLog.info({ durationMs }, "job completed successfully");
+      }
     } catch (err) {
+      stopRenewal?.();
       const durationMs = Date.now() - startedAt;
       const errorMessage = err instanceof Error ? err.message : String(err);
+      jobLog.error({ durationMs, err: errorMessage }, "job execution failed");
 
-      jobLog.error(
-        { runId, durationMs, err: errorMessage },
-        "job execution failed",
-      );
-
-      // Record the failure
-      if (runId) {
-        try {
-          await jobStore.completeRun(runId, {
-            status: "failed",
-            error: errorMessage,
-            durationMs,
-          });
-        } catch (completeErr) {
-          jobLog.error(
-            {
-              runId,
-              err: completeErr instanceof Error ? completeErr.message : String(completeErr),
-            },
-            "failed to record job failure",
-          );
-        }
-      }
+      await safeCompleteOccurrence(jobLog, {
+        occurrenceId: occurrence.id,
+        claim,
+        runId: run.id,
+        status: "failed",
+        error: errorMessage,
+        durationMs,
+      });
     } finally {
-      // Remove from active set
+      stopRenewal?.();
       activeJobs.delete(jobId);
-
-      // 5. Always advance the schedule pointer (even on failure)
-      try {
-        await advanceSchedulePointer(job);
-      } catch (err) {
-        jobLog.error(
-          { err: err instanceof Error ? err.message : String(err) },
-          "failed to advance schedule pointer",
-        );
-      }
     }
+  }
+
+  async function dispatchJob(claimed: ClaimedOccurrence): Promise<void> {
+    const scheduledAt = (claimed.occurrence.scheduledFor ?? new Date()).toISOString();
+    await executeClaimedRun(claimed, "schedule", scheduledAt);
   }
 
   // -----------------------------------------------------------------------
@@ -451,110 +707,26 @@ export function createPluginJobScheduler(
       );
     }
 
-    // Overlap prevention
-    if (activeJobs.has(jobId)) {
-      throw new Error(
-        `Job "${job.jobKey}" is already running — cannot trigger while in progress`,
-      );
-    }
-
-    // Also check DB for running runs (defensive — covers multi-instance)
-    const existingRuns = await db
-      .select()
-      .from(pluginJobRuns)
-      .where(
-        and(
-          eq(pluginJobRuns.jobId, jobId),
-          eq(pluginJobRuns.status, "running"),
-        ),
-      );
-
-    if (existingRuns.length > 0) {
-      throw new Error(
-        `Job "${job.jobKey}" already has a running execution — cannot trigger while in progress`,
-      );
-    }
-
-    // Check worker availability
     if (!workerManager.isRunning(job.pluginId)) {
       throw new Error(
         `Worker for plugin "${job.pluginId}" is not running — cannot trigger job`,
       );
     }
 
-    // Create the run and dispatch (non-blocking)
-    const run = await jobStore.createRun({
-      jobId,
-      pluginId: job.pluginId,
-      trigger,
-    });
+    // Atomic claim: refuses if the job already has a live claimed
+    // occurrence (scheduled or manual) — replaces the prior in-memory-only
+    // + best-effort DB overlap check with a single fenced transaction.
+    const claimed = await claimManualOccurrence(db, { jobId, trigger });
+    if (!claimed) {
+      throw new Error(
+        `Job "${job.jobKey}" is already running — cannot trigger while in progress`,
+      );
+    }
 
     // Dispatch in background — don't block the caller
-    void dispatchManualRun(job, run.id, trigger);
+    void executeClaimedRun(claimed, trigger, new Date().toISOString());
 
-    return { runId: run.id, jobId };
-  }
-
-  /**
-   * Dispatch a manually triggered job run.
-   */
-  async function dispatchManualRun(
-    job: typeof pluginJobs.$inferSelect,
-    runId: string,
-    trigger: "manual" | "retry",
-  ): Promise<void> {
-    const { id: jobId, pluginId, jobKey } = job;
-    const jobLog = log.child({ jobId, pluginId, jobKey, runId, trigger });
-
-    activeJobs.add(jobId);
-    const startedAt = Date.now();
-
-    try {
-      await jobStore.markRunning(runId);
-
-      await workerManager.call(
-        pluginId,
-        "runJob",
-        {
-          job: {
-            jobKey,
-            runId,
-            trigger,
-            scheduledAt: new Date().toISOString(),
-          },
-        },
-        jobTimeoutMs,
-      );
-
-      const durationMs = Date.now() - startedAt;
-      await jobStore.completeRun(runId, {
-        status: "succeeded",
-        durationMs,
-      });
-
-      jobLog.info({ durationMs }, "manual job completed successfully");
-    } catch (err) {
-      const durationMs = Date.now() - startedAt;
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      jobLog.error({ durationMs, err: errorMessage }, "manual job failed");
-
-      try {
-        await jobStore.completeRun(runId, {
-          status: "failed",
-          error: errorMessage,
-          durationMs,
-        });
-      } catch (completeErr) {
-        jobLog.error(
-          {
-            err: completeErr instanceof Error ? completeErr.message : String(completeErr),
-          },
-          "failed to record manual job failure",
-        );
-      }
-    } finally {
-      activeJobs.delete(jobId);
-    }
+    return { runId: claimed.run.id, jobId };
   }
 
   // -----------------------------------------------------------------------
@@ -562,44 +734,61 @@ export function createPluginJobScheduler(
   // -----------------------------------------------------------------------
 
   /**
-   * Advance the `lastRunAt` and `nextRunAt` timestamps on a job after a run.
+   * Compute the next `nextRunAt` tick for a due job. Called from inside
+   * `claimDueOccurrences`'s transaction (see tick()) so the schedule pointer
+   * is reserved atomically alongside the occurrence claim — no separate
+   * post-dispatch "advance the pointer" step exists anymore, closing the
+   * crash window where a claim could survive but the pointer advance not
+   * (or vice versa).
    */
-  async function advanceSchedulePointer(
-    job: typeof pluginJobs.$inferSelect,
-  ): Promise<void> {
-    const now = new Date();
-    let nextRunAt: Date | null = null;
+  function computeNextRunAtForJob(job: typeof pluginJobs.$inferSelect, now: Date): Date | null {
+    if (!job.schedule) return null;
 
-    if (job.schedule) {
-      const validationError = validateCron(job.schedule);
-      if (validationError) {
-        log.warn(
-          { jobId: job.id, schedule: job.schedule, error: validationError },
-          "invalid cron schedule — cannot compute next run",
-        );
-      } else {
-        const cron = parseCron(job.schedule);
-        nextRunAt = nextCronTick(cron, now);
-      }
+    const validationError = validateCron(job.schedule);
+    if (validationError) {
+      log.warn(
+        { jobId: job.id, schedule: job.schedule, error: validationError },
+        "invalid cron schedule — cannot compute next run",
+      );
+      return null;
     }
 
-    await jobStore.updateRunTimestamps(job.id, now, nextRunAt);
+    const cron = parseCron(job.schedule);
+    return nextCronTick(cron, now);
   }
 
   /**
-   * Ensure all active jobs for a plugin have a `nextRunAt` value.
-   * Called when a plugin is registered with the scheduler.
+   * Bootstrap a first `nextRunAt` for active jobs that have never had one —
+   * i.e. `next_run_at IS NULL` (a freshly declared job). Called when a
+   * plugin is registered with the scheduler.
+   *
+   * This must NEVER touch a job that already has a pointer, even one that
+   * is now overdue: `claimDueOccurrences` is the only path allowed to
+   * advance `next_run_at`, because that's the only path that reserves the
+   * occurrence atomically alongside the advance. An earlier version of this
+   * function recomputed `nextRunAt` from `nextCronTick(cron, new Date())`
+   * whenever the existing pointer was in the past, which silently skipped
+   * the missed occurrence — the job's schedule pointer jumped straight to
+   * the next future tick with no occurrence, no run, and no record that a
+   * tick was ever due — instead of leaving it for `claimDueOccurrences` to
+   * pick up on the next tick. It also always overwrote `lastRunAt`
+   * (defaulting to the epoch when unset), clobbering a real prior run
+   * timestamp with a synthetic one. Neither is done here: `lastRunAt` is
+   * left untouched (this function only sets `nextRunAt`), and the write
+   * itself is conditioned on `next_run_at IS NULL` so it is a no-op —
+   * atomically, even if two replicas register the same plugin concurrently
+   * — for any job that already has a pointer.
    */
   async function ensureNextRunTimestamps(pluginId: string): Promise<void> {
     const jobs = await jobStore.listJobs(pluginId, "active");
 
     for (const job of jobs) {
-      // Skip jobs that already have a valid nextRunAt in the future
-      if (job.nextRunAt && job.nextRunAt.getTime() > Date.now()) {
+      // Only bootstrap jobs that have never been scheduled. A job with any
+      // existing nextRunAt — future or overdue — is left strictly alone.
+      if (job.nextRunAt !== null) {
         continue;
       }
 
-      // Skip jobs without a schedule
       if (!job.schedule) {
         continue;
       }
@@ -615,16 +804,21 @@ export function createPluginJobScheduler(
 
       const cron = parseCron(job.schedule);
       const nextRunAt = nextCronTick(cron, new Date());
+      if (!nextRunAt) continue;
 
-      if (nextRunAt) {
-        await jobStore.updateRunTimestamps(
-          job.id,
-          job.lastRunAt ?? new Date(0),
-          nextRunAt,
-        );
+      // CAS on next_run_at IS NULL: makes this safe even if two replicas
+      // call registerPlugin for the same plugin concurrently — only the
+      // first write lands, the second is a harmless no-op.
+      const [updated] = await db
+        .update(pluginJobs)
+        .set({ nextRunAt, updatedAt: new Date() })
+        .where(and(eq(pluginJobs.id, job.id), isNull(pluginJobs.nextRunAt)))
+        .returning();
+
+      if (updated) {
         log.debug(
           { jobId: job.id, jobKey: job.jobKey, nextRunAt: nextRunAt.toISOString() },
-          "computed nextRunAt for job",
+          "bootstrapped nextRunAt for job",
         );
       }
     }
@@ -642,46 +836,34 @@ export function createPluginJobScheduler(
   async function unregisterPlugin(pluginId: string): Promise<void> {
     log.info({ pluginId }, "unregistering plugin from job scheduler");
 
-    // Cancel any in-flight run records for this plugin that are still
-    // queued or running. Active jobs in-memory will finish naturally.
+    // Revoke only occurrences the worker was never actually asked to run
+    // (acknowledged_at IS NULL) — those are safe to force-cancel. Occurrences
+    // already dispatched to the worker are deliberately left alone; they
+    // drain via their own completion path (executeClaimedRun's
+    // completeOccurrence call), same as if the plugin were still running.
     try {
-      const runningRuns = await db
-        .select()
-        .from(pluginJobRuns)
-        .where(
-          and(
-            eq(pluginJobRuns.pluginId, pluginId),
-            or(
-              eq(pluginJobRuns.status, "running"),
-              eq(pluginJobRuns.status, "queued"),
-            ),
-          ),
-        );
-
-      for (const run of runningRuns) {
-        await jobStore.completeRun(run.id, {
-          status: "cancelled",
-          error: "Plugin unregistered",
-          durationMs: run.startedAt
-            ? Date.now() - run.startedAt.getTime()
-            : null,
-        });
-      }
+      await revokeUnacknowledgedOccurrences(db, {
+        pluginId,
+        reason: "Plugin unregistered",
+      });
     } catch (err) {
       log.error(
         {
           pluginId,
           err: err instanceof Error ? err.message : String(err),
         },
-        "error cancelling in-flight runs during unregister",
+        "error revoking unacknowledged occurrences during unregister",
       );
     }
 
-    // Remove any active tracking for jobs owned by this plugin
-    const jobs = await jobStore.listJobs(pluginId);
-    for (const job of jobs) {
-      activeJobs.delete(job.id);
-    }
+    // Deliberately does NOT touch `activeJobs` here. `activeJobs` tracks
+    // in-flight executions, and only `executeClaimedRun`'s own try/finally
+    // adds/removes an entry — it owns the full lifecycle of that jobId's
+    // membership. An acknowledged (already-dispatched) occurrence is left to
+    // drain above; forcibly deleting its jobId from `activeJobs` here would
+    // let a concurrent tick's `isEligible` overlap check see it as free and
+    // attempt to claim a new occurrence for the same job while the old one
+    // is still actually running on the worker.
   }
 
   // -----------------------------------------------------------------------
@@ -698,19 +880,29 @@ export function createPluginJobScheduler(
     tickTimer = setInterval(() => {
       void tick();
     }, tickIntervalMs);
+    reconciliationTimer = setInterval(() => {
+      // `reconcile()` never throws (see its own try/finally) so this bare
+      // fire-and-forget call cannot become an unhandled rejection, but the
+      // `void` documents that intent explicitly.
+      void reconcile();
+    }, reconciliationIntervalMs);
 
     log.info(
-      { tickIntervalMs, maxConcurrentJobs },
+      { tickIntervalMs, maxConcurrentJobs, reconciliationIntervalMs, reconciliationGraceMs },
       "plugin job scheduler started",
     );
   }
 
   function stop(): void {
-    // Always clear the timer defensively, even if `running` is already false,
+    // Always clear timers defensively, even if `running` is already false,
     // to prevent leaked interval timers.
     if (tickTimer !== null) {
       clearInterval(tickTimer);
       tickTimer = null;
+    }
+    if (reconciliationTimer !== null) {
+      clearInterval(reconciliationTimer);
+      reconciliationTimer = null;
     }
 
     if (!running) return;
@@ -747,6 +939,7 @@ export function createPluginJobScheduler(
     unregisterPlugin,
     triggerJob,
     tick,
+    reconcile,
     diagnostics,
   };
 }
