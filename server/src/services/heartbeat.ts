@@ -255,6 +255,16 @@ import { taskWatchdogService } from "./task-watchdogs.js";
 import { withAgentStartLock } from "./agent-start-lock.js";
 import { claimHeartbeatRunSlot } from "./heartbeat-run-slot.js";
 import {
+  appendFencedRunEvent,
+  claimExpiredLease,
+  describeStaleOwnershipRejection,
+  findExpiredLeaseRuns,
+  isClaimStale,
+  redactOwnerToken,
+  writeFencedRunPatch,
+  type RunClaim,
+} from "./run-ownership-store.js";
+import {
   evaluateAgentInvokability,
   evaluateAgentInvokabilityFromDb,
   shouldCancelRunsForNonInvokableAgent,
@@ -5959,6 +5969,16 @@ function isTrackedLocalChildProcessAdapter(adapterType: string) {
   return SESSIONED_LOCAL_ADAPTERS.has(adapterType);
 }
 
+// Build a fencing claim from a run row read at recovery/reconciliation time
+// (e.g. terminalizeRunOnLeaseRelease, reapOrphanedRuns). This is distinct
+// from — and must never be confused with — the immutable claim executeRun
+// captures once at claim time: a row read here reflects whoever owns the run
+// *right now*, which is exactly what these call sites want to fence against
+// (their own most recent read), not a value carried across an execution.
+function runClaimFrom(run: { ownerToken: string | null; fence: number | null }): RunClaim | undefined {
+  return run.ownerToken ? { ownerToken: run.ownerToken, fence: run.fence } : undefined;
+}
+
 function isHeartbeatRunTerminalStatus(
   status: string | null | undefined,
 ): status is (typeof HEARTBEAT_RUN_TERMINAL_STATUSES)[number] {
@@ -8955,17 +8975,48 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
     return ensured;
   }
 
+  // `claim`, when passed, fences the write: the caller must have captured it
+  // once (immutably) from the claim/takeover that gave it ownership — see
+  // run-ownership-store.ts's correctness contract. It only applies while the
+  // caller still holds that exact (ownerToken, fence) pair; a stale owner's
+  // write is silently dropped (returns null) rather than throwing, matching
+  // the existing compare-and-set idiom below. Omitted for the many call
+  // sites that mutate runs before ownership exists (queued cancellation) or
+  // from operator/control-plane paths that must be allowed to act regardless
+  // of which executor currently holds the lease.
+  //
+  // Writing a terminal status always releases ownership in the same
+  // statement (owner_token/lease cleared) — a run that finished has nothing
+  // left to fence, and leaving a stale owner_token behind would make a
+  // finished run look claimable-by-CAS forever.
   async function setRunStatus(
     runId: string,
     status: string,
     patch?: Partial<typeof heartbeatRuns.$inferInsert>,
+    claim?: RunClaim,
   ) {
+    const releasePatch = isHeartbeatRunTerminalStatus(status)
+      ? { ownerToken: null, leaseExpiresAt: null }
+      : {};
     const updated = await db
       .update(heartbeatRuns)
-      .set({ status, ...patch, updatedAt: new Date() })
-      .where(eq(heartbeatRuns.id, runId))
+      .set({ status, ...patch, ...releasePatch, updatedAt: new Date() })
+      .where(
+        claim
+          ? and(
+              eq(heartbeatRuns.id, runId),
+              eq(heartbeatRuns.ownerToken, claim.ownerToken),
+              claim.fence === null ? sql`${heartbeatRuns.fence} is null` : eq(heartbeatRuns.fence, claim.fence),
+            )
+          : eq(heartbeatRuns.id, runId),
+      )
       .returning()
       .then((rows) => rows[0] ?? null);
+
+    if (!updated && claim && (await isClaimStale(db, { runId, claim }))) {
+      const rejection = describeStaleOwnershipRejection({ runId, claim, context: `setRunStatus:${status}` });
+      logger.warn(rejection.fields, rejection.event);
+    }
 
     if (updated) {
       if (isHeartbeatRunTerminalStatus(updated.status)) {
@@ -8986,8 +9037,9 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
     runId: string,
     status: string,
     patch?: Partial<typeof heartbeatRuns.$inferInsert>,
+    claim?: RunClaim,
   ) {
-    return setRunStatusFromLive(runId, status, ["running"], patch);
+    return setRunStatusFromLive(runId, status, ["running"], patch, claim);
   }
 
   // Move a run to a new status only when its current status is one of
@@ -9000,11 +9052,20 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
     status: string,
     fromStatuses: string[],
     patch?: Partial<typeof heartbeatRuns.$inferInsert>,
+    claim?: RunClaim,
   ) {
+    const conditions = [eq(heartbeatRuns.id, runId), inArray(heartbeatRuns.status, fromStatuses)];
+    if (claim) {
+      conditions.push(eq(heartbeatRuns.ownerToken, claim.ownerToken));
+      conditions.push(claim.fence === null ? sql`${heartbeatRuns.fence} is null` : eq(heartbeatRuns.fence, claim.fence));
+    }
+    const releasePatch = isHeartbeatRunTerminalStatus(status)
+      ? { ownerToken: null, leaseExpiresAt: null }
+      : {};
     const updated = await db
       .update(heartbeatRuns)
-      .set({ status, ...patch, updatedAt: new Date() })
-      .where(and(eq(heartbeatRuns.id, runId), inArray(heartbeatRuns.status, fromStatuses)))
+      .set({ status, ...patch, ...releasePatch, updatedAt: new Date() })
+      .where(and(...conditions))
       .returning()
       .then((rows) => rows[0] ?? null);
 
@@ -9026,6 +9087,15 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
       .from(heartbeatRuns)
       .where(eq(heartbeatRuns.id, runId))
       .then((rows) => rows[0] ?? null);
+
+    if (claim && current && (current.ownerToken !== claim.ownerToken || current.fence !== claim.fence)) {
+      const rejection = describeStaleOwnershipRejection({
+        runId,
+        claim,
+        context: `setRunStatusFromLive:${fromStatuses.join("|")}->${status}`,
+      });
+      logger.warn(rejection.fields, rejection.event);
+    }
 
     return { run: current, updated: false as const };
   }
@@ -9070,7 +9140,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
       finishedAt: run.finishedAt ?? new Date(),
       error: run.error ?? (terminalStatus === "interrupted" ? message : null),
       errorCode: run.errorCode ?? (terminalStatus === "interrupted" ? "lease_released_before_terminal" : null),
-    });
+    }, runClaimFrom(run));
     if (!write.updated) {
       // Another path already finalized the run. Keep that terminal outcome.
       return write.run ?? run;
@@ -9780,18 +9850,53 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
       at: eventAt,
     });
 
-    await db.insert(heartbeatRunEvents).values({
-      companyId: run.companyId,
-      runId: run.id,
-      agentId: run.agentId,
-      seq,
-      eventType: event.eventType,
-      stream: event.stream,
-      level: event.level,
-      color: event.color,
-      message: sanitizedMessage,
-      payload: sanitizedPayload,
-    });
+    // Fence log/event writes against the run's current durable ownership: the
+    // lease-renewal check and the event insert are one atomic statement (see
+    // appendFencedRunEvent), so a takeover landing between "check" and
+    // "insert" cannot let a stale executor's event through. Runs without an
+    // ownerToken (not yet claimed, or claimed before this migration) are not
+    // fenced — insert unconditionally with a null fence.
+    const claim = runClaimFrom(run);
+    if (claim) {
+      const appended = await appendFencedRunEvent(db, {
+        runId: run.id,
+        claim,
+        companyId: run.companyId,
+        agentId: run.agentId,
+        seq,
+        eventType: event.eventType,
+        stream: event.stream ?? null,
+        level: event.level ?? null,
+        color: event.color ?? null,
+        message: sanitizedMessage ?? null,
+        payload: sanitizedPayload ?? null,
+      });
+      if (!appended) {
+        if (await isClaimStale(db, { runId: run.id, claim })) {
+          const rejection = describeStaleOwnershipRejection({
+            runId: run.id,
+            claim,
+            context: `appendRunEvent:${event.eventType}`,
+          });
+          logger.warn(rejection.fields, rejection.event);
+        }
+        return;
+      }
+    } else {
+      await db.insert(heartbeatRunEvents).values({
+        companyId: run.companyId,
+        runId: run.id,
+        agentId: run.agentId,
+        seq,
+        eventType: event.eventType,
+        stream: event.stream,
+        level: event.level,
+        color: event.color,
+        message: sanitizedMessage,
+        payload: sanitizedPayload,
+        fence: null,
+      });
+    }
 
     publishLiveEvent({
       companyId: run.companyId,
@@ -10772,7 +10877,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
           errorCode: "server_shutdown_interrupted",
           errorMessage: message,
         }),
-      });
+      }, runClaimFrom(run));
       if (!interruptedStatus.updated || !interruptedStatus.run) continue;
       let interrupted = interruptedStatus.run;
       await setWakeupStatus(run.wakeupRequestId, "cancelled", {
@@ -12003,7 +12108,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         ...parseObject(run.contextSnapshot),
         workspaceBusyDeferredWhileAssignee: deferral.wasIssueAssignee,
       },
-    });
+    }, runClaimFrom(run));
     if (!cancelWrite.updated) {
       logger.info(
         { runId: run.id, currentStatus: cancelWrite.run?.status ?? null },
@@ -13314,12 +13419,28 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
     for (const { run, adapterType, adapterConfig } of activeRuns) {
       if (runningProcesses.has(run.id) || activeRunExecutions.has(run.id)) continue;
 
+      // A live lease means some executor (this process today; potentially a
+      // peer once multiple replicas run this reconciliation loop) still holds
+      // durable ownership and is expected to be renewing it. Defer to that
+      // lease instead of reaping on process-local ignorance alone — the
+      // durable signal, not "not tracked here", is what should gate reaping.
+      // This app-clock comparison is only a cheap pre-filter to skip an extra
+      // round trip for the common case of a live lease; the authoritative
+      // "is it really expired" decision is claimExpiredLease below, which
+      // compares against PostgreSQL's own clock so two replicas racing this
+      // loop cannot disagree because of clock skew between them.
+      if (run.leaseExpiresAt && run.leaseExpiresAt.getTime() > now.getTime()) continue;
+
       // Apply staleness threshold to avoid false positives
       if (staleThresholdMs > 0) {
         const refTime = run.updatedAt ? new Date(run.updatedAt).getTime() : 0;
         if (now.getTime() - refTime < staleThresholdMs) continue;
       }
 
+      // Decide whether this run is actually orphaned using the row's own
+      // data, before taking anything over — a run whose process is still
+      // alive (or adoptable via hot-restart) is not orphaned, and must not
+      // have its lease/fence stolen just to immediately be left alone again.
       const tracksLocalChild = isTrackedLocalChildProcessAdapter(adapterType);
       const processPidAlive = tracksLocalChild && run.processPid && isProcessAlive(run.processPid);
       const processGroupAlive = tracksLocalChild && run.processGroupId && isProcessGroupAlive(run.processGroupId);
@@ -13329,13 +13450,41 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
       ) {
         continue;
       }
+
+      // Every write below this point is fenced. A row that already carries
+      // ownership (the normal case post-migration) can only be written by
+      // the reaper after the reaper itself wins a real, DB-clock-verified
+      // takeover — claimExpiredLease is the same CAS primitive a peer
+      // replica's reaper would race against, so at most one reaper instance
+      // wins it for a given run. Losing the race (already reaped, or the
+      // lease was renewed between the pre-filter above and this call) means
+      // skip, not force-write. A row with no ownerToken predates fencing (or
+      // was never claimed) and is written unfenced, as before.
+      let reaperClaim: RunClaim | undefined;
+      if (run.ownerToken) {
+        const takenOver = await claimExpiredLease(db, { runId: run.id });
+        if (!takenOver) {
+          logger.info(
+            { runId: run.id, ownerToken: redactOwnerToken(run.ownerToken) },
+            "heartbeat.run_ownership.reaper_takeover_lost_race",
+          );
+          continue;
+        }
+        if (!takenOver.ownerToken) continue; // guaranteed by claimExpiredLease's UPDATE; guard for the type only
+        reaperClaim = { ownerToken: takenOver.ownerToken, fence: takenOver.fence };
+        logger.warn(
+          { runId: run.id, fence: takenOver.fence, ownerToken: redactOwnerToken(takenOver.ownerToken) },
+          "heartbeat.run_ownership.reaper_took_over_expired_lease",
+        );
+      }
+
       if (processPidAlive) {
         if (run.errorCode !== DETACHED_PROCESS_ERROR_CODE) {
           const detachedMessage = `Lost in-memory process handle, but child pid ${run.processPid} is still alive`;
           const detachedRun = await setRunStatus(run.id, "running", {
             error: detachedMessage,
             errorCode: DETACHED_PROCESS_ERROR_CODE,
-          });
+          }, reaperClaim);
           if (detachedRun) {
             await appendRunEvent(detachedRun, await nextRunEventSeq(detachedRun.id), {
               eventType: "lifecycle",
@@ -13407,7 +13556,20 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
             }
             : result;
         })(),
-      });
+      }, reaperClaim);
+      if (!finalizedRun && reaperClaim && (await isClaimStale(db, { runId: run.id, claim: reaperClaim }))) {
+        // The fenced finalize write itself lost the race after this reaper
+        // won the earlier takeover — a peer reclaimed/finalized the run in
+        // between. All downstream side effects below (lease release, retry
+        // scheduling, event append, agent status, next-run dispatch) belong
+        // to whoever holds the run now; running them here would duplicate or
+        // fight with that owner's own finalization.
+        logger.info(
+          { runId: run.id, ownerToken: redactOwnerToken(reaperClaim.ownerToken) },
+          "heartbeat.run_ownership.reaper_finalize_lost_race",
+        );
+        continue;
+      }
       await setWakeupStatus(run.wakeupRequestId, "failed", {
         finishedAt: now,
         error: shouldRetry ? `${baseMessage}; retrying once` : baseMessage,
@@ -13464,6 +13626,26 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
     if (reaped.length > 0) {
       logger.warn({ reapedCount: reaped.length, runIds: reaped }, "reaped orphaned heartbeat runs");
     }
+
+    // Operator-visible signal for expired leases this pass did not reap: rows
+    // a peer's reaper won the takeover race for between our pre-filter read
+    // and now, or rows genuinely stuck with no live owner. This is expected
+    // active-active behavior but is exactly what an operator alerting on
+    // lease health needs visibility into. Rows this process is still
+    // tracking locally (runningProcesses/activeRunExecutions, skipped above)
+    // are excluded — a long-running single-process run outliving its lease
+    // window is normal, not a lease-health signal, since this process is
+    // still the one actively driving it.
+    const stillExpired = (await findExpiredLeaseRuns(db, { limit: 100 })).filter(
+      (r) => !runningProcesses.has(r.id) && !activeRunExecutions.has(r.id),
+    );
+    if (stillExpired.length > 0) {
+      logger.warn(
+        { count: stillExpired.length, runIds: stillExpired.map((r) => r.id) },
+        "heartbeat.run_ownership.expired_lease_visible",
+      );
+    }
+
     return { reaped: reaped.length, runIds: reaped };
   }
 
@@ -13717,7 +13899,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
       if (claimedRuns.length === 0) return [];
 
       for (const claimedRun of claimedRuns) {
-        const execution = executeRun(claimedRun.id).catch((err) => {
+        const execution = executeRun(claimedRun).catch((err) => {
           logger.error({ err, runId: claimedRun.id }, "queued heartbeat execution failed");
         });
         // Register the in-flight execution so drainActiveRunExecutions() can await
@@ -13770,21 +13952,33 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
     return promise;
   }
 
-  async function executeRun(runId: string) {
+  // executeRun must never adopt an arbitrary "running" row by id — it only
+  // ever operates on a row the caller (startNextQueuedRunForAgent's dispatch
+  // loop) just won via claimQueuedRun and is handing in directly. That
+  // claim's (ownerToken, fence) is captured once, right here, into an
+  // immutable binding (`executionClaim`) that is threaded through every
+  // fenced write for the rest of this execution. It must never be re-read
+  // off a later SELECT of the row: after a takeover a later SELECT reflects
+  // the new owner, not this execution, and passing that back in as "mine"
+  // would let a superseded process keep writing under the new owner's
+  // identity.
+  async function executeRun(claimedRun: typeof heartbeatRuns.$inferSelect) {
     if ((await getSchedulingSuppression()).suppressed) return;
 
-    let run = await getRun(runId);
-    if (!run) return;
-    if (run.status !== "queued" && run.status !== "running") return;
-
-    if (run.status === "queued") {
-      const claimed = await claimQueuedRun(run);
-      if (!claimed) {
-        // claimQueuedRun can also leave the run queued when dependencies are unresolved.
-        return;
-      }
-      run = claimed;
+    if (claimedRun.status !== "running" || !claimedRun.ownerToken) {
+      logger.error(
+        {
+          runId: claimedRun.id,
+          status: claimedRun.status,
+          ownerToken: redactOwnerToken(claimedRun.ownerToken),
+        },
+        "executeRun refused: was not handed a freshly claimed, owned running row",
+      );
+      return;
     }
+    const runId = claimedRun.id;
+    const executionClaim: RunClaim = { ownerToken: claimedRun.ownerToken, fence: claimedRun.fence };
+    let run = claimedRun;
 
     activeRunExecutions.add(run.id);
     let runScratch: HeartbeatRunScratch | null = null;
@@ -13796,7 +13990,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         error: "Agent not found",
         errorCode: "agent_not_found",
         finishedAt: new Date(),
-      });
+      }, executionClaim);
       await setWakeupStatus(run.wakeupRequestId, "failed", {
         finishedAt: new Date(),
         error: "Agent not found",
@@ -14932,13 +15126,19 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
     }
     if (persistedExecutionWorkspace) {
       context.executionWorkspaceId = persistedExecutionWorkspace.id;
-      await db
-        .update(heartbeatRuns)
-        .set({
-          contextSnapshot: context,
-          updatedAt: new Date(),
-        })
-        .where(eq(heartbeatRuns.id, run.id));
+      const written = await writeFencedRunPatch(db, {
+        runId: run.id,
+        claim: executionClaim,
+        patch: { contextSnapshot: context },
+      });
+      if (!written && (await isClaimStale(db, { runId: run.id, claim: executionClaim }))) {
+        const rejection = describeStaleOwnershipRejection({
+          runId: run.id,
+          claim: executionClaim,
+          context: "executeRun.executionWorkspaceId.contextSnapshot",
+        });
+        logger.warn(rejection.fields, rejection.event);
+      }
     }
     const acquiredEnvironment = await envOrchestrator.acquireForRun({
       companyId: agent.companyId,
@@ -15065,13 +15265,21 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
           }
         : {}),
     };
-    await db
-      .update(heartbeatRuns)
-      .set({
-        contextSnapshot: context,
-        updatedAt: new Date(),
-      })
-      .where(eq(heartbeatRuns.id, run.id));
+    {
+      const written = await writeFencedRunPatch(db, {
+        runId: run.id,
+        claim: executionClaim,
+        patch: { contextSnapshot: context },
+      });
+      if (!written && (await isClaimStale(db, { runId: run.id, claim: executionClaim }))) {
+        const rejection = describeStaleOwnershipRejection({
+          runId: run.id,
+          claim: executionClaim,
+          context: "executeRun.environmentLease.contextSnapshot",
+        });
+        logger.warn(rejection.fields, rejection.event);
+      }
+    }
     const runtimeSessionResolution = resolveRuntimeSessionParamsForWorkspace({
       agentId: agent.id,
       previousSessionParams,
@@ -15308,18 +15516,34 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
     };
     try {
       const startedAt = run.startedAt ?? new Date();
-      const runningWithSession = await db
-        .update(heartbeatRuns)
-        .set({
+      const runningWithSession = await writeFencedRunPatch(db, {
+        runId: run.id,
+        claim: executionClaim,
+        patch: {
           startedAt,
           sessionIdBefore: runtimeForAdapter.sessionDisplayId ?? runtimeForAdapter.sessionId,
           contextSnapshot: context,
-          updatedAt: new Date(),
-        })
-        .where(eq(heartbeatRuns.id, run.id))
-        .returning()
-        .then((rows) => rows[0] ?? null);
-      if (runningWithSession) run = runningWithSession;
+        },
+      });
+      if (!runningWithSession) {
+        // Ownership moved on before this session/context write landed —
+        // continuing to launch the adapter under a claim that is no longer
+        // ours is exactly the duplicate-execution risk fencing exists to
+        // prevent, so abort rather than proceed with stale local state. The
+        // stale_write_rejected event, however, only fires when a reread
+        // confirms an actual owner/fence mismatch rather than e.g. the row
+        // having been deleted out from under us.
+        if (await isClaimStale(db, { runId: run.id, claim: executionClaim })) {
+          const rejection = describeStaleOwnershipRejection({
+            runId: run.id,
+            claim: executionClaim,
+            context: "executeRun.sessionStart",
+          });
+          logger.warn(rejection.fields, rejection.event);
+        }
+        return;
+      }
+      run = runningWithSession;
 
       // A board cancellation can race with workspace/config preparation after this
       // run was claimed. Re-check after preparation before performing more setup;
@@ -15359,7 +15583,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
               errorMessage: abortReason,
             }),
           } : {}),
-        });
+        }, executionClaim);
         await setWakeupStatus(run.wakeupRequestId, "cancelled", {
           finishedAt: new Date(),
           error: abortReason,
@@ -15535,13 +15759,31 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         context.paperclipRuntimeServices = runtimeServices;
         context.paperclipRuntimePrimaryUrl =
           runtimeServices.find((service) => readNonEmptyString(service.url))?.url ?? null;
-        await db
+        // Mid-execution context write, fenced against the immutable claim
+        // captured at the top of executeRun — a stale/superseded owner must
+        // not be able to keep mutating contextSnapshot after losing the run.
+        const contextWritten = await db
           .update(heartbeatRuns)
           .set({
             contextSnapshot: context,
             updatedAt: new Date(),
           })
-          .where(eq(heartbeatRuns.id, run.id));
+          .where(and(
+            eq(heartbeatRuns.id, run.id),
+            eq(heartbeatRuns.ownerToken, executionClaim.ownerToken),
+            executionClaim.fence === null
+              ? sql`${heartbeatRuns.fence} is null`
+              : eq(heartbeatRuns.fence, executionClaim.fence),
+          ))
+          .returning();
+        if (contextWritten.length === 0 && (await isClaimStale(db, { runId: run.id, claim: executionClaim }))) {
+          const rejection = describeStaleOwnershipRejection({
+            runId: run.id,
+            claim: executionClaim,
+            context: "executeRun.runtimeServices.contextSnapshot",
+          });
+          logger.warn(rejection.fields, rejection.event);
+        }
       }
       if (issueId && (executionWorkspace.created || runtimeServices.some((service) => !service.reused))) {
         try {
@@ -15960,13 +16202,29 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         context.paperclipRuntimeServices = combinedRuntimeServices;
         context.paperclipRuntimePrimaryUrl =
           combinedRuntimeServices.find((service) => readNonEmptyString(service.url))?.url ?? null;
-        await db
+        // Same fencing as the runtimeServices write above.
+        const contextWritten = await db
           .update(heartbeatRuns)
           .set({
             contextSnapshot: context,
             updatedAt: new Date(),
           })
-          .where(eq(heartbeatRuns.id, run.id));
+          .where(and(
+            eq(heartbeatRuns.id, run.id),
+            eq(heartbeatRuns.ownerToken, executionClaim.ownerToken),
+            executionClaim.fence === null
+              ? sql`${heartbeatRuns.fence} is null`
+              : eq(heartbeatRuns.fence, executionClaim.fence),
+          ))
+          .returning();
+        if (contextWritten.length === 0 && (await isClaimStale(db, { runId: run.id, claim: executionClaim }))) {
+          const rejection = describeStaleOwnershipRejection({
+            runId: run.id,
+            claim: executionClaim,
+            context: "executeRun.adapterManagedRuntimeServices.contextSnapshot",
+          });
+          logger.warn(rejection.fields, rejection.event);
+        }
         if (issueId) {
           try {
             await postWorkspaceReadyComment({
@@ -16130,7 +16388,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         logSha256: logSummary?.sha256,
         logCompressed: logSummary?.compressed ?? false,
         logRef: logSummary?.logRef,
-      });
+      }, executionClaim);
       if (!persistedRunWrite.updated) {
         logger.info(
           {
@@ -16357,7 +16615,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         logSha256: logSummary?.sha256,
         logCompressed: logSummary?.compressed ?? false,
         logRef: logSummary?.logRef,
-      });
+      }, executionClaim);
       if (!failedRunWrite.updated) {
         logger.info(
           {
@@ -16483,7 +16741,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
                   workspaceValidationSetupFailure?.resultJson ?? configurationIncompleteSetupFailure?.resultJson ?? null,
               }),
             } : {}),
-          }).catch(() => ({ run: null, updated: false as const }));
+          }, executionClaim).catch(() => ({ run: null, updated: false as const }));
           if (!setupFailureWrite.updated) {
             logger.info(
               {
@@ -19348,6 +19606,11 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
     prepareHotRestartShutdown,
     reconcileHotRestartAdoption,
     reapOrphanedRuns,
+    // Operator/reconciliation visibility into durable run ownership (plan
+    // 003): running rows whose lease has lapsed. Read-only — see
+    // run-ownership-store.ts for why this does not auto-recover the run.
+    listExpiredLeaseRuns: (opts?: { graceMs?: number; now?: Date; limit?: number }) =>
+      findExpiredLeaseRuns(db, opts),
     // Override-aware scheduling-suppression check (honors the worktree
     // run-execution experimental setting). Callers outside the service that
     // gate on suppression should prefer this over the env-only resolver.

@@ -56,6 +56,18 @@ export const heartbeatRuns = pgTable(
     lastUsefulActionAt: timestamp("last_useful_action_at", { withTimezone: true }),
     nextAction: text("next_action"),
     contextSnapshot: jsonb("context_snapshot").$type<Record<string, unknown>>(),
+    // Durable leased ownership (active-active run fencing, plan 003). ownerToken
+    // identifies the executor holding the run; fence is a globally monotonic
+    // value minted from heartbeat_run_fence_seq on every claim/takeover, so a
+    // stale holder's writes can be rejected by comparing against the current
+    // row rather than trusting process-local state. leaseExpiresAt/leaseRenewedAt
+    // gate reconciliation visibility only — expiry never proves the previous
+    // holder actually stopped (see doc/operations/run-ownership.md).
+    ownerToken: text("owner_token"),
+    fence: bigint("fence", { mode: "number" }),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    leaseRenewedAt: timestamp("lease_renewed_at", { withTimezone: true }),
+    claimAttempt: integer("claim_attempt").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -119,6 +131,12 @@ export const heartbeatRuns = pgTable(
     companyCtxPaperclipIssueIdx: index("heartbeat_runs_company_ctx_paperclip_issue_idx").on(
       table.companyId,
       sql`((${table.contextSnapshot} -> 'paperclipIssue') ->> 'id')`,
+    ),
+    // Reconciliation scan for run-ownership-store.findExpiredLeaseRuns: running
+    // rows whose lease has lapsed, oldest first.
+    statusLeaseExpiresIdx: index("heartbeat_runs_status_lease_expires_idx").on(
+      table.status,
+      table.leaseExpiresAt,
     ),
   }),
 );
