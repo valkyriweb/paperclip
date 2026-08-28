@@ -121,6 +121,14 @@ export interface Config {
   runResultRetentionIntervalMs: number;
   runResultRetentionBatchSize: number;
   runResultRetentionItemLimit: number;
+  liveEventFanoutEnabled: boolean;
+  liveEventFanoutPollIntervalMs: number;
+  liveEventFanoutBatchSize: number;
+  liveEventOutboxRetentionEnabled: boolean;
+  liveEventOutboxRetentionDays: number;
+  liveEventOutboxRetentionIntervalMs: number;
+  liveEventOutboxRetentionBatchSize: number;
+  liveEventOutboxRetentionMaxBatches: number;
   feedbackExportBackendUrl: string | undefined;
   feedbackExportBackendToken: string | undefined;
   heartbeatSchedulerEnabled: boolean;
@@ -245,6 +253,46 @@ export function loadConfig(): Config {
   const runResultRetentionItemLimit = clampIntEnv(
     process.env.PAPERCLIP_RUN_RESULT_RETENTION_ITEM_LIMIT,
     2000,
+    1,
+  );
+  // Durable event outbox (active-active plan 005): cross-replica fanout poll
+  // cadence/batch size and outbox-row retention. See
+  // services/domain-event-outbox.ts and doc/operations/live-event-replay.md.
+  const liveEventFanoutEnabled = process.env.PAPERCLIP_LIVE_EVENT_FANOUT_ENABLED !== "false";
+  const liveEventFanoutPollIntervalMs = clampIntEnv(
+    process.env.PAPERCLIP_LIVE_EVENT_FANOUT_POLL_INTERVAL_MS,
+    1000,
+    100,
+  );
+  const liveEventFanoutBatchSize = clampIntEnv(
+    process.env.PAPERCLIP_LIVE_EVENT_FANOUT_BATCH_SIZE,
+    200,
+    1,
+    5_000,
+  );
+  const liveEventOutboxRetentionEnabled =
+    process.env.PAPERCLIP_LIVE_EVENT_OUTBOX_RETENTION_ENABLED !== "false";
+  const liveEventOutboxRetentionDays = clampIntEnv(
+    process.env.PAPERCLIP_LIVE_EVENT_OUTBOX_RETENTION_DAYS,
+    7,
+    1,
+  );
+  const liveEventOutboxRetentionIntervalMs = clampIntEnv(
+    process.env.PAPERCLIP_LIVE_EVENT_OUTBOX_RETENTION_INTERVAL_MS,
+    60 * 60 * 1000,
+    60_000,
+  );
+  const liveEventOutboxRetentionBatchSize = clampIntEnv(
+    process.env.PAPERCLIP_LIVE_EVENT_OUTBOX_RETENTION_BATCH_SIZE,
+    500,
+    1,
+    5_000,
+  );
+  // Named MAX_BATCHES, not ITEM_LIMIT — bounds how many batchSize-sized
+  // delete batches one sweep call runs, not a count of items.
+  const liveEventOutboxRetentionMaxBatches = clampIntEnv(
+    process.env.PAPERCLIP_LIVE_EVENT_OUTBOX_RETENTION_MAX_BATCHES,
+    200,
     1,
   );
   const feedbackExportBackendUrl =
@@ -451,6 +499,14 @@ export function loadConfig(): Config {
     runResultRetentionIntervalMs,
     runResultRetentionBatchSize,
     runResultRetentionItemLimit,
+    liveEventFanoutEnabled,
+    liveEventFanoutPollIntervalMs,
+    liveEventFanoutBatchSize,
+    liveEventOutboxRetentionEnabled,
+    liveEventOutboxRetentionDays,
+    liveEventOutboxRetentionIntervalMs,
+    liveEventOutboxRetentionBatchSize,
+    liveEventOutboxRetentionMaxBatches,
     feedbackExportBackendUrl,
     feedbackExportBackendToken,
     heartbeatSchedulerEnabled: process.env.HEARTBEAT_SCHEDULER_ENABLED !== "false",

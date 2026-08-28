@@ -227,6 +227,18 @@ export function setupLiveEventsWebSocketServer(
       return;
     }
 
+    // No reconnect-replay: this slice's durable outbox (see
+    // domain-event-outbox.ts) gives every event a durable row, but the
+    // client-facing `event.id` is a per-connection local counter, not that
+    // row's id (see live-events.ts's `deliverLiveEventLocally`) — there is
+    // no stable cross-reconnect cursor for a client to hand back, and no
+    // caller in this codebase sends one. A prior version of this file
+    // accepted an `afterEventId` query param and replayed outbox rows after
+    // it; that surface was removed as unused and, given the id spaces above,
+    // misleading. Delivery to a live connection remains at-least-once for
+    // the duration of that connection; a client that misses events across a
+    // reconnect should refetch state from the REST API, same as before this
+    // slice existed.
     const unsubscribe = subscribeCompanyLiveEvents(context.companyId, (event) => {
       if (socket.readyState !== WebSocket.OPEN) return;
       socket.send(JSON.stringify(event));

@@ -43,6 +43,11 @@ import {
 } from "./services/managed-config.js";
 import { setupEnvironmentCustomImageTerminalWebSocketServer } from "./realtime/environment-custom-image-terminal-ws.js";
 import { setupLiveEventsWebSocketServer } from "./realtime/live-events-ws.js";
+import { configureLiveEventOutbox, deliverLiveEventLocally, getLiveEventReplicaId } from "./services/live-events.js";
+import {
+  createLiveEventFanoutConsumer,
+  runLiveEventOutboxRetentionSweep,
+} from "./services/domain-event-outbox.js";
 import {
   feedbackService,
   applyManagedEnvironments,
@@ -573,7 +578,15 @@ export async function startServer(): Promise<StartedServer> {
     resolvedEmbeddedPostgresPort = port;
     startupDbInfo = { mode: "embedded-postgres", dataDir, port };
   }
-  
+
+  // Must run before any producer publishes a live event, so the best-effort
+  // outbox write in live-events.ts has a `db` to write through from the
+  // start — see domain-event-outbox.ts / doc/operations/live-event-replay.md.
+  // `liveEventFanoutEnabled` is the outbox kill switch end-to-end: it gates
+  // this write path (via the `writeEnabled` arg here), not just whether the
+  // fanout consumer below reads rows back out.
+  configureLiveEventOutbox(db, config.liveEventFanoutEnabled);
+
   if (config.deploymentMode === "local_trusted" && !isLoopbackHost(config.host)) {
     throw new Error(
       `local_trusted mode requires loopback host binding (received: ${config.host}). ` +
@@ -1490,6 +1503,72 @@ export async function startServer(): Promise<StartedServer> {
     }, config.runResultRetentionIntervalMs);
   }
 
+  // Durable event outbox cross-replica fanout consumer (active-active plan
+  // 005). Delivers rows other replicas produced to this replica's local
+  // WebSocket subscribers; see domain-event-outbox.ts for poll/checkpoint
+  // design and doc/operations/live-event-replay.md for the operator summary.
+  const liveEventFanoutConsumer = config.liveEventFanoutEnabled
+    ? createLiveEventFanoutConsumer({
+        db: db as any,
+        replicaId: getLiveEventReplicaId(),
+        pollIntervalMs: config.liveEventFanoutPollIntervalMs,
+        batchSize: config.liveEventFanoutBatchSize,
+        deliver: deliverLiveEventLocally,
+      })
+    : null;
+  if (liveEventFanoutConsumer) {
+    await liveEventFanoutConsumer.start();
+    logger.info(
+      {
+        replicaId: getLiveEventReplicaId(),
+        pollIntervalMs: config.liveEventFanoutPollIntervalMs,
+        batchSize: config.liveEventFanoutBatchSize,
+      },
+      "live event fanout consumer started",
+    );
+  } else {
+    // Still logged with this replica's identity even when fanout is
+    // disabled: `configureLiveEventOutbox` above already used
+    // `liveEventFanoutEnabled` to gate outbox writes too, so an operator
+    // reading this line needs the replica id to correlate it with other
+    // replica-scoped log lines regardless of which side of that flag it's on.
+    logger.info({ replicaId: getLiveEventReplicaId() }, "live event fanout consumer disabled");
+  }
+
+  // Live event outbox row retention. Rows are ephemeral fanout/replay signal,
+  // not a durable log — bounds unbounded table growth per plan 005's STOP
+  // condition. Boot sweep staggered 90s behind the archiver/result-retention
+  // sweeps above so cold-start sweeps don't collide.
+  let liveEventOutboxRetentionTimer: ReturnType<typeof setInterval> | null = null;
+  let liveEventOutboxRetentionBootTimer: ReturnType<typeof setTimeout> | null = null;
+  if (!config.liveEventOutboxRetentionEnabled) {
+    logger.info({}, "live event outbox retention sweeper disabled");
+  } else {
+    const retentionConfig = {
+      retentionDays: config.liveEventOutboxRetentionDays,
+      batchSize: config.liveEventOutboxRetentionBatchSize,
+      maxBatches: config.liveEventOutboxRetentionMaxBatches,
+    };
+    logger.info(
+      {
+        intervalMs: config.liveEventOutboxRetentionIntervalMs,
+        ...retentionConfig,
+      },
+      "live event outbox retention sweeper enabled",
+    );
+    liveEventOutboxRetentionBootTimer = setTimeout(() => {
+      void runLiveEventOutboxRetentionSweep(db as any, retentionConfig).catch((err) => {
+        logger.error({ err }, "live event outbox retention boot sweep failed");
+      });
+    }, 90_000);
+    liveEventOutboxRetentionBootTimer.unref?.();
+    liveEventOutboxRetentionTimer = setInterval(() => {
+      void runLiveEventOutboxRetentionSweep(db as any, retentionConfig).catch((err) => {
+        logger.error({ err }, "live event outbox retention sweep failed");
+      });
+    }, config.liveEventOutboxRetentionIntervalMs);
+  }
+
   // Wait for external adapters to finish loading before accepting requests.
   // Without this, adapter type validation (assertKnownAdapterType) would
   // reject valid external adapter types during the startup loading window.
@@ -1589,6 +1668,15 @@ export async function startServer(): Promise<StartedServer> {
       if (runResultRetentionTimer) {
         clearInterval(runResultRetentionTimer);
         runResultRetentionTimer = null;
+      }
+      liveEventFanoutConsumer?.stop();
+      if (liveEventOutboxRetentionBootTimer) {
+        clearTimeout(liveEventOutboxRetentionBootTimer);
+        liveEventOutboxRetentionBootTimer = null;
+      }
+      if (liveEventOutboxRetentionTimer) {
+        clearInterval(liveEventOutboxRetentionTimer);
+        liveEventOutboxRetentionTimer = null;
       }
       await systemdNotify(["--stopping", `--status=Stopping after ${signal}`]);
       heartbeatSchedulerStopped = true;

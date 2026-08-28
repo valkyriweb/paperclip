@@ -79,7 +79,7 @@ import {
 // Re-exported because heartbeat's workspace surface exposed the scrubber before the
 // git-credentials module became its canonical home; existing importers keep working.
 export { scrubGitCredentialText };
-import { publishLiveEvent } from "./live-events.js";
+import { deliverLiveEventLocally, publishLiveEvent, publishLiveEventTx } from "./live-events.js";
 import { normalizeResponsibleUserDenialCode } from "./responsible-user-denial-run-outcomes.js";
 import { getRunLogStore, type RunLogHandle, type RunLogStoreType } from "./run-log-store.js";
 import { getServerAdapter, listAdapterModelProfiles, runningProcesses } from "../adapters/index.js";
@@ -8998,20 +8998,35 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
     const releasePatch = isHeartbeatRunTerminalStatus(status)
       ? { ownerToken: null, leaseExpiresAt: null }
       : {};
-    const updated = await db
-      .update(heartbeatRuns)
-      .set({ status, ...patch, ...releasePatch, updatedAt: new Date() })
-      .where(
-        claim
-          ? and(
-              eq(heartbeatRuns.id, runId),
-              eq(heartbeatRuns.ownerToken, claim.ownerToken),
-              claim.fence === null ? sql`${heartbeatRuns.fence} is null` : eq(heartbeatRuns.fence, claim.fence),
-            )
-          : eq(heartbeatRuns.id, runId),
-      )
-      .returning()
-      .then((rows) => rows[0] ?? null);
+    // Status transitions are a committed state change a client must never
+    // silently miss (plan 005's Goal), so the outbox row is written in the
+    // same transaction as the row update — see `publishLiveEventTx`. Local
+    // delivery happens only after commit, below.
+    let outboxRow: Awaited<ReturnType<typeof publishLiveEventTx>> | null = null;
+    const updated = await db.transaction(async (tx) => {
+      const row = await tx
+        .update(heartbeatRuns)
+        .set({ status, ...patch, ...releasePatch, updatedAt: new Date() })
+        .where(
+          claim
+            ? and(
+                eq(heartbeatRuns.id, runId),
+                eq(heartbeatRuns.ownerToken, claim.ownerToken),
+                claim.fence === null ? sql`${heartbeatRuns.fence} is null` : eq(heartbeatRuns.fence, claim.fence),
+              )
+            : eq(heartbeatRuns.id, runId),
+        )
+        .returning()
+        .then((rows) => rows[0] ?? null);
+      if (row) {
+        outboxRow = await publishLiveEventTx(tx, {
+          companyId: row.companyId,
+          type: "heartbeat.run.status",
+          payload: buildHeartbeatRunStatusLiveEventPayload(row),
+        });
+      }
+      return row;
+    });
 
     if (!updated && claim && (await isClaimStale(db, { runId, claim }))) {
       const rejection = describeStaleOwnershipRejection({ runId, claim, context: `setRunStatus:${status}` });
@@ -9022,11 +9037,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
       if (isHeartbeatRunTerminalStatus(updated.status)) {
         clearHeartbeatRunRuntimeStatus(updated.id);
       }
-      publishLiveEvent({
-        companyId: updated.companyId,
-        type: "heartbeat.run.status",
-        payload: buildHeartbeatRunStatusLiveEventPayload(updated),
-      });
+      if (outboxRow) deliverLiveEventLocally(outboxRow);
       publishRunLifecyclePluginEvent(updated);
     }
 
@@ -9062,22 +9073,31 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
     const releasePatch = isHeartbeatRunTerminalStatus(status)
       ? { ownerToken: null, leaseExpiresAt: null }
       : {};
-    const updated = await db
-      .update(heartbeatRuns)
-      .set({ status, ...patch, ...releasePatch, updatedAt: new Date() })
-      .where(and(...conditions))
-      .returning()
-      .then((rows) => rows[0] ?? null);
+    // Same atomic-outbox treatment as setRunStatus above: this is a
+    // committed run-status transition, not a best-effort signal.
+    let outboxRow: Awaited<ReturnType<typeof publishLiveEventTx>> | null = null;
+    const updated = await db.transaction(async (tx) => {
+      const row = await tx
+        .update(heartbeatRuns)
+        .set({ status, ...patch, ...releasePatch, updatedAt: new Date() })
+        .where(and(...conditions))
+        .returning()
+        .then((rows) => rows[0] ?? null);
+      if (row) {
+        outboxRow = await publishLiveEventTx(tx, {
+          companyId: row.companyId,
+          type: "heartbeat.run.status",
+          payload: buildHeartbeatRunStatusLiveEventPayload(row),
+        });
+      }
+      return row;
+    });
 
     if (updated) {
       if (isHeartbeatRunTerminalStatus(updated.status)) {
         clearHeartbeatRunRuntimeStatus(updated.id);
       }
-      publishLiveEvent({
-        companyId: updated.companyId,
-        type: "heartbeat.run.status",
-        payload: buildHeartbeatRunStatusLiveEventPayload(updated),
-      });
+      if (outboxRow) deliverLiveEventLocally(outboxRow);
       publishRunLifecyclePluginEvent(updated);
       return { run: updated, updated: true as const };
     }
