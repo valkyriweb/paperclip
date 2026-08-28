@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
   agents,
   agentRuntimeState,
@@ -9,12 +9,13 @@ import {
   createDb,
   heartbeatRunEvents,
   heartbeatRuns,
+  liveEventOutbox,
 } from "@paperclipai/db";
 import {
   getEmbeddedPostgresTestSupport,
   startEmbeddedPostgresTestDatabase,
 } from "./helpers/embedded-postgres.js";
-import { subscribeCompanyLiveEvents } from "../services/live-events.ts";
+import { configureLiveEventOutbox, subscribeCompanyLiveEvents } from "../services/live-events.ts";
 import {
   clearAllHeartbeatRunRuntimeStatuses,
   getHeartbeatRunRuntimeStatus,
@@ -198,6 +199,85 @@ describeEmbeddedPostgres("heartbeat runtime state deduplication", () => {
       expect(getHeartbeatRunRuntimeStatus(runId)).toBeNull();
     } finally {
       unsubscribe();
+    }
+  });
+
+  it("producer wiring: cancelRun's setRunStatus transition actually reaches live-event subscribers via publishLiveEventTx/deliverLiveEventLocally, and durably outboxes the row", async () => {
+    // Proves the transactional-outbox wiring end to end through a real
+    // producer (setRunStatus, exercised here via cancelRun), not just that
+    // domain-event-outbox.ts's functions work when called directly — see
+    // adversarial review item "producer wiring tests". The first pass of this
+    // test never called configureLiveEventOutbox, so outboxDb stayed null and
+    // isOutboxWriteEligible() was unconditionally false — it only proved
+    // local delivery, not that a real producer's transaction durably writes
+    // the row. Configuring the real outbox here closes that gap.
+    configureLiveEventOutbox(db, true);
+    const companyId = randomUUID();
+    const agentId = randomUUID();
+    const runId = randomUUID();
+    const issuePrefix = `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`;
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix,
+      requireBoardApprovalForNewAgents: false,
+    });
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "CodexCoder",
+      role: "engineer",
+      status: "running",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    });
+    await db.insert(heartbeatRuns).values({
+      id: runId,
+      companyId,
+      agentId,
+      invocationSource: "assignment",
+      status: "running",
+    });
+
+    const liveEvents: Array<{ type: string; payload: Record<string, unknown> }> = [];
+    const unsubscribe = subscribeCompanyLiveEvents(companyId, (event) => liveEvents.push(event));
+    try {
+      const heartbeat = heartbeatService(db);
+      await heartbeat.cancelRun(runId, "producer wiring test");
+
+      expect(liveEvents).toContainEqual(
+        expect.objectContaining({
+          companyId,
+          type: "heartbeat.run.status",
+          payload: expect.objectContaining({ runId, status: "cancelled" }),
+        }),
+      );
+
+      const [persisted] = await db.select().from(heartbeatRuns).where(eq(heartbeatRuns.id, runId));
+      expect(persisted?.status).toBe("cancelled");
+
+      // cancelRun's internals also flip agent status (a separate, also-
+      // allowlisted "agent.status" event) as part of the same cancellation —
+      // filter to this event's own type rather than assuming this is the
+      // only outboxed row for the company.
+      const outboxed = await db
+        .select()
+        .from(liveEventOutbox)
+        .where(
+          and(eq(liveEventOutbox.companyId, companyId), eq(liveEventOutbox.type, "heartbeat.run.status")),
+        );
+      expect(outboxed).toHaveLength(1);
+      expect(outboxed[0]!.payload).toMatchObject({ runId, status: "cancelled" });
+    } finally {
+      unsubscribe();
+      // Restore write-disabled so later tests in this file (which never
+      // configure the outbox themselves) don't pick up an unexpectedly
+      // enabled write path from this test's module-level configuration.
+      configureLiveEventOutbox(db, false);
+      await db.delete(liveEventOutbox);
     }
   });
 
