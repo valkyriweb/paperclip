@@ -159,6 +159,10 @@ describePostgres("MigrationCoordinator", () => {
     });
     const order: string[] = [];
     const states: MigrationCoordinatorState[] = [];
+    let waiterStarted!: () => void;
+    const waiterWaiting = new Promise<void>((resolve) => {
+      waiterStarted = resolve;
+    });
 
     const holder = first.withExclusiveMigrationLock(async () => {
       order.push("holder-enter");
@@ -174,10 +178,13 @@ describePostgres("MigrationCoordinator", () => {
     }, {
       timeoutMs: 5_000,
       pollIntervalMs: 10,
-      onStateChange: (state) => states.push(state),
+      onStateChange: (state) => {
+        states.push(state);
+        if (state === "waiting_for_migration_lock") waiterStarted();
+      },
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    await waiterWaiting;
     expect(order).toEqual(["holder-enter"]);
     releaseFirst();
 

@@ -106,12 +106,25 @@ describeEmbeddedPostgres("assignment wakeup window gating and manual skip reason
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     // A run leaving "running" status can still have trailing async work (e.g.
-    // durable failure writes) land a moment later; give it a beat to settle.
+    // durable failure writes) land a moment later; drain the service's tracked
+    // wakeups/executions before deleting their parent rows.
     await new Promise((resolve) => setTimeout(resolve, 150));
-    await db.delete(heartbeatRunEvents);
+    await heartbeatService(db).drainActiveRunExecutions();
+    // A trailing fire-and-forget lifecycle event can race the first event
+    // cleanup. Retry the parent delete after clearing events so this suite's
+    // cleanup is deterministic under the full test runner.
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await db.delete(heartbeatRunEvents);
+      await db.delete(activityLog);
+      try {
+        await db.delete(heartbeatRuns);
+        break;
+      } catch (error) {
+        if (attempt === 19 || (error as { code?: string }).code !== "23503") throw error;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    }
     await db.delete(environmentLeases);
-    await db.delete(activityLog);
-    await db.delete(heartbeatRuns);
     await db.delete(agentWakeupRequests);
     await db.delete(issueComments);
     await db.delete(issues);

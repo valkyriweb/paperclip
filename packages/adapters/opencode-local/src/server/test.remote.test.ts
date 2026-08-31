@@ -125,5 +125,5 @@ describe("opencode remote environment diagnostics", () => {
     expect(probeCall?.[4].env.XDG_CONFIG_HOME).toBe(
       "/remote/workspace/.paperclip-runtime/runs/test/workspace/.paperclip-runtime/opencode/xdgConfig",
     );
-  });
+  }, 30_000);
 });

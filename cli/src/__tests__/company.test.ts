@@ -1,4 +1,6 @@
 import { Command } from "commander";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CompanyPortabilityPreviewResult } from "@paperclipai/shared";
 import {
@@ -49,13 +51,11 @@ function company(overrides: Record<string, unknown> = {}) {
     issueCounter: 1,
     budgetMonthlyCents: 0,
     spentMonthlyCents: 0,
-    attachmentMaxBytes: 1073741824,
     requireBoardApprovalForNewAgents: false,
     feedbackDataSharingEnabled: false,
     feedbackDataSharingConsentAt: null,
     feedbackDataSharingConsentByUserId: null,
     feedbackDataSharingTermsVersion: null,
-    brandColor: "#5c5fff",
     logoAssetId: null,
     createdAt: "2026-06-04T00:00:00.000Z",
     updatedAt: "2026-06-04T00:00:00.000Z",
@@ -74,6 +74,7 @@ describe("company CLI commands", () => {
     delete process.env.PAPERCLIP_API_URL;
     delete process.env.PAPERCLIP_API_KEY;
     delete process.env.PAPERCLIP_COMPANY_ID;
+    process.env.PAPERCLIP_CONTEXT = path.join(os.tmpdir(), "paperclip-cli-company-tests", "context.json");
     fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
@@ -347,8 +348,6 @@ describe("renderCompanyImportPreview", () => {
           path: "COMPANY.md",
           name: "Source Co",
           description: null,
-          attachmentMaxBytes: null,
-          brandColor: null,
           logoPath: null,
           requireBoardApprovalForNewAgents: false,
           feedbackDataSharingEnabled: false,
@@ -584,8 +583,6 @@ describe("import selection catalog", () => {
           path: "COMPANY.md",
           name: "Source Co",
           description: null,
-          attachmentMaxBytes: null,
-          brandColor: null,
           logoPath: "images/company-logo.png",
           requireBoardApprovalForNewAgents: false,
           feedbackDataSharingEnabled: false,
@@ -761,8 +758,6 @@ describe("import selection catalog", () => {
           path: "COMPANY.md",
           name: "Source Co",
           description: null,
-          attachmentMaxBytes: null,
-          brandColor: null,
           logoPath: null,
           requireBoardApprovalForNewAgents: false,
           feedbackDataSharingEnabled: false,

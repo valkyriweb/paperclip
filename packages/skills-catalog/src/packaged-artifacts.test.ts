@@ -13,11 +13,20 @@ function readPackMetadata(packDestination: string) {
     cwd: packageRoot,
     encoding: "utf8",
   });
-  const metadata = JSON.parse(output);
-  if (!Array.isArray(metadata) || metadata.length === 0 || typeof metadata[0]?.filename !== "string") {
+  const metadata = JSON.parse(output) as unknown;
+  // npm 10 emits an array here, while npm 12 emits an object keyed by package
+  // name. Accept both stable --json shapes so the artifact contract is tested
+  // independently of the runner's npm minor version.
+  const candidates = Array.isArray(metadata)
+    ? metadata
+    : metadata && typeof metadata === "object"
+      ? Object.values(metadata)
+      : [];
+  const pack = candidates[0];
+  if (!pack || typeof pack !== "object" || typeof (pack as { filename?: unknown }).filename !== "string") {
     throw new Error(`Unexpected npm pack output from ${packageRoot}: ${output}`);
   }
-  return metadata[0] as { filename: string; files: Array<{ path: string }> };
+  return pack as { filename: string; files: Array<{ path: string }> };
 }
 
 describe("skills catalog package artifacts", () => {

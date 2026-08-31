@@ -673,11 +673,23 @@ async function fetchReferencedFileBytes(
   const url = rawGitHubUrl(source, normalizedPath);
   try {
     const response = await fetch(url);
-    if (!response.ok) {
-      errors.push(`${prefix}/${normalizedPath} failed to fetch pinned GitHub file: HTTP ${response.status}.`);
-      return null;
+    if (response.ok) return Buffer.from(await response.arrayBuffer());
+
+    // Raw GitHub occasionally returns a transient 400 for an otherwise valid
+    // pinned blob. Use the contents API as a bounded fallback so a catalog
+    // build does not fail because one raw edge rejects a path.
+    const apiResponse = await fetch(githubContentsUrl(source, normalizedPath), {
+      headers: { accept: "application/vnd.github+json" },
+    });
+    if (apiResponse.ok) {
+      const body = await apiResponse.json() as { type?: unknown; encoding?: unknown; content?: unknown };
+      if (body.type === "file" && body.encoding === "base64" && typeof body.content === "string") {
+        return Buffer.from(body.content.replace(/\\s/g, ""), "base64");
+      }
     }
-    return Buffer.from(await response.arrayBuffer());
+
+    errors.push(`${prefix}/${normalizedPath} failed to fetch pinned GitHub file: HTTP ${response.status}.`);
+    return null;
   } catch (error) {
     errors.push(`${prefix}/${normalizedPath} failed to fetch pinned GitHub file: ${errorMessage(error)}.`);
     return null;
@@ -881,6 +893,12 @@ function rawGitHubUrl(source: CatalogSkillSource, relativePath: string) {
   return normalized === "github.com" || normalized === "www.github.com"
     ? `https://raw.githubusercontent.com/${source.owner}/${source.repo}/${source.commit}/${encodedPath}`
     : `https://${source.hostname}/raw/${source.owner}/${source.repo}/${source.commit}/${encodedPath}`;
+}
+
+function githubContentsUrl(source: CatalogSkillSource, relativePath: string) {
+  const fullPath = source.path ? `${source.path}/${relativePath}` : relativePath;
+  const encodedPath = fullPath.split("/").map((segment) => encodeURIComponent(segment)).join("/");
+  return `${githubApiBase(source.hostname)}/repos/${source.owner}/${source.repo}/contents/${encodedPath}?ref=${encodeURIComponent(source.commit)}`;
 }
 
 function isPathInside(parent: string, child: string) {

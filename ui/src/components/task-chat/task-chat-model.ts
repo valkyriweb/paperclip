@@ -1,6 +1,6 @@
 /**
- * Normalized presentation model for the Task Chat Redesign (flag:
- * enableTaskChatRedesign).
+ * Normalized presentation model for the chat-style task thread (the default
+ * task view; the classic legacy view sits behind enableClassicTaskInterface).
  *
  * This is a deliberately small, protocol-agnostic model that the new render
  * layer consumes. Two producers feed it:
@@ -70,11 +70,8 @@ export interface TaskChatMessageItem {
   streaming?: boolean;
   /** Optimistic local echo state (matches IssueChatComment.clientStatus). */
   optimistic?: "pending" | "queued";
-  /**
-   * Per-message mode tag ("Agent mode" / "Plan mode" / "Ask mode"). Shown as a
-   * chip in the agent header and under a sent human bubble (v6 decision).
-   */
-  modeLabel?: string;
+  /** Live run this queued message is waiting behind. */
+  queueTargetRunId?: string | null;
   /** Assigned agent icon name (AgentIconName) for the avatar header. */
   agentIcon?: string | null;
   /**
@@ -199,6 +196,22 @@ export interface TaskChatUsageItem {
   id: string;
   kind: "usage";
   usage: TaskChatTokenUsage;
+  /** Present when the measurement is not scoped to the current run. */
+  label?: string;
+  detail?: string;
+}
+
+export interface TaskChatActivityPhaseItem {
+  id: string;
+  kind: "activity_phase";
+  /** Historical assistant update that introduced this phase. */
+  interstitial?: TaskChatMessageItem;
+  /** Chronological tool/usage rows owned exclusively by this phase. */
+  items: Array<TaskChatToolItem | TaskChatUsageItem>;
+  /** Deterministic, taxonomy-based summary (for example "Read 3 files, ran 1 command"). */
+  summary: string;
+  /** The tail phase of an in-flight run stays foregrounded. */
+  active: boolean;
 }
 
 /**
@@ -232,7 +245,8 @@ export type TaskChatTurnChildItem =
   | TaskChatToolItem
   | TaskChatStatusItem
   | TaskChatMarkerItem
-  | TaskChatUsageItem;
+  | TaskChatUsageItem
+  | TaskChatActivityPhaseItem;
 
 /**
  * One agent turn's activity (thinking/tools/diffs) grouped so a finished turn
@@ -276,6 +290,7 @@ export type TaskChatItem =
   | TaskChatStatusItem
   | TaskChatMarkerItem
   | TaskChatUsageItem
+  | TaskChatActivityPhaseItem
   | TaskChatInteractionItem
   | TaskChatTurnItem
   | TaskChatBriefItem;
