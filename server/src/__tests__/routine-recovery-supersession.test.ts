@@ -304,13 +304,13 @@ describeEmbeddedPostgres("routine recovery supersession", () => {
       recoveryIssueId: null,
       kind: "stranded_assigned_issue",
       status: "active",
-      ownerType: "agent",
-      ownerAgentId: managerId,
+      ownerType: "board",
+      ownerAgentId: null,
       previousOwnerAgentId: coderId,
       returnOwnerAgentId: coderId,
       cause: "stranded_assigned_issue",
       attemptCount: 1,
     });
-    expect(enqueueWakeup).toHaveBeenCalledWith(managerId, expect.any(Object));
+    expect(enqueueWakeup).not.toHaveBeenCalled();
   });
 });

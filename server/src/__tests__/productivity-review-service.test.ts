@@ -506,22 +506,26 @@ describeEmbeddedPostgres("productivity review service", () => {
     expect(hold.held).toBe(false);
   });
 
-  it("suppresses long-active productivity reviews for paused assignees with no active run pending", async () => {
+  it("skips a long-active candidate while its assignee is paused and reviews it once unpaused", async () => {
     const now = new Date("2026-04-28T12:00:00.000Z");
     const seeded = await seedAssignedIssue({
       status: "in_progress",
       startedAt: new Date(now.getTime() - 7 * 60 * 60 * 1000),
       agentStatus: "paused",
     });
+    const service = productivityReviewService(db);
 
-    const result = await productivityReviewService(db).reconcileProductivityReviews({
-      now,
-      companyId: seeded.companyId,
-    });
+    const pausedResult = await service.reconcileProductivityReviews({ now, companyId: seeded.companyId });
 
-    expect(result.created).toBe(0);
-    expect(result.skipped).toBe(1);
+    expect(pausedResult.created).toBe(0);
+    expect(pausedResult.skipped).toBe(1);
     expect(await listProductivityReviews(seeded.companyId)).toHaveLength(0);
+
+    await db.update(agents).set({ status: "idle" }).where(eq(agents.id, seeded.coderId));
+    const unpausedResult = await service.reconcileProductivityReviews({ now, companyId: seeded.companyId });
+
+    expect(unpausedResult.created).toBe(1);
+    expect(await listProductivityReviews(seeded.companyId)).toHaveLength(1);
   });
 
   it("allows productivity reviews for paused assignees when an active run is pending", async () => {

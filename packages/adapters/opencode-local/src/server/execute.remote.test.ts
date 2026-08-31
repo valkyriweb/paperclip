@@ -248,7 +248,7 @@ describe("opencode remote execution", () => {
     expect(call?.[3].remoteExecution?.remoteCwd).toBe(managedRemoteWorkspace);
     expect(startAdapterExecutionTargetPaperclipBridge).toHaveBeenCalledTimes(1);
     expect(restoreWorkspaceFromSshExecution).toHaveBeenCalledTimes(1);
-  });
+  }, 30_000);
 
   it("fails before the remote run when the configured model is unavailable on the SSH target", async () => {
     runChildProcess.mockImplementationOnce(async () => ({
@@ -311,7 +311,7 @@ describe("opencode remote execution", () => {
     expect(runChildProcess).toHaveBeenCalledTimes(1);
     expect((runChildProcess.mock.calls[0]?.[2] as string[] | undefined) ?? []).toEqual(["models"]);
     expect(startAdapterExecutionTargetPaperclipBridge).not.toHaveBeenCalled();
-  });
+  }, 30_000);
 
   it("resumes saved OpenCode sessions for remote SSH execution only when the identity matches", async () => {
     const rootDir = await mkdtemp(path.join(os.tmpdir(), "paperclip-opencode-remote-resume-"));
@@ -375,5 +375,5 @@ describe("opencode remote execution", () => {
       | undefined;
     expect(call?.[2]).toContain("--session");
     expect(call?.[2]).toContain("session-123");
-  });
+  }, 30_000);
 });

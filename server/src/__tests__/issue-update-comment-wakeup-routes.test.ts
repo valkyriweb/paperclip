@@ -8,6 +8,7 @@ const MENTIONED_AGENT_ID = "33333333-3333-4333-8333-333333333333";
 
 const mockIssueService = vi.hoisted(() => ({
   getById: vi.fn(),
+  getByIdForUpdate: vi.fn(),
   update: vi.fn(),
   addComment: vi.fn(),
   findMentionedAgents: vi.fn(),
@@ -31,9 +32,15 @@ const mockIssueThreadInteractionService = vi.hoisted(() => ({
   expireStaleRequestConfirmationsForIssueDocument: vi.fn(async () => []),
 }));
 
+vi.mock("../services/native-runtime/native-question-bridge.js", () => ({
+  deliverNativeQuestionResponse: vi.fn(async () => "not_native"),
+  nativeQuestionRunToCancel: vi.fn(async () => null),
+  validateNativeQuestionResponseInput: vi.fn(),
+}));
+
 vi.mock("../services/index.js", () => ({
   companyService: () => ({
-    getById: vi.fn(async () => ({ id: "company-1", attachmentMaxBytes: 10 * 1024 * 1024 })),
+    getById: vi.fn(async () => ({ id: "company-1" })),
   }),
   accessService: () => ({
     canUser: vi.fn(async () => true),
@@ -105,7 +112,7 @@ vi.mock("../services/index.js", () => ({
 function registerModuleMocks() {
   vi.doMock("../services/index.js", () => ({
     companyService: () => ({
-      getById: vi.fn(async () => ({ id: "company-1", attachmentMaxBytes: 10 * 1024 * 1024 })),
+      getById: vi.fn(async () => ({ id: "company-1" })),
     }),
     accessService: () => ({
       canUser: vi.fn(async () => true),
@@ -192,7 +199,9 @@ async function createApp() {
     };
     next();
   });
-  app.use("/api", issueRoutes({} as any, {} as any));
+  app.use("/api", issueRoutes({
+    transaction: async (callback: (tx: Record<string, never>) => Promise<unknown>) => callback({}),
+  } as any, {} as any));
   app.use(errorHandler);
   return app;
 }
@@ -227,6 +236,7 @@ describe("issue update comment wakeups", () => {
     registerModuleMocks();
     vi.clearAllMocks();
     mockIssueService.findMentionedAgents.mockResolvedValue([]);
+    mockIssueService.getByIdForUpdate.mockImplementation(async () => mockIssueService.getById());
     mockIssueService.getRelationSummaries.mockResolvedValue({ blockedBy: [], blocks: [] });
     mockIssueService.listWakeableBlockedDependents.mockResolvedValue([]);
     mockIssueService.getWakeableParentAfterChildCompletion.mockResolvedValue(null);
@@ -258,7 +268,10 @@ describe("issue update comment wakeups", () => {
       });
 
     expect(res.status).toBe(200);
-    expect(mockHeartbeatService.wakeup).toHaveBeenCalledTimes(1);
+    // The route dispatches the wake after it sends the response, so wait for
+    // the fire-and-forget dispatch to settle. This keeps the wake inside this
+    // test and stops it from leaking into the next test as an extra call.
+    await vi.waitFor(() => expect(mockHeartbeatService.wakeup).toHaveBeenCalledTimes(1));
     expect(mockHeartbeatService.wakeup).toHaveBeenCalledWith(
       ASSIGNEE_AGENT_ID,
       expect.objectContaining({

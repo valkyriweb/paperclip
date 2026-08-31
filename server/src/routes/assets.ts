@@ -3,10 +3,14 @@ import multer from "multer";
 import createDOMPurify from "dompurify";
 import { JSDOM } from "jsdom";
 import type { Db } from "@paperclipai/db";
-import { createAssetImageMetadataSchema } from "@paperclipai/shared";
+import { ASSET_NAMESPACE_RULE, createAssetImageMetadataSchema } from "@paperclipai/shared";
 import type { StorageService } from "../storage/types.js";
 import { assetService, logActivity } from "../services/index.js";
-import { isAllowedContentType, MAX_ATTACHMENT_BYTES } from "../attachment-types.js";
+import {
+  formatAttachmentSize,
+  isAllowedContentType,
+  MAX_ATTACHMENT_BYTES,
+} from "../attachment-types.js";
 import { assertCompanyAccess, getAccessibleResource, getActorInfo } from "./authz.js";
 import { logger } from "../middleware/logger.js";
 const SVG_CONTENT_TYPE = "image/svg+xml";
@@ -117,7 +121,9 @@ export function assetRoutes(db: Db, storage: StorageService) {
     } catch (err) {
       if (err instanceof multer.MulterError) {
         if (err.code === "LIMIT_FILE_SIZE") {
-          res.status(422).json({ error: `File exceeds ${MAX_ATTACHMENT_BYTES} bytes` });
+          res.status(422).json({
+            error: `File is larger than the ${formatAttachmentSize(MAX_ATTACHMENT_BYTES)} limit`,
+          });
           return;
         }
         res.status(400).json({ error: err.message });
@@ -134,7 +140,10 @@ export function assetRoutes(db: Db, storage: StorageService) {
 
     const parsedMeta = createAssetImageMetadataSchema.safeParse(req.body ?? {});
     if (!parsedMeta.success) {
-      res.status(400).json({ error: "Invalid image metadata", details: parsedMeta.error.issues });
+      res.status(400).json({
+        error: `Invalid image metadata: ${ASSET_NAMESPACE_RULE}`,
+        details: parsedMeta.error.issues,
+      });
       return;
     }
 
@@ -232,7 +241,9 @@ export function assetRoutes(db: Db, storage: StorageService) {
     } catch (err) {
       if (err instanceof multer.MulterError) {
         if (err.code === "LIMIT_FILE_SIZE") {
-          res.status(422).json({ error: `Image exceeds ${MAX_ATTACHMENT_BYTES} bytes` });
+          res.status(422).json({
+            error: `Image is larger than the ${formatAttachmentSize(MAX_ATTACHMENT_BYTES)} limit`,
+          });
           return;
         }
         res.status(400).json({ error: err.message });

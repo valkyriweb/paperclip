@@ -517,7 +517,10 @@ describeEmbeddedPostgres("createDrizzleHeartbeatResultRetentionDb (real Postgres
     const ids = [uuid(1), uuid(2), uuid(3)];
     for (const id of ids) {
       await seedRun({ id, companyId, agentId, resultJson: { stdout: "H".repeat(500) } });
-      await ageRun(id, 40);
+      // The fixture clock is intentionally fixed while the database default
+      // uses the host clock; age far enough to be unambiguously before the
+      // fixed 30-day cutoff on every test host while preserving microseconds.
+      await ageRun(id, 60);
     }
 
     const [{ subMs }] = (await db.execute(sql`

@@ -135,6 +135,52 @@ describe("skills catalog manifest", () => {
     expect(result.manifest.skills[0]!.contentHash).toMatch(/^sha256:[a-f0-9]{64}$/);
   });
 
+  it("falls back to the GitHub contents API when a pinned raw file returns 400", async () => {
+    const packageDir = await createCatalogPackage();
+    const skillMarkdown = "---\nname: Remote Research\ndescription: A remote skill.\n---\n\nUse this skill.\n";
+    const commit = "0123456789abcdef0123456789abcdef01234567";
+    await writeReference(packageDir, "optional", "research", "remote-research", {
+      source: {
+        type: "github",
+        hostname: "github.com",
+        owner: "example",
+        repo: "remote-skill",
+        ref: "v1.0.0",
+        commit,
+        path: "skills/remote-research",
+      },
+      files: ["SKILL.md"],
+      recommendedForRoles: ["researcher"],
+      tags: ["research"],
+    });
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/git/trees/")) {
+        return new Response(JSON.stringify({
+          tree: [{ path: "skills/remote-research/SKILL.md", type: "blob", size: Buffer.byteLength(skillMarkdown) }],
+        }), { status: 200 });
+      }
+      if (url.includes("/contents/skills/remote-research/SKILL.md?ref=")) {
+        return new Response(JSON.stringify({
+          type: "file",
+          encoding: "base64",
+          content: Buffer.from(skillMarkdown).toString("base64"),
+        }), { status: 200 });
+      }
+      if (url.includes("raw.githubusercontent.com/")) return new Response("bad request", { status: 400 });
+      return new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await buildCatalogManifest({ packageDir, generatedAt: "2026-05-26T00:00:00.000Z" });
+
+    expect(result.errors).toEqual([]);
+    expect(result.manifest.skills[0]!.files.map((file) => file.path)).toEqual(["SKILL.md"]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining(`/contents/skills/remote-research/SKILL.md?ref=${commit}`),
+      expect.objectContaining({ headers: { accept: "application/vnd.github+json" } }),
+    );
+  });
+
   it("does not reuse existing inventory when a globbed GitHub reference is temporarily unavailable", async () => {
     const packageDir = await createCatalogPackage();
     await writeReference(packageDir, "optional", "research", "remote-research", {

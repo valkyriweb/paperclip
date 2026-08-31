@@ -21,7 +21,9 @@ export async function commandVersion(command: string): Promise<string | null> {
   try {
     const result = await runCommand(command, ["--version"], { timeoutMs: 5_000 });
     if (result.exitCode !== 0) return null;
-    return `${result.stdout}${result.stderr}`.trim();
+    // npm-backed shims can emit configuration warnings on stderr; version
+    // parsers should consume the CLI's stdout without those diagnostics.
+    return result.stdout.trim() || result.stderr.trim();
   } catch {
     return null;
   }

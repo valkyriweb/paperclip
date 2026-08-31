@@ -6,7 +6,7 @@ import {
   getEmbeddedPostgresTestSupport,
   startEmbeddedPostgresTestDatabase,
 } from "../__tests__/helpers/embedded-postgres.js";
-import { claimHeartbeatRunSlot } from "./heartbeat-run-slot.js";
+import { claimHeartbeatRunSlot, claimHeartbeatRunSlotWithDailyCap } from "./heartbeat-run-slot.js";
 
 const embeddedPostgresSupport = await getEmbeddedPostgresTestSupport();
 const describeEmbeddedPostgres = embeddedPostgresSupport.supported ? describe : describe.skip;
@@ -77,6 +77,68 @@ describeEmbeddedPostgres("heartbeat run slot claims", () => {
         .where(eq(heartbeatRuns.agentId, agentId));
       expect(statuses.filter((row) => row.status === "running")).toHaveLength(3);
       expect(statuses.filter((row) => row.status === "queued")).toHaveLength(5);
+    } finally {
+      await db.delete(heartbeatRuns).where(eq(heartbeatRuns.agentId, agentId));
+      await db.delete(agents).where(eq(agents.id, agentId));
+      await db.delete(companies).where(eq(companies.id, companyId));
+    }
+  });
+
+  it("never over-admits concurrent claims across independent callers under a daily run cap", async () => {
+    const companyId = randomUUID();
+    const agentId = randomUUID();
+    const runIds = [randomUUID(), randomUUID()];
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Synthetic daily cap company",
+      issuePrefix: `D${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+      defaultResponsibleUserId: "responsible-user",
+    });
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "Synthetic daily cap agent",
+      role: "engineer",
+      status: "active",
+      adapterType: "test_adapter",
+      adapterConfig: {},
+      runtimeConfig: { heartbeat: { maxConcurrentRuns: 8, maxDailyRuns: 1 } },
+      permissions: {},
+    });
+    await db.insert(heartbeatRuns).values(
+      runIds.map((id) => ({
+        id,
+        companyId,
+        agentId,
+        status: "queued",
+        invocationSource: "assignment",
+        contextSnapshot: {},
+      })),
+    );
+
+    try {
+      const outcomes = await Promise.all(
+        runIds.map((runId) =>
+          claimHeartbeatRunSlotWithDailyCap(db, {
+            runId,
+            agentId,
+            startedAt: new Date(),
+            responsibleUserId: "responsible-user",
+            dailyRunLimit: 1,
+          }),
+        ),
+      );
+
+      expect(outcomes.filter((outcome) => outcome.claimed)).toHaveLength(1);
+      expect(outcomes.filter((outcome) => outcome.dailyCapBlock)).toHaveLength(1);
+      const statuses = await db
+        .select({ status: heartbeatRuns.status })
+        .from(heartbeatRuns)
+        .where(eq(heartbeatRuns.agentId, agentId));
+      expect(statuses.filter((row) => row.status === "running")).toHaveLength(1);
+      expect(statuses.filter((row) => row.status === "queued")).toHaveLength(1);
     } finally {
       await db.delete(heartbeatRuns).where(eq(heartbeatRuns.agentId, agentId));
       await db.delete(agents).where(eq(agents.id, agentId));

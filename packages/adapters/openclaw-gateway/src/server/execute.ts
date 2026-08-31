@@ -7,6 +7,7 @@ import {
   asNumber,
   asString,
   buildPaperclipEnv,
+  buildRuntimeToolsEnv,
   parseObject,
   readPaperclipIssueWorkModeFromContext,
   renderPaperclipWakePrompt,
@@ -466,6 +467,7 @@ function buildPaperclipEnvForWake(ctx: AdapterExecutionContext, wakePayload: Wak
   const paperclipApiUrlOverride = resolvePaperclipApiUrlOverride(ctx.config.paperclipApiUrl);
   const paperclipEnv: Record<string, string> = {
     ...buildPaperclipEnv(ctx.agent),
+    ...buildRuntimeToolsEnv(ctx.runtimeTools),
     PAPERCLIP_RUN_ID: ctx.runId,
   };
 
@@ -544,6 +546,7 @@ function buildWakeText(
     "Workflow:",
     "1) GET /api/agents/me",
     `2) Determine issueId: PAPERCLIP_TASK_ID if present, otherwise issue_id (${issueIdHint}).`,
+    '   Replace {issueId} in every endpoint below with that determined id. Never send the literal text "{issueId}" in a URL.',
     "3) If issueId exists:",
     "   - POST /api/issues/{issueId}/checkout with {\"agentId\":\"$PAPERCLIP_AGENT_ID\",\"expectedStatuses\":[\"todo\",\"backlog\",\"blocked\",\"in_review\"]}",
     "   - GET /api/issues/{issueId}",
@@ -1499,6 +1502,13 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   let latestResultPayload: unknown = null;
   let retryCount = 0;
   const maxConnectRetries = Math.max(0, connectMaxAttempts - 1);
+  let dispatchReported = false;
+
+  const reportDispatch = () => {
+    if (dispatchReported) return;
+    dispatchReported = true;
+    ctx.onDispatch?.();
+  };
 
   while (true) {
     const trackedRunIds = new Set<string>([ctx.runId]);
@@ -1639,6 +1649,10 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
           ? Promise.resolve(null)
           : fetchSessionUsageTotals(client, urlValue, sessionKey, configuredAgentId, ctx.onLog);
 
+      // The first agent request is the remote-work boundary: once it is sent,
+      // retrying would be unsafe because the gateway may have accepted work even
+      // if the response is lost.
+      reportDispatch();
       const acceptedPayload = await client.request<Record<string, unknown>>("agent", agentParams, {
         timeoutMs: connectTimeoutMs,
       });
@@ -1843,7 +1857,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       // connect or submission timeout). Run overruns are never retried.
       const isTransient = !pairingRequired && classification.retryable;
 
-      if (isTransient && retryCount < maxConnectRetries) {
+      if (isTransient && !dispatchReported && retryCount < maxConnectRetries) {
         retryCount++;
         const backoffMs = connectRetryDelayMs(retryCount, connectRetryBaseDelayMs);
         await ctx.onLog(
