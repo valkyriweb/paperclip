@@ -1,3 +1,6 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import express from "express";
 import request from "supertest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -144,6 +147,8 @@ describe.sequential("cli auth routes", () => {
   });
 
   it.sequential("serves the invite-scoped paperclip skill anonymously for active invites", async () => {
+    const claudeHome = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-cli-auth-empty-"));
+    vi.stubEnv("CLAUDE_HOME", claudeHome);
     const invite = {
       id: "invite-1",
       companyId: "company-1",
@@ -166,12 +171,17 @@ describe.sequential("cli auth routes", () => {
       })),
     };
 
-    const app = await createApp({ type: "none", source: "none" }, db);
-    const res = await request(app).get("/api/invites/token-123/skills/paperclip");
+    try {
+      const app = await createApp({ type: "none", source: "none" }, db);
+      const res = await request(app).get("/api/invites/token-123/skills/paperclip");
 
-    expect(res.status).toBe(200);
-    expect(res.headers["content-type"]).toContain("text/markdown");
-    expect(res.text).toContain("# Paperclip\n");
+      expect(res.status).toBe(200);
+      expect(res.headers["content-type"]).toContain("text/markdown");
+      expect(res.text).toContain("# Paperclip Skill\n");
+    } finally {
+      vi.unstubAllEnvs();
+      await fs.rm(claudeHome, { recursive: true, force: true });
+    }
   });
 
   it.sequential("marks challenge status as requiring sign-in for anonymous viewers", async () => {
