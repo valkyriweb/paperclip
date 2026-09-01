@@ -61,6 +61,8 @@ jobs:
         with:
           client-id: ${{ env.CLAWSWEEPER_APP_CLIENT_ID }}
           private-key: ${{ secrets.CLAWSWEEPER_APP_PRIVATE_KEY }}
+          # The dispatcher App and its target repository remain in valkyriweb;
+          # GITHUB_REPOSITORY identifies lue-labs/paperclip as the event source.
           owner: valkyriweb
           repositories: clawsweeper
           permission-contents: write
