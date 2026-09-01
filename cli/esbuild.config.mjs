@@ -65,6 +65,27 @@ if (bundledCliNpmDependencies.has("embedded-postgres")) {
   }
 }
 
+// Only these can't be inlined: prebuilt platform binaries, and @paperclipai/server
+// (dynamically imported, and pulling it in drags the whole OTel server graph).
+// Everything else is bundled so the output runs straight from the repo checkout —
+// pnpm's strict node_modules layout does not expose transitive deps (zod, ws,
+// postgres, commander) to cli/, so leaving them external produced a dist that
+// crashed with ERR_MODULE_NOT_FOUND.
+const runtimeExternal = [...externals]
+  .filter((name) => name.startsWith("@embedded-postgres/") || externalWorkspacePackages.has(name))
+  .sort();
+
+// Bundling CJS deps into an ESM output needs the CommonJS globals shimmed.
+const banner = [
+  "#!/usr/bin/env node",
+  'import { createRequire as __pcCreateRequire } from "node:module";',
+  'import { fileURLToPath as __pcFileURLToPath } from "node:url";',
+  'import { dirname as __pcDirname } from "node:path";',
+  "const require = __pcCreateRequire(import.meta.url);",
+  "const __filename = __pcFileURLToPath(import.meta.url);",
+  "const __dirname = __pcDirname(__filename);",
+].join("\n");
+
 /** @type {import('esbuild').BuildOptions} */
 export default {
   entryPoints: ["src/index.ts"],
@@ -73,8 +94,8 @@ export default {
   target: "node20",
   format: "esm",
   outfile: "dist/index.js",
-  banner: { js: "#!/usr/bin/env node" },
-  external: [...externals].sort(),
+  banner: { js: banner },
+  external: runtimeExternal,
   treeShaking: true,
   sourcemap: true,
 };
