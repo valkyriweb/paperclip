@@ -4,7 +4,7 @@
 # valkyriweb/clawsweeper and the bermont-clawsweeper GitHub App.
 #
 # Setup (per target repo — paperclip is done as of this PR except the App install):
-#   1. Install the bermont-clawsweeper App on valkyriweb/paperclip (Only select repositories).
+#   1. Install the bermont-clawsweeper App on lue-labs/paperclip (Only select repositories).
 #   2. Set repo secret CLAWSWEEPER_APP_PRIVATE_KEY from 1Password vault
 #      "Bermont Digital" item "GitHub App — bermont-clawsweeper" / private_key field.
 #   3. This file lives on master (default branch — so issues/issue_comment,
