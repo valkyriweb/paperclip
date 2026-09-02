@@ -137,13 +137,19 @@ WORKDIR /app
 # the app copy changes on every commit — ordered the other way around, this
 # (the single most expensive layer: four CLI toolchains + apt, per arch) can
 # never hit the layer cache and rebuilds on every build.
+# Pin /opt/otel packages to server/package.json peerDependency exacts (NODE_PATH); instrumentation.ts no-ops tracing on version drift.
 RUN echo "cli-tools-epoch: ${CLI_TOOLS_CACHE_EPOCH}" \
   && npm install --global --omit=dev @anthropic-ai/claude-code@latest @openai/codex@latest opencode-ai @google/gemini-cli@latest @moonshot-ai/kimi-code@latest \
   && mkdir -p /opt/otel/preload \
   && npm install --prefix /opt/otel --omit=dev \
     @opentelemetry/api@^1.9.1 \
-    @opentelemetry/sdk-node@latest \
-    @opentelemetry/auto-instrumentations-node@^0.75.0 \
+    @opentelemetry/sdk-node@0.221.0 \
+    @opentelemetry/auto-instrumentations-node@0.79.0 \
+    @opentelemetry/resources@2.10.0 \
+    @opentelemetry/semantic-conventions@1.43.0 \
+    @opentelemetry/exporter-trace-otlp-http@0.221.0 \
+    @opentelemetry/exporter-trace-otlp-grpc@0.221.0 \
+    @opentelemetry/exporter-trace-otlp-proto@0.221.0 \
     @traceloop/node-server-sdk@^0.26.0 \
   && chown -R node:node /opt/otel
 
