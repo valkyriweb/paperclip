@@ -97,6 +97,13 @@ COPY --from=deps /app /app
 COPY . .
 RUN pnpm --filter @paperclipai/ui build
 RUN pnpm --filter @paperclipai/plugin-sdk build
+# Bundled first-party plugins ship as workspace packages and are activated
+# from their build output at runtime (plugin-loader resolves the package
+# "manifest" export, e.g. dist/manifest.js). Without these builds the image
+# ships source only and activation fails with "no longer exposes a Paperclip
+# manifest" / WORKER_UNAVAILABLE.
+RUN pnpm --filter @paperclipai/plugin-llm-wiki build
+RUN test -f packages/plugins/plugin-llm-wiki/dist/manifest.js || (echo "ERROR: plugin-llm-wiki build output missing" && exit 1)
 # The server build runs scripts/write-build-stamp.mjs, which stamps the built
 # commit into dist/build-info.json. The build context has no .git, so the
 # script reads PAPERCLIP_BUILD_COMMIT instead. Docker exposes an ARG to the
