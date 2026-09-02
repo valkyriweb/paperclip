@@ -97,14 +97,16 @@ const DEFAULT_RECONCILIATION_INTERVAL_MS = 60_000;
 
 /**
  * Default grace period added on top of an occurrence's own lease expiry
- * before reconciliation will take it over (60 seconds). Slack for
+ * before reconciliation will take it over (30 seconds). Slack for
  * clock/scheduling jitter around the lease-renewal cadence
  * (`leaseTtlMs / 3`, i.e. every ~60s for the default 180s occurrence TTL) —
  * a genuinely healthy renewal that lands a beat late must not be raced by
- * reconciliation. Dig 2026-09-02: widened from 30s alongside the longer TTL
- * after live `marked unknown, not replayed` churn.
+ * reconciliation. Dig 2026-09-02 / Captain: keep occurrence TTL at 180s as
+ * the intentional lease slack; do not double grace to 60s — that widens the
+ * expired-lease overlap where a new claim can start beside a still-running
+ * job.
  */
-const DEFAULT_RECONCILIATION_GRACE_MS = 60_000;
+const DEFAULT_RECONCILIATION_GRACE_MS = 30_000;
 
 /** Bounded batch size per reconciliation sweep. */
 const DEFAULT_RECONCILIATION_BATCH_LIMIT = 100;
@@ -127,7 +129,7 @@ export interface PluginJobSchedulerOptions {
   tickIntervalMs?: number;
   /** Timeout for individual job RPC calls in ms (default: 5min). */
   jobTimeoutMs?: number;
-  /** Maximum number of concurrent job executions (default: 10). */
+  /** Maximum number of concurrent job executions (default: 6). */
   maxConcurrentJobs?: number;
   /** Interval between expiry-reconciliation sweeps in ms (default: 60s). */
   reconciliationIntervalMs?: number;

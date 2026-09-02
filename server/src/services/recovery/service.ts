@@ -173,6 +173,8 @@ type ResolvedDependencyWakeBackstopOptions = {
   companyId?: string | null;
   blockerIssueId?: string | null;
   source?: ResolvedDependencyWakeBackstopSource;
+  /** When true (operator auto-recovery/run), skip the 120s backlog cooldown. */
+  force?: boolean;
 };
 
 type LatestIssueRun = Pick<
@@ -5969,8 +5971,12 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
       ? RESOLVED_DEPENDENCY_WAKE_BACKSTOP_MAX_CHECKED_PER_TICK
       : RESOLVED_DEPENDENCY_WAKE_BACKSTOP_TARGETED_CANDIDATE_LIMIT;
 
+    // Operator force (auto-recovery/run) must not no-op dependency wakes behind
+    // the periodic thrash cooldown. Finalize/blockerIssueId stays eager via
+    // useCursor=false above; force covers the unscoped full-scan path.
     if (
       useCursor &&
+      opts?.force !== true &&
       resolvedDependencyWakeBackstopNextEligibleAt > 0 &&
       Date.now() < resolvedDependencyWakeBackstopNextEligibleAt
     ) {
@@ -6353,6 +6359,7 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
 
     const dependencyWakeBackstop = await reconcileResolvedDependencyWakeBackstop({
       runId: opts?.runId ?? null,
+      force: opts?.force === true,
     });
     result.dependencyWakeBackstopChecked = dependencyWakeBackstop.checked;
     result.dependencyWakesHealed = dependencyWakeBackstop.healed;
