@@ -107,7 +107,24 @@ const DEFERRED_WAKE_CONTEXT_KEY = "_paperclipWakeContext";
 const EXECUTION_REVIEW_PARTICIPANT_RECOVERY_REASON = "execution_review_participant_recovery";
 const STRANDED_BOARD_ESCALATION_POLICY = "board_escalation_no_takeover_v1";
 const DISPOSITION_REPAIR_IDEMPOTENCY_INDEX = "agent_wakeup_requests_disposition_repair_idempotency_uq";
-const RESOLVED_DEPENDENCY_WAKE_BACKSTOP_CANDIDATE_LIMIT = 500;
+// Dig 2026-09-02 (live): limit=500 with ~633 blocked candidates produced
+// ~15×/30m "deferred … past page limit" (processed 500 / skipped ~133,
+// nextCursor set) — page thrash; backlog never cleared in one tick.
+// Prefer smaller pages + a harder per-tick checked budget with multi-page
+// cursor drain, plus a cooldown when candidateLimitSkipped stays high so
+// readiness blasts do not fire on every heartbeat scheduler interval.
+const RESOLVED_DEPENDENCY_WAKE_BACKSTOP_CANDIDATE_LIMIT = 100;
+/**
+ * Targeted / workspace.finalize path (blockerIssueId set) keeps a higher
+ * single-page fan-out. Periodic full-scan stays at 100 + cooldown/budget;
+ * finalize is edge-triggered and already scoped to one blocker, so it must
+ * not inherit the thrash-mitigation page shrink.
+ */
+const RESOLVED_DEPENDENCY_WAKE_BACKSTOP_TARGETED_CANDIDATE_LIMIT = 500;
+/** Max candidates inspected across pages in one periodic backstop invocation. */
+const RESOLVED_DEPENDENCY_WAKE_BACKSTOP_MAX_CHECKED_PER_TICK = 250;
+/** When a tick still leaves pages unread, cool down before the next full scan. */
+const RESOLVED_DEPENDENCY_WAKE_BACKSTOP_BACKLOG_COOLDOWN_MS = 120_000;
 const SESSIONED_LOCAL_ADAPTERS = new Set([
   "claude_local",
   "codex_local",
@@ -156,6 +173,8 @@ type ResolvedDependencyWakeBackstopOptions = {
   companyId?: string | null;
   blockerIssueId?: string | null;
   source?: ResolvedDependencyWakeBackstopSource;
+  /** When true (operator auto-recovery/run), skip the 120s backlog cooldown. */
+  force?: boolean;
 };
 
 type LatestIssueRun = Pick<
@@ -773,6 +792,8 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
   });
 
   let resolvedDependencyWakeBackstopCandidateCursor: string | null = null;
+  let resolvedDependencyWakeBackstopLastSkipped = 0;
+  let resolvedDependencyWakeBackstopNextEligibleAt = 0;
 
   async function getAgent(agentId: string) {
     return db.select().from(agents).where(eq(agents.id, agentId)).then((rows) => rows[0] ?? null);
@@ -5926,6 +5947,7 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
       deferredOrFailed: 0,
       enqueueFailed: 0,
       issueIds: [] as string[],
+      backlogCooldownSkipped: false,
     };
 
     const source = opts?.source ?? "issue_graph_liveness.backstop";
@@ -5935,7 +5957,45 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
     const payloadBackstop = source === "workspace.finalize"
       ? "workspace_finalize_reconciliation"
       : "issue_graph_liveness_reconciliation";
+    // Cursor pagination only for the periodic full-scan path. Targeted
+    // blockerIssueId calls (workspace.finalize) must stay eager and uncapped
+    // by the backlog cooldown — they are edge-triggered and already scoped.
     const useCursor = !opts?.blockerIssueId;
+    // Periodic: small pages (100) + harder per-tick budget (250) + cooldown.
+    // Targeted/finalize: restore pre-dig fan-out (500) on a single scoped page
+    // so a popular blocker is not silently truncated by thrash mitigations.
+    const effectiveCandidateLimit = useCursor
+      ? RESOLVED_DEPENDENCY_WAKE_BACKSTOP_CANDIDATE_LIMIT
+      : RESOLVED_DEPENDENCY_WAKE_BACKSTOP_TARGETED_CANDIDATE_LIMIT;
+    const effectiveMaxCheckedPerTick = useCursor
+      ? RESOLVED_DEPENDENCY_WAKE_BACKSTOP_MAX_CHECKED_PER_TICK
+      : RESOLVED_DEPENDENCY_WAKE_BACKSTOP_TARGETED_CANDIDATE_LIMIT;
+
+    // Operator force (auto-recovery/run) must not no-op dependency wakes behind
+    // the periodic thrash cooldown. Finalize/blockerIssueId stays eager via
+    // useCursor=false above; force covers the unscoped full-scan path.
+    if (
+      useCursor &&
+      opts?.force !== true &&
+      resolvedDependencyWakeBackstopNextEligibleAt > 0 &&
+      Date.now() < resolvedDependencyWakeBackstopNextEligibleAt
+    ) {
+      // Do not mirror lastSkipped into candidateLimitSkipped here: checked=0
+      // on a cooldown skip, and conflating the two metrics made callers think
+      // this tick deferred candidates it never inspected. Surface the skip
+      // via backlogCooldownSkipped instead.
+      result.backlogCooldownSkipped = true;
+      logger.debug(
+        {
+          nextEligibleAt: new Date(resolvedDependencyWakeBackstopNextEligibleAt).toISOString(),
+          lastSkipped: resolvedDependencyWakeBackstopLastSkipped,
+          cooldownMs: RESOLVED_DEPENDENCY_WAKE_BACKSTOP_BACKLOG_COOLDOWN_MS,
+          source,
+        },
+        "issue graph liveness backstop skipped — backlog cooldown after page-limit thrash",
+      );
+      return result;
+    }
 
     const queryCandidates = (afterIssueId: string | null) => {
       const filters = [
@@ -5966,7 +6026,7 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
           .innerJoin(issues, eq(issueRelations.relatedIssueId, issues.id))
           .where(and(...filters))
           .orderBy(asc(issues.id))
-          .limit(RESOLVED_DEPENDENCY_WAKE_BACKSTOP_CANDIDATE_LIMIT);
+          .limit(effectiveCandidateLimit);
       }
 
       return db
@@ -5981,29 +6041,76 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
         .from(issues)
         .where(and(...filters))
         .orderBy(asc(issues.id))
-        .limit(RESOLVED_DEPENDENCY_WAKE_BACKSTOP_CANDIDATE_LIMIT);
+        .limit(effectiveCandidateLimit);
     };
 
-    let candidateRows = await queryCandidates(useCursor ? resolvedDependencyWakeBackstopCandidateCursor : null);
-    if (useCursor && candidateRows.length === 0 && resolvedDependencyWakeBackstopCandidateCursor) {
-      resolvedDependencyWakeBackstopCandidateCursor = null;
-      candidateRows = await queryCandidates(null);
+    type BackstopCandidate = {
+      id: string;
+      companyId: string;
+      identifier: string | null;
+      assigneeAgentId: string | null;
+      blockedTransitionAt: Date | null;
+    };
+
+    const pageCandidates: BackstopCandidate[] = [];
+    let pagesFetched = 0;
+    // Periodic: ceil(250/100)=3 pages covers the dig's ~633-candidate set
+    // across a few cooled-down ticks without a single 500-row readiness blast.
+    // Targeted/finalize: one higher-limit page (500), no multi-page thrash path.
+    const maxPagesPerTick = Math.ceil(
+      effectiveMaxCheckedPerTick / effectiveCandidateLimit,
+    );
+
+    // Multi-page drain under the harder per-tick checked budget (dig 2026-09-02).
+    while (result.checked < effectiveMaxCheckedPerTick) {
+      if (useCursor && pagesFetched >= maxPagesPerTick) break;
+
+      let candidateRows = await queryCandidates(useCursor ? resolvedDependencyWakeBackstopCandidateCursor : null);
+      if (useCursor && candidateRows.length === 0 && resolvedDependencyWakeBackstopCandidateCursor) {
+        resolvedDependencyWakeBackstopCandidateCursor = null;
+        candidateRows = await queryCandidates(null);
+      }
+
+      const totalCandidateCount = candidateRows[0]?.totalCount ?? 0;
+      const candidates = candidateRows.map(({ totalCount: _totalCount, ...candidate }) => candidate);
+      if (candidates.length === 0) {
+        result.candidateLimitSkipped = 0;
+        if (useCursor) resolvedDependencyWakeBackstopCandidateCursor = null;
+        break;
+      }
+
+      pagesFetched += 1;
+      const remainingBudget = effectiveMaxCheckedPerTick - result.checked;
+      const pageSlice = candidates.slice(0, remainingBudget);
+      pageCandidates.push(...pageSlice);
+      result.checked += pageSlice.length;
+      result.candidateLimitSkipped = Math.max(0, totalCandidateCount - candidates.length);
+      // If we truncated the page for budget, treat the unread tail as skipped too.
+      if (pageSlice.length < candidates.length) {
+        result.candidateLimitSkipped += candidates.length - pageSlice.length;
+      }
+      const lastCandidate = pageSlice[pageSlice.length - 1] ?? null;
+      if (useCursor) {
+        resolvedDependencyWakeBackstopCandidateCursor =
+          result.candidateLimitSkipped > 0 && lastCandidate ? lastCandidate.id : null;
+      }
+
+      // Targeted blocker scans are single-page by design (higher limit).
+      if (!useCursor) break;
+      // Drained this wrap of the blocked set.
+      if (result.candidateLimitSkipped === 0) break;
+      // Harder per-tick budget reached — leave cursor for the next eligible tick.
+      if (result.checked >= effectiveMaxCheckedPerTick) break;
     }
-    const totalCandidateCount = candidateRows[0]?.totalCount ?? 0;
-    const candidates = candidateRows.map(({ totalCount: _totalCount, ...candidate }) => candidate);
-    result.checked = candidates.length;
-    result.candidateLimitSkipped = Math.max(0, totalCandidateCount - candidates.length);
-    const lastCandidate = candidates[candidates.length - 1] ?? null;
-    if (useCursor) {
-      resolvedDependencyWakeBackstopCandidateCursor =
-        result.candidateLimitSkipped > 0 && lastCandidate ? lastCandidate.id : null;
-    }
+
     if (result.candidateLimitSkipped > 0) {
       logger.warn(
         {
-          processed: candidates.length,
+          processed: result.checked,
           skipped: result.candidateLimitSkipped,
-          limit: RESOLVED_DEPENDENCY_WAKE_BACKSTOP_CANDIDATE_LIMIT,
+          pagesFetched,
+          limit: effectiveCandidateLimit,
+          maxCheckedPerTick: effectiveMaxCheckedPerTick,
           nextCursor: useCursor ? resolvedDependencyWakeBackstopCandidateCursor : null,
           source,
           blockerIssueId: opts?.blockerIssueId ?? null,
@@ -6012,6 +6119,7 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
       );
     }
 
+    const candidates = pageCandidates;
     const candidatesByCompany = new Map<string, typeof candidates>();
     for (const candidate of candidates) {
       const companyCandidates = candidatesByCompany.get(candidate.companyId) ?? [];
@@ -6157,6 +6265,20 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
       );
     }
 
+    if (useCursor) {
+      if (result.candidateLimitSkipped > 0) {
+        // Dig 2026-09-02: persistent page-limit skips thrashed warns ~every
+        // scheduler interval. Keep cursor progress but cool down the next
+        // full-scan invocation so we do not re-blast readiness every tick.
+        resolvedDependencyWakeBackstopLastSkipped = result.candidateLimitSkipped;
+        resolvedDependencyWakeBackstopNextEligibleAt =
+          Date.now() + RESOLVED_DEPENDENCY_WAKE_BACKSTOP_BACKLOG_COOLDOWN_MS;
+      } else {
+        resolvedDependencyWakeBackstopLastSkipped = 0;
+        resolvedDependencyWakeBackstopNextEligibleAt = 0;
+      }
+    }
+
     return result;
   }
 
@@ -6226,6 +6348,7 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
       dependencyWakeHoldSkipped: 0,
       dependencyWakeNotReadySkipped: 0,
       dependencyWakeCandidateLimitSkipped: 0,
+      dependencyWakeBacklogCooldownSkipped: false,
       dependencyWakeDeferredOrFailed: 0,
       dependencyWakeEnqueueFailed: 0,
       dependencyWakeIssueIds: [] as string[],
@@ -6236,6 +6359,7 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
 
     const dependencyWakeBackstop = await reconcileResolvedDependencyWakeBackstop({
       runId: opts?.runId ?? null,
+      force: opts?.force === true,
     });
     result.dependencyWakeBackstopChecked = dependencyWakeBackstop.checked;
     result.dependencyWakesHealed = dependencyWakeBackstop.healed;
@@ -6246,6 +6370,7 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
     result.dependencyWakeHoldSkipped = dependencyWakeBackstop.wakeHoldSkipped;
     result.dependencyWakeNotReadySkipped = dependencyWakeBackstop.notReadySkipped;
     result.dependencyWakeCandidateLimitSkipped = dependencyWakeBackstop.candidateLimitSkipped;
+    result.dependencyWakeBacklogCooldownSkipped = dependencyWakeBackstop.backlogCooldownSkipped;
     result.dependencyWakeDeferredOrFailed = dependencyWakeBackstop.deferredOrFailed;
     result.dependencyWakeEnqueueFailed = dependencyWakeBackstop.enqueueFailed;
     result.dependencyWakeIssueIds = dependencyWakeBackstop.issueIds;

@@ -37,7 +37,9 @@
  *    plugin-job-claims-store.ts's module doc for why blind replay is unsafe.
  *    Without this sweep, an occurrence whose worker crashed mid-lease (no
  *    completion write, no acknowledgement-revoke) would stay `running`
- *    forever.
+ *    forever. Dig 2026-09-02: lease churn under the old 90s TTL + 10-way
+ *    concurrency is mitigated by a longer occurrence TTL, slightly lower
+ *    maxConcurrentJobs, and richer takeover metrics (never silent unknown).
  *
  * @see PLUGIN_SPEC.md §17 — Scheduled Jobs
  * @see ./plugin-job-store.ts — Persistence layer
@@ -81,18 +83,28 @@ const DEFAULT_TICK_INTERVAL_MS = 30_000;
 /** Default timeout for a runJob RPC call (5 minutes). */
 const DEFAULT_JOB_TIMEOUT_MS = 5 * 60 * 1_000;
 
-/** Maximum number of concurrent job executions across all plugins. */
-const DEFAULT_MAX_CONCURRENT_JOBS = 10;
+/**
+ * Maximum number of concurrent job executions across all plugins.
+ * Dig 2026-09-02: 10 concurrent runJob RPCs on one event loop correlated with
+ * occurrence-lease renewal slips → expired-lease takeover churn. Slightly
+ * lower default reduces renewal timer starvation; override via options if a
+ * host needs more throughput.
+ */
+const DEFAULT_MAX_CONCURRENT_JOBS = 6;
 
 /** Default interval between expiry-reconciliation sweeps (60 seconds). */
 const DEFAULT_RECONCILIATION_INTERVAL_MS = 60_000;
 
 /**
  * Default grace period added on top of an occurrence's own lease expiry
- * before reconciliation will take it over (30 seconds). This is slack for
+ * before reconciliation will take it over (30 seconds). Slack for
  * clock/scheduling jitter around the lease-renewal cadence
- * (`leaseTtlMs / 3`, i.e. every ~30s for the default 90s TTL) — a genuinely
- * healthy renewal that lands a beat late must not be raced by reconciliation.
+ * (`leaseTtlMs / 3`, i.e. every ~60s for the default 180s occurrence TTL) —
+ * a genuinely healthy renewal that lands a beat late must not be raced by
+ * reconciliation. Dig 2026-09-02 / Captain: keep occurrence TTL at 180s as
+ * the intentional lease slack; do not double grace to 60s — that widens the
+ * expired-lease overlap where a new claim can start beside a still-running
+ * job.
  */
 const DEFAULT_RECONCILIATION_GRACE_MS = 30_000;
 
@@ -117,7 +129,7 @@ export interface PluginJobSchedulerOptions {
   tickIntervalMs?: number;
   /** Timeout for individual job RPC calls in ms (default: 5min). */
   jobTimeoutMs?: number;
-  /** Maximum number of concurrent job executions (default: 10). */
+  /** Maximum number of concurrent job executions (default: 6). */
   maxConcurrentJobs?: number;
   /** Interval between expiry-reconciliation sweeps in ms (default: 60s). */
   reconciliationIntervalMs?: number;
@@ -437,7 +449,15 @@ export function createPluginJobScheduler(
         return;
       }
 
-      log.warn({ count: expired.length }, "reconciling expired occurrence leases");
+      log.warn(
+        {
+          count: expired.length,
+          reconciliationGraceMs,
+          leaseTtlMs: DEFAULT_OCCURRENCE_LEASE_TTL_MS,
+          maxConcurrentJobs,
+        },
+        "reconciling expired occurrence leases",
+      );
 
       for (const occurrence of expired) {
         try {
@@ -446,8 +466,32 @@ export function createPluginJobScheduler(
             graceMs: reconciliationGraceMs,
           });
           if (result) {
+            const leaseExpiresAt = occurrence.leaseExpiresAt
+              ? new Date(occurrence.leaseExpiresAt)
+              : null;
+            const leaseRenewedAt = occurrence.leaseRenewedAt
+              ? new Date(occurrence.leaseRenewedAt)
+              : null;
+            // Always attach lease metrics when marking unknown — dig 2026-09-02
+            // takeover churn was hard to diagnose from id-only warn lines.
             log.warn(
-              { occurrenceId: occurrence.id, jobId: occurrence.jobId, runId: result.run?.id ?? null },
+              {
+                occurrenceId: occurrence.id,
+                jobId: occurrence.jobId,
+                pluginId: occurrence.pluginId,
+                runId: result.run?.id ?? null,
+                kind: occurrence.kind,
+                statusBeforeTakeover: occurrence.status,
+                claimAttempt: occurrence.claimAttempt,
+                acknowledgedAt: occurrence.acknowledgedAt
+                  ? new Date(occurrence.acknowledgedAt).toISOString()
+                  : null,
+                leaseExpiresAt: leaseExpiresAt ? leaseExpiresAt.toISOString() : null,
+                leaseRenewedAt: leaseRenewedAt ? leaseRenewedAt.toISOString() : null,
+                leaseExpiredAgeMs: leaseExpiresAt ? Date.now() - leaseExpiresAt.getTime() : null,
+                reconciliationGraceMs,
+                leaseTtlMs: DEFAULT_OCCURRENCE_LEASE_TTL_MS,
+              },
               "took over expired occurrence lease — marked unknown, not replayed",
             );
           }
