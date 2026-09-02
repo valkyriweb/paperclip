@@ -1167,13 +1167,13 @@ export async function startServer(): Promise<StartedServer> {
     trackHeartbeatSchedulerWork(runEnvironmentLeaseCleanupSweep(ENVIRONMENT_LEASE_CLEANUP_SWEEP_BACKOFF_MS));
   };
 
-  await questionResponseDeliveries.sweepPending().then((result) => {
+  trackHeartbeatSchedulerWork(questionResponseDeliveries.sweepPending().then((result) => {
     if (result.scanned > 0) {
       logger.info(result, "startup question-response delivery sweep completed");
     }
   }).catch((err) => {
     logger.error({ err }, "startup question-response delivery sweep failed");
-  });
+  }));
 
   if (heartbeat) {
     const secretProposals = createSecretProposalsService(db as any);
@@ -1413,42 +1413,13 @@ export async function startServer(): Promise<StartedServer> {
       })().catch((err) => {
         logger.error({ err }, "startup heartbeat recovery failed");
       });
+      // Listen-before-heavy-startup (2026-09-02 cold-start dig): do NOT await
+      // startupHeartbeatRecovery before HTTP bind. Cross-node cold start spent
+      // ~3.7min in this chain (issue-graph backstop etc.) before server.listen,
+      // while probes got connection refused. Track it so shutdown still drains
+      // in-flight work; periodic ticks remain the degraded backstop if it lags.
       trackHeartbeatSchedulerWork(startupHeartbeatRecovery);
-      await startupHeartbeatRecovery;
     }
-
-    const setupCleanup = await environmentCustomImages.cleanupExpiredSetupSessions();
-    if (setupCleanup.timedOut > 0 || setupCleanup.failed > 0) {
-      logger.warn({ ...setupCleanup }, "startup environment customImage setup cleanup changed sessions");
-    }
-
-    const toolHealthSweep = await tools.sweepConnectionHealth();
-    if (toolHealthSweep.failed > 0) {
-      logger.warn({ ...toolHealthSweep }, "startup tool connection health sweep found failing connections");
-    }
-    await decisionExecutor.sweepExpired();
-
-    // Run the adapter login reaper once at startup, so a login sandbox that
-    // outlived a server restart is deleted before timer ticks start.
-    await adapterLoginReaper
-      .sweep()
-      .then(logAdapterLoginReaperResult)
-      .catch((err) => {
-        logger.error({ err }, "startup adapter login reaper sweep failed");
-      });
-
-    // Run the setup-token login reaper once at startup, so a login sandbox lease
-    // that outlived a server restart releases before timer ticks start.
-    await setupTokenReaper
-      .sweep()
-      .then(logSetupTokenReaperResult)
-      .catch((err) => {
-        logger.error({ err }, "startup setup-token login reaper sweep failed");
-      });
-
-    // Retry any orphan sandbox teardown left by a failed acquire before a server
-    // restart, so a leaked sandbox does not stay allocated across the restart.
-    await runEnvironmentLeaseCleanupSweep(0);
 
     const runRetentionSweep = async () => {
       const activeCompanies = await db.select({ id: companies.id }).from(companies).where(eq(companies.status, "active"));
@@ -1467,7 +1438,48 @@ export async function startServer(): Promise<StartedServer> {
       const notifications = await retentionExecutor.deliverNotifications();
       return { archived, ...notifications };
     };
-    await runRetentionSweep();
+
+    // Same listen-before-heavy rule: fire once-at-startup sweeps in the
+    // background instead of blocking bind. Order among these is best-effort;
+    // the scheduler interval below is the steady-state owner.
+    trackHeartbeatSchedulerWork((async () => {
+      const setupCleanup = await environmentCustomImages.cleanupExpiredSetupSessions();
+      if (setupCleanup.timedOut > 0 || setupCleanup.failed > 0) {
+        logger.warn({ ...setupCleanup }, "startup environment customImage setup cleanup changed sessions");
+      }
+
+      const toolHealthSweep = await tools.sweepConnectionHealth();
+      if (toolHealthSweep.failed > 0) {
+        logger.warn({ ...toolHealthSweep }, "startup tool connection health sweep found failing connections");
+      }
+      await decisionExecutor.sweepExpired();
+
+      // Run the adapter login reaper once at startup, so a login sandbox that
+      // outlived a server restart is deleted before timer ticks start.
+      await adapterLoginReaper
+        .sweep()
+        .then(logAdapterLoginReaperResult)
+        .catch((err) => {
+          logger.error({ err }, "startup adapter login reaper sweep failed");
+        });
+
+      // Run the setup-token login reaper once at startup, so a login sandbox lease
+      // that outlived a server restart releases before timer ticks start.
+      await setupTokenReaper
+        .sweep()
+        .then(logSetupTokenReaperResult)
+        .catch((err) => {
+          logger.error({ err }, "startup setup-token login reaper sweep failed");
+        });
+
+      // Retry any orphan sandbox teardown left by a failed acquire before a server
+      // restart, so a leaked sandbox does not stay allocated across the restart.
+      await runEnvironmentLeaseCleanupSweep(0);
+
+      await runRetentionSweep().catch((err) => {
+        logger.error({ err }, "startup decision retention sweep failed");
+      });
+    })());
 
     startHeartbeatSchedulerInterval(() => {
       // Track the outer async callback as well as the work it starts. Shutdown
@@ -1663,7 +1675,8 @@ export async function startServer(): Promise<StartedServer> {
     // is still required. A failed acquire can leak a paid provider sandbox, so
     // this path retries the teardown at startup and on the interval, exactly as
     // the enabled path does.
-    await runEnvironmentLeaseCleanupSweep(0);
+    // Non-blocking: same listen-before-heavy rule when heartbeat scheduler is off.
+    trackHeartbeatSchedulerWork(runEnvironmentLeaseCleanupSweep(0));
     startHeartbeatSchedulerInterval(() => {
       scheduleExternalObjectRefreshSweep(new Date());
       scheduleEnvironmentLeaseCleanupSweep();
