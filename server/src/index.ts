@@ -1319,50 +1319,55 @@ export async function startServer(): Promise<StartedServer> {
     );
     const heartbeatSchedulingSuppression = await heartbeat.resolveSchedulingSuppression();
 
-    // Reap orphaned runs before timer ticks start so wakeups cannot coalesce
-    // into a dead "running" row during startup recovery.
+    // Await orphan reap (and hot-restart) before timer ticks so wakeups cannot
+    // coalesce into a dead "running" row. Defer the heavy recovery tail
+    // (issue-graph / productivity etc.) so HTTP bind is not blocked — that
+    // tail cost ~3.7min cross-node on 2026-09-02 while probes got connection
+    // refused.
     if (heartbeatSchedulingSuppression.suppressed) {
       logger.warn(
         { reason: heartbeatSchedulingSuppression.reason },
         "heartbeat scheduling suppressed for this runtime instance",
       );
     } else {
-      const startupHeartbeatRecovery = (async () => {
-        try {
-          const hotRestart = await heartbeat.reconcileHotRestartAdoption();
-          if (hotRestart.mode === "reported") {
-            logger.info(
-              hotRestart,
-              "startup hot-restart adoption reconciliation complete",
-            );
-          }
-        } catch (err) {
-          logger.error(
-            { err },
-            "startup hot-restart adoption reconciliation failed - orphan reaper will serve as degraded backstop",
+      try {
+        const hotRestart = await heartbeat.reconcileHotRestartAdoption();
+        if (hotRestart.mode === "reported") {
+          logger.info(
+            hotRestart,
+            "startup hot-restart adoption reconciliation complete",
           );
         }
+      } catch (err) {
+        logger.error(
+          { err },
+          "startup hot-restart adoption reconciliation failed - orphan reaper will serve as degraded backstop",
+        );
+      }
 
-        for (let attempt = 1; attempt <= 2; attempt++) {
-          try {
-            const result = await heartbeat.reapOrphanedRuns();
-            logger.info(
-              { reaped: result.reaped, runIds: result.runIds },
-              "startup reap of orphaned heartbeat runs complete",
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          const result = await heartbeat.reapOrphanedRuns();
+          logger.info(
+            { reaped: result.reaped, runIds: result.runIds },
+            "startup reap of orphaned heartbeat runs complete",
+          );
+          break;
+        } catch (err) {
+          if (attempt < 2) {
+            logger.warn({ err, attempt }, "startup reap failed, retrying");
+          } else {
+            logger.error(
+              { err },
+              "startup reap of orphaned heartbeat runs failed after retry - periodic reaper will serve as degraded backstop",
             );
-            break;
-          } catch (err) {
-            if (attempt < 2) {
-              logger.warn({ err, attempt }, "startup reap failed, retrying");
-            } else {
-              logger.error(
-                { err },
-                "startup reap of orphaned heartbeat runs failed after retry - periodic reaper will serve as degraded backstop",
-              );
-            }
           }
         }
+      }
 
+      // Listen-before-heavy: track the slow reconciles without awaiting them
+      // before bind / before starting the scheduler interval below.
+      const startupHeartbeatHeavyRecovery = (async () => {
         const promotion = await heartbeat.promoteDueScheduledRetries();
         await heartbeat.resumeQueuedRuns();
         const reconciled = await heartbeat.reconcileStrandedAssignedIssues();
@@ -1411,14 +1416,9 @@ export async function startServer(): Promise<StartedServer> {
           logger.warn({ ...reviewed }, "startup productivity reconciliation created or updated review work");
         }
       })().catch((err) => {
-        logger.error({ err }, "startup heartbeat recovery failed");
+        logger.error({ err }, "startup heartbeat heavy recovery failed");
       });
-      // Listen-before-heavy-startup (2026-09-02 cold-start dig): do NOT await
-      // startupHeartbeatRecovery before HTTP bind. Cross-node cold start spent
-      // ~3.7min in this chain (issue-graph backstop etc.) before server.listen,
-      // while probes got connection refused. Track it so shutdown still drains
-      // in-flight work; periodic ticks remain the degraded backstop if it lags.
-      trackHeartbeatSchedulerWork(startupHeartbeatRecovery);
+      trackHeartbeatSchedulerWork(startupHeartbeatHeavyRecovery);
     }
 
     const runRetentionSweep = async () => {
@@ -1439,23 +1439,34 @@ export async function startServer(): Promise<StartedServer> {
       return { archived, ...notifications };
     };
 
-    // Same listen-before-heavy rule: fire once-at-startup sweeps in the
-    // background instead of blocking bind. Order among these is best-effort;
-    // the scheduler interval below is the steady-state owner.
+    // Once-at-startup sweeps: do not block bind. Per-step try/catch so one
+    // failure cannot skip lease/reaper cleanup. Interval below is steady-state.
     trackHeartbeatSchedulerWork((async () => {
-      const setupCleanup = await environmentCustomImages.cleanupExpiredSetupSessions();
-      if (setupCleanup.timedOut > 0 || setupCleanup.failed > 0) {
-        logger.warn({ ...setupCleanup }, "startup environment customImage setup cleanup changed sessions");
+      try {
+        const setupCleanup = await environmentCustomImages.cleanupExpiredSetupSessions();
+        if (setupCleanup.timedOut > 0 || setupCleanup.failed > 0) {
+          logger.warn({ ...setupCleanup }, "startup environment customImage setup cleanup changed sessions");
+        }
+      } catch (err) {
+        logger.error({ err }, "startup environment customImage setup cleanup failed");
       }
 
-      const toolHealthSweep = await tools.sweepConnectionHealth();
-      if (toolHealthSweep.failed > 0) {
-        logger.warn({ ...toolHealthSweep }, "startup tool connection health sweep found failing connections");
+      try {
+        const toolHealthSweep = await tools.sweepConnectionHealth();
+        if (toolHealthSweep.failed > 0) {
+          logger.warn({ ...toolHealthSweep }, "startup tool connection health sweep found failing connections");
+        }
+      } catch (err) {
+        logger.error({ err }, "startup tool connection health sweep failed");
       }
-      await decisionExecutor.sweepExpired();
 
-      // Run the adapter login reaper once at startup, so a login sandbox that
-      // outlived a server restart is deleted before timer ticks start.
+      try {
+        await decisionExecutor.sweepExpired();
+      } catch (err) {
+        logger.error({ err }, "startup decision expiry sweep failed");
+      }
+
+      // Best-effort once at startup; periodic ticks also run these.
       await adapterLoginReaper
         .sweep()
         .then(logAdapterLoginReaperResult)
@@ -1463,8 +1474,6 @@ export async function startServer(): Promise<StartedServer> {
           logger.error({ err }, "startup adapter login reaper sweep failed");
         });
 
-      // Run the setup-token login reaper once at startup, so a login sandbox lease
-      // that outlived a server restart releases before timer ticks start.
       await setupTokenReaper
         .sweep()
         .then(logSetupTokenReaperResult)
@@ -1472,8 +1481,7 @@ export async function startServer(): Promise<StartedServer> {
           logger.error({ err }, "startup setup-token login reaper sweep failed");
         });
 
-      // Retry any orphan sandbox teardown left by a failed acquire before a server
-      // restart, so a leaked sandbox does not stay allocated across the restart.
+      // Retry orphan sandbox teardown left by a failed acquire across restart.
       await runEnvironmentLeaseCleanupSweep(0);
 
       await runRetentionSweep().catch((err) => {
