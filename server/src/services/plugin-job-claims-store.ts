@@ -2,7 +2,7 @@ import { and, asc, eq, lte, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import { pluginJobs, pluginJobRuns, pluginJobOccurrences } from "@paperclipai/db";
 import type { PluginJobRunStatus, PluginJobRunTrigger } from "@paperclipai/shared";
-import { DEFAULT_LEASE_TTL_MS, mintOwnerToken } from "./run-ownership-store.js";
+import { mintOwnerToken } from "./run-ownership-store.js";
 
 /**
  * PluginJobClaimsStore — durable, fenced occurrence claims for plugin
@@ -35,7 +35,20 @@ import { DEFAULT_LEASE_TTL_MS, mintOwnerToken } from "./run-ownership-store.js";
  *   for their own idempotency going forward.
  */
 
-export const DEFAULT_OCCURRENCE_LEASE_TTL_MS = DEFAULT_LEASE_TTL_MS;
+/**
+ * Occurrence lease TTL (3 minutes).
+ *
+ * Dig 2026-09-02 (live): under the previous shared 90s run-ownership TTL
+ * (renewal every ~30s, grace 30s), the cluster repeatedly logged
+ * `reconciling expired occurrence leases` / `took over expired occurrence
+ * lease — marked unknown, not replayed`. Plugin `runJob` RPCs share the host
+ * event loop with other concurrent jobs; a single delayed renewal past
+ * TTL+grace terminalizes the occurrence as `"unknown"` with no replay.
+ * Keep heartbeat-run leases on `DEFAULT_LEASE_TTL_MS` (90s) and give
+ * occurrences a longer, dedicated TTL so healthy-but-late renewals survive
+ * load spikes. Reversible — restore `DEFAULT_LEASE_TTL_MS` to couple again.
+ */
+export const DEFAULT_OCCURRENCE_LEASE_TTL_MS = 180_000;
 
 /** The claim identity a caller must capture once and thread immutably. */
 export type OccurrenceClaim = { ownerToken: string; fence: number | null };

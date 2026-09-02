@@ -181,7 +181,7 @@ describeEmbeddedPostgres("plugin job scheduler", () => {
 
   it("a rejected renewOccurrenceLease during an in-flight dispatch never becomes an unhandled rejection (B1)", async () => {
     // Only fake setInterval/clearInterval — the lease-renewal interval is a
-    // hardcoded ~30s (DEFAULT_OCCURRENCE_LEASE_TTL_MS / 3), too slow to wait
+    // hardcoded ~leaseTtl/3 (DEFAULT_OCCURRENCE_LEASE_TTL_MS / 3), too slow to wait
     // out in real time, but the DB calls it triggers are real I/O and must
     // keep resolving on the real clock, so setTimeout/Date/etc. stay real.
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
