@@ -22,6 +22,7 @@ import { pluginJobStore } from "../services/plugin-job-store.js";
 import { createPluginJobScheduler, type PluginJobScheduler } from "../services/plugin-job-scheduler.js";
 import type { PluginWorkerManager } from "../services/plugin-worker-manager.js";
 import * as claimsStore from "../services/plugin-job-claims-store.js";
+import { DEFAULT_OCCURRENCE_LEASE_TTL_MS } from "../services/plugin-job-claims-store.js";
 
 vi.mock("../services/plugin-job-claims-store.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../services/plugin-job-claims-store.js")>();
@@ -180,10 +181,11 @@ describeEmbeddedPostgres("plugin job scheduler", () => {
   // -------------------------------------------------------------------------
 
   it("a rejected renewOccurrenceLease during an in-flight dispatch never becomes an unhandled rejection (B1)", async () => {
-    // Only fake setInterval/clearInterval — the lease-renewal interval is a
-    // hardcoded ~leaseTtl/3 (DEFAULT_OCCURRENCE_LEASE_TTL_MS / 3), too slow to wait
-    // out in real time, but the DB calls it triggers are real I/O and must
-    // keep resolving on the real clock, so setTimeout/Date/etc. stay real.
+    // Only fake setInterval/clearInterval — the lease-renewal interval is
+    // Math.max(5_000, floor(DEFAULT_OCCURRENCE_LEASE_TTL_MS / 3)) (=60s), too
+    // slow to wait out in real time, but the DB calls it triggers are real
+    // I/O and must keep resolving on the real clock, so setTimeout/Date/etc.
+    // stay real.
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     const pluginId = await seedPlugin();
     const jobId = await seedJob({ pluginId });
@@ -216,7 +218,11 @@ describeEmbeddedPostgres("plugin job scheduler", () => {
 
       // Fire the lease-renewal interval once — its rejected promise must be
       // caught internally, not thrown out of the setInterval callback.
-      await vi.advanceTimersByTimeAsync(30_000);
+      // Interval is Math.max(5_000, floor(leaseTtl/3)); with the 180s TTL that
+      // is 60s (not the old 30s from the 90s TTL era).
+      await vi.advanceTimersByTimeAsync(
+        Math.max(5_000, Math.floor(DEFAULT_OCCURRENCE_LEASE_TTL_MS / 3)),
+      );
       await waitForCall(vi.mocked(claimsStore.renewOccurrenceLease));
 
       expect(unhandledRejections).toHaveLength(0);
