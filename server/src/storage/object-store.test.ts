@@ -208,6 +208,65 @@ describe("durable object store", () => {
     await expect(store.put(input)).resolves.toEqual(committed);
   });
 
+  it("adopts an orphan backend object on 409 when metadata was never committed", async () => {
+    const body = Buffer.from("shared bytes");
+    const checksumSha256 = Buffer.from(sha256(body), "hex").toString("base64");
+    const { store, rows, objects } = fixture({
+      async putObject() {
+        throw Object.assign(new Error("exists"), { status: 409 });
+      },
+      async headObject() {
+        return {
+          exists: true,
+          contentLength: body.length,
+          checksumSha256,
+          etag: "etag-orphan",
+          version: "v-orphan",
+        };
+      },
+    });
+    objects.set("company-1/run-logs/run-orphan.ndjson.gz", body);
+
+    const committed = await store.put({
+      companyId: "company-1",
+      kind: "run_log",
+      objectKey: "company-1/run-logs/run-orphan.ndjson.gz",
+      contentType: "application/gzip",
+      body,
+      contentLength: body.length,
+      sha256: sha256(body),
+    });
+
+    expect(committed.status).toBe("committed");
+    expect(committed.version).toBe("v-orphan");
+    expect(committed.etag).toBe("etag-orphan");
+    expect(committed.sha256).toBe(sha256(body));
+    expect(rows).toHaveLength(1);
+  });
+
+  it("still rejects a 409 orphan when HEAD length does not match the put", async () => {
+    const body = Buffer.from("shared bytes");
+    const { store, rows } = fixture({
+      async putObject() {
+        throw Object.assign(new Error("exists"), { status: 409 });
+      },
+      async headObject() {
+        return { exists: true, contentLength: 999, version: "v1" };
+      },
+    });
+
+    await expect(store.put({
+      companyId: "company-1",
+      kind: "run_log",
+      objectKey: "company-1/run-logs/run-orphan.ndjson.gz",
+      contentType: "application/gzip",
+      body,
+      contentLength: body.length,
+      sha256: sha256(body),
+    })).rejects.toMatchObject({ status: 409 });
+    expect(rows).toHaveLength(0);
+  });
+
   it("does not treat a non-conflict upload error as an idempotent retry", async () => {
     const { store } = fixture({
       async putObject() {

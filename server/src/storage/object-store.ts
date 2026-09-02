@@ -122,30 +122,57 @@ export function createObjectStore(deps: {
           : undefined;
         if (status !== 409) throw error;
 
+        // Conditional create lost the race, or a prior attempt uploaded bytes
+        // then failed before metadata commit. Adopt the backend object only
+        // when HEAD length/checksum match this put; otherwise keep failing.
+        // Without orphan adoption, run-log archive sweeps hot-loop forever on
+        // "Object already exists" after a PG blip mid-commit (prod: 25x/30m).
         const existing = await deps.metadata.find(deps.provider.backendId, input.objectKey);
-        if (
-          existing?.status !== "committed" ||
-          existing.companyId !== input.companyId ||
-          existing.kind !== input.kind ||
-          existing.contentType !== input.contentType ||
-          existing.byteSize !== input.contentLength ||
-          existing.sha256 !== input.sha256
-        ) {
-          throw error;
-        }
-
         const head = await deps.provider.headObject({
-          objectKey: existing.objectKey,
-          version: existing.version ?? undefined,
+          objectKey: input.objectKey,
+          version: existing?.version ?? undefined,
         });
         if (
           !head.exists ||
-          head.contentLength !== existing.byteSize ||
+          head.contentLength !== input.contentLength ||
           (head.checksumSha256 && head.checksumSha256 !== checksumSha256)
         ) {
-          throw new Error("Durable object retry verification failed");
+          if (existing) {
+            throw new Error("Durable object retry verification failed");
+          }
+          throw error;
         }
-        return existing;
+
+        if (
+          existing?.status === "committed" &&
+          existing.companyId === input.companyId &&
+          existing.kind === input.kind &&
+          existing.contentType === input.contentType &&
+          existing.byteSize === input.contentLength &&
+          existing.sha256 === input.sha256
+        ) {
+          return existing;
+        }
+
+        if (existing != null) {
+          // Row exists but does not match this put (corrupt/deleted/different
+          // content). Do not invent a second metadata row under the unique key.
+          throw error;
+        }
+
+        return await deps.metadata.commit({
+          companyId: input.companyId,
+          kind: input.kind,
+          provider: deps.provider.id,
+          backendId: deps.provider.backendId,
+          objectKey: input.objectKey,
+          contentType: input.contentType,
+          byteSize: input.contentLength,
+          sha256: input.sha256,
+          version: head.version ?? null,
+          etag: head.etag ?? null,
+          verifiedAt: new Date(),
+        });
       }
 
       let head;
