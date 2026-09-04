@@ -36,6 +36,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { checkExactPeerVersions } from "./peer-version-check.js";
+import { importOptionalPeer } from "./optional-peer-import.js";
 
 export { checkExactPeerVersions } from "./peer-version-check.js";
 
@@ -368,14 +369,11 @@ async function importExporter(protocol: ExporterProtocol): Promise<{
 }> {
   switch (protocol) {
     case "grpc":
-      // @ts-ignore optional peer dep
-      return await import("@opentelemetry/exporter-trace-otlp-grpc");
+      return await importOptionalPeer("@opentelemetry/exporter-trace-otlp-grpc");
     case "http/protobuf":
-      // @ts-ignore optional peer dep
-      return await import("@opentelemetry/exporter-trace-otlp-proto");
+      return await importOptionalPeer("@opentelemetry/exporter-trace-otlp-proto");
     case "http/json":
-      // @ts-ignore optional peer dep
-      return await import("@opentelemetry/exporter-trace-otlp-http");
+      return await importOptionalPeer("@opentelemetry/exporter-trace-otlp-http");
   }
 }
 
@@ -446,6 +444,10 @@ export function resolveServiceVersion(
 }
 
 async function bootstrapOtel(endpoint: string): Promise<void> {
+  // The container preload owns SDK startup and shutdown. Reuse its global tracer
+  // instead of registering a second provider and duplicate instrumentations.
+  if (process.env.PAPERCLIP_OTEL_SDK_OWNER === "preload") return;
+
   const { protocol, packageName: exporterPackage } = resolveProtocol();
 
   // Gate on exact peer versions before touching a single dynamic import: a
@@ -460,19 +462,15 @@ async function bootstrapOtel(endpoint: string): Promise<void> {
   }
 
   try {
-    // Dynamic imports so type-resolution doesn't require the packages to
-    // be installed unless the operator actually opts in.
+    // Resolve through the same Node search paths as the version gate before
+    // importing. Bare ESM imports ignore operator-provided NODE_PATH installs.
     const [sdkNode, autoInstr, traceExporter, resources, semconv] =
       await Promise.all([
-        // @ts-ignore optional peer dep
-        import("@opentelemetry/sdk-node"),
-        // @ts-ignore optional peer dep
-        import("@opentelemetry/auto-instrumentations-node"),
+        importOptionalPeer("@opentelemetry/sdk-node"),
+        importOptionalPeer("@opentelemetry/auto-instrumentations-node"),
         importExporter(protocol),
-        // @ts-ignore optional peer dep
-        import("@opentelemetry/resources"),
-        // @ts-ignore optional peer dep
-        import("@opentelemetry/semantic-conventions"),
+        importOptionalPeer("@opentelemetry/resources"),
+        importOptionalPeer("@opentelemetry/semantic-conventions"),
       ]);
 
     const { NodeSDK } = sdkNode;

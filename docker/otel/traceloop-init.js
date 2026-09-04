@@ -17,3 +17,6 @@ registerInstrumentations({
     new OpenAIInstrumentation({ traceContent }),
   ],
 });
+
+// The preceding auto-instrumentation preload owns the process-wide SDK.
+process.env.PAPERCLIP_OTEL_SDK_OWNER = "preload";
