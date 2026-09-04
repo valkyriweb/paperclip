@@ -14,6 +14,7 @@ import { createRequire } from "node:module";
 const ENDPOINT_ENV = "OTEL_EXPORTER_OTLP_ENDPOINT";
 const PROTOCOL_ENV = "OTEL_EXPORTER_OTLP_PROTOCOL";
 
+const originalSdkOwner = process.env.PAPERCLIP_OTEL_SDK_OWNER;
 const originalEndpoint = process.env[ENDPOINT_ENV];
 const originalProtocol = process.env[PROTOCOL_ENV];
 
@@ -23,11 +24,14 @@ async function importFreshInstrumentation() {
 }
 
 beforeEach(() => {
+  delete process.env.PAPERCLIP_OTEL_SDK_OWNER;
   delete process.env[ENDPOINT_ENV];
   delete process.env[PROTOCOL_ENV];
 });
 
 afterEach(() => {
+  if (originalSdkOwner === undefined) delete process.env.PAPERCLIP_OTEL_SDK_OWNER;
+  else process.env.PAPERCLIP_OTEL_SDK_OWNER = originalSdkOwner;
   if (originalEndpoint === undefined) delete process.env[ENDPOINT_ENV];
   else process.env[ENDPOINT_ENV] = originalEndpoint;
   if (originalProtocol === undefined) delete process.env[PROTOCOL_ENV];
@@ -66,6 +70,16 @@ describe("resolveProtocol", () => {
 });
 
 describe("instrumentationReady", () => {
+  it("leaves a preload-owned SDK in control without loading optional peers", async () => {
+    process.env[ENDPOINT_ENV] = "http://collector:4318";
+    process.env.PAPERCLIP_OTEL_SDK_OWNER = "preload";
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { instrumentationReady, shutdownInstrumentation } = await importFreshInstrumentation();
+    await instrumentationReady;
+    await shutdownInstrumentation();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
   it("resolves immediately when OTEL_EXPORTER_OTLP_ENDPOINT is unset", async () => {
     const { instrumentationReady } = await importFreshInstrumentation();
 

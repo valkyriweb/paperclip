@@ -24,6 +24,12 @@ alternative peer dependencies — install exactly **one**, matching
 When `OTEL_EXPORTER_OTLP_ENDPOINT` is unset, none of the `@opentelemetry/*` SDK
 packages are imported and there is zero runtime overhead.
 
+Operator-provided `NODE_PATH` installations are supported: the version check and
+package loader use the same Node resolution paths. Packages are still loaded only
+when the OTLP endpoint is configured. The container preload sets
+`PAPERCLIP_OTEL_SDK_OWNER=preload` after registration. The application then reuses
+the preload-owned global tracer and does not start a second SDK.
+
 `server/package.json` declares each optional package at the exact version the
 server tests against; install that exact version. Our Dependabot cannot bump
 these versions: its npm parser reads only `dependencies`, `devDependencies`,
