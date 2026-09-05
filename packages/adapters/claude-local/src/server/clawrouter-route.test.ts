@@ -13,10 +13,10 @@ describe("explicit Claude ClawRouter route", () => {
     expect(resolveClaudeClawRouterRoute(config, true, {}).config).toBe(config);
   });
   it("normalizes only the selected provider and never mutates stored config", () => {
-    const config = { model: "clawrouter/claude-sonnet-5-200k", env: { OTHER: "preserved", ANTHROPIC_API_KEY: "old" } };
+    const config = { model: "clawrouter/claude-sonnet-5-200k", env: { OTHER: "preserved", ANTHROPIC_API_KEY: "old", CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST: "0", CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "0" } };
     const before = structuredClone(config);
     expect(resolveClaudeClawRouterRoute(config, false, trusted).config).toEqual({
-      model: "claude-sonnet-5-200k", env: { OTHER: "preserved", ANTHROPIC_API_KEY: "", ANTHROPIC_BASE_URL: trusted.PAPERCLIP_CLAWROUTER_BASE_URL, ANTHROPIC_AUTH_TOKEN: trusted.CLAWROUTER_PROXY_KEY },
+      model: "claude-sonnet-5-200k", env: { OTHER: "preserved", ANTHROPIC_API_KEY: "", ANTHROPIC_BASE_URL: trusted.PAPERCLIP_CLAWROUTER_BASE_URL, ANTHROPIC_AUTH_TOKEN: trusted.CLAWROUTER_PROXY_KEY, CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST: "1", CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1" },
     });
     expect(config).toEqual(before);
   });
@@ -36,7 +36,7 @@ describe("explicit Claude ClawRouter route", () => {
   it("does not export server credentials to remote execution", () => {
     expect(resolveClaudeClawRouterRoute({ model: "clawrouter/claude-sonnet-5-200k" }, true, trusted).config).toBeUndefined();
   });
-  it.each(["CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", "ANTHROPIC_BEDROCK_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN"])("rejects competing provider setting %s without disclosing values", (name) => {
+  it.each(["CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_USE_MANTLE", "CLAUDE_CODE_USE_ANTHROPIC_AWS", "ANTHROPIC_BEDROCK_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN"])("rejects competing provider setting %s without disclosing values", (name) => {
     const value = name.startsWith("CLAUDE_CODE_USE_") ? "1" : "synthetic-conflicting-secret";
     const config = { model: "clawrouter/claude-sonnet-5-200k", env: { [name]: value } };
     const result = resolveClaudeClawRouterRoute(config, false, trusted);

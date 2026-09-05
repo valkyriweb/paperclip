@@ -514,6 +514,7 @@ describe("claude_local ACP lane", () => {
       expect(config).toEqual(before);
       expect(runtimes[0]?.ensureInputs[0]?.sessionOptions).toMatchObject({ env: {
         ANTHROPIC_BASE_URL: "http://router.internal:8789", ANTHROPIC_AUTH_TOKEN: "synthetic-acp-route-secret",
+        CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST: "1", CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1",
         ANTHROPIC_API_KEY: "", ANTHROPIC_MODEL: "claude-sonnet-5-200k",
       } });
       expect(JSON.stringify(result)).not.toContain("synthetic-acp-route-secret");

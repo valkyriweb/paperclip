@@ -14,3 +14,5 @@ Models without the `clawrouter/` prefix keep their current route and authenticat
 The environment test validates this same route configuration. Its existing Claude hello and ACP prerequisite checks remain separate from an actual ACP tool turn. A successful environment test is not proof that an agent's business work completed.
 
 Rollback the application image and remove the non-secret server URL setting to revert the feature. No agent configuration or credential migration is required.
+
+Explicit gateway runs set `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1` so settings files cannot replace the selected provider, and `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` to remove provider credentials from Bash, hooks, and MCP subprocesses. Agent env overrides cannot disable these flags. Use a Claude version that supports both controls; validate shell-tool behavior on the target Linux image because credential scrubbing also uses PID namespace isolation. See the [Claude environment variable reference](https://code.claude.com/docs/en/env-vars).

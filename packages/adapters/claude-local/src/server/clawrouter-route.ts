@@ -25,7 +25,7 @@ export function resolveClaudeClawRouterRoute(
   if (!nativeModel) return { error: "ClawRouter Claude routing requires a model name." };
   const env = parseObject(config.env);
   const effectiveEnv = { ...serverEnv, ...env };
-  const providerMode = ["CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"]
+  const providerMode = ["CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_USE_MANTLE", "CLAUDE_CODE_USE_ANTHROPIC_AWS"]
     .some((name) => effectiveEnv[name] === "1" || effectiveEnv[name] === "true");
   if (providerMode || effectiveEnv.ANTHROPIC_BEDROCK_BASE_URL || effectiveEnv.CLAUDE_CODE_OAUTH_TOKEN) {
     return { error: "ClawRouter Claude routing cannot be combined with another provider mode or subscription OAuth token." };
@@ -52,6 +52,8 @@ export function resolveClaudeClawRouterRoute(
         ANTHROPIC_BASE_URL: baseUrl,
         ANTHROPIC_AUTH_TOKEN: key,
         ANTHROPIC_API_KEY: "",
+        CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST: "1",
+        CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1",
       },
     },
   };
