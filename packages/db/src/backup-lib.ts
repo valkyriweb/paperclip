@@ -7,6 +7,7 @@ import { open as openFile } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
 import { createGunzip, createGzip } from "node:zlib";
 import postgres from "postgres";
+import { nativeBackupConnectionEnv } from "./backup-connection.js";
 
 export type BackupRetentionPolicy = {
   dailyDays: number;
@@ -335,11 +336,7 @@ export async function runPgDumpBackup(opts: {
     ],
     {
       stdio: ["ignore", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        PGDATABASE: opts.connectionString,
-        PGCONNECT_TIMEOUT: String(opts.connectTimeout),
-      },
+      env: nativeBackupConnectionEnv(opts.connectionString, opts.connectTimeout),
     },
   );
 
@@ -379,11 +376,7 @@ async function restoreWithPsql(opts: RunDatabaseRestoreOptions, connectTimeout: 
     ],
     {
       stdio: ["pipe", "ignore", "pipe"],
-      env: {
-        ...process.env,
-        PGDATABASE: opts.connectionString,
-        PGCONNECT_TIMEOUT: String(connectTimeout),
-      },
+      env: nativeBackupConnectionEnv(opts.connectionString, connectTimeout),
     },
   );
 
