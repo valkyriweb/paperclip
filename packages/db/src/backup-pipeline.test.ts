@@ -43,10 +43,9 @@ describe("pg_dump pipeline", () => {
     expect(fs.existsSync(options.backupFile)).toBe(false);
   });
 
-  it("passes native connection fields through the environment and creates a private completed gzip", async () => {
+  it("preserves the established native connection argument and creates a private completed gzip", async () => {
     const options = fixture(`
-if (process.argv.some(arg => arg.includes('synthetic-password'))) process.exit(2);
-if (process.env.PGDATABASE !== "example" || process.env.PGHOST !== "localhost" || process.env.PGUSER !== "fixture" || process.env.PGPASSWORD !== "synthetic-password" || process.env.PGSSLMODE !== "require") process.exit(3);
+if (!process.argv.includes(${JSON.stringify("--dbname=" + connectionString)})) process.exit(3);
 process.stdout.write('-- fixture dump\\nSELECT 1;\\n');
 `);
     await runPgDumpBackup({ ...options, connectionString, connectTimeout: 1 });

@@ -6,7 +6,6 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:f
 import { tmpdir } from "node:os";
 import { join, basename } from "node:path";
 import { gunzipSync } from "node:zlib";
-import { nativeBackupConnectionEnv } from "/app/packages/db/src/backup-connection.ts";
 import { runDatabaseBackup, runDatabaseRestore } from "/app/packages/db/src/backup-lib.ts";
 
 const host = process.env.PAPERCLIP_BACKUP_PROOF_HOST || "backup-db";
@@ -17,8 +16,8 @@ const source = sourceUrl.href;
 const targetUrl = new URL(source);
 targetUrl.pathname = "/backup_restore";
 const target = targetUrl.href;
-const query = (connectionString, sql) => execFileSync("psql", ["--no-psqlrc", "--set=ON_ERROR_STOP=1", "-tAc", sql], {
-  env: nativeBackupConnectionEnv(connectionString, 10), encoding: "utf8",
+const query = (connectionString, sql) => execFileSync("psql", ["--dbname", connectionString, "--no-psqlrc", "--set=ON_ERROR_STOP=1", "-tAc", sql], {
+  env: { ...process.env, PGCONNECT_TIMEOUT: "10" }, encoding: "utf8",
 }).trim();
 assert.match(execFileSync("pg_dump", ["--version"], { encoding: "utf8" }), /PostgreSQL\) 17\./);
 query(source, "CREATE TABLE backup_fixture (id integer PRIMARY KEY); INSERT INTO backup_fixture VALUES (42);");
